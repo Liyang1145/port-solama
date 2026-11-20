@@ -1,5 +1,8 @@
 // Geometry accumulation helpers: per-material, per-chunk merged buffers with custom attributes
 import * as THREE from 'three';
+import { CYBER } from './mapsel.js';
+// v4.4 (map 霓港): drop JS-side geometry arrays after upload (heap was ~2x GPU data). r6.0: map 索拉纳港 keeps r5.0 behaviour.
+const DROP_JS = CYBER;
 
 export class GeoBucket {
   constructor(attrs = {}) { this.p = []; this.n = []; this.uv = []; this.idx = []; this.c = []; this.custom = {}; this.attrSizes = attrs; for (const k in attrs) this.custom[k] = []; this.vc = 0; }
@@ -32,6 +35,19 @@ export class GeoBucket {
     else for (let i = 0; i < pos.count; i++) this.idx.push(base + i);
     this.vc += pos.count;
   }
+  // v4.4: append another bucket (all per-vertex attributes kept) transformed by a matrix (rotated streamed buildings)
+  append(o, m) {
+    const nm = new THREE.Matrix3().getNormalMatrix(m); const v = new THREE.Vector3(), n = new THREE.Vector3(); const base = this.vc;
+    for (let i = 0; i < o.vc; i++) {
+      v.set(o.p[i * 3], o.p[i * 3 + 1], o.p[i * 3 + 2]).applyMatrix4(m); this.p.push(v.x, v.y, v.z);
+      n.set(o.n[i * 3], o.n[i * 3 + 1], o.n[i * 3 + 2]).applyMatrix3(nm).normalize(); this.n.push(n.x, n.y, n.z);
+      this.uv.push(o.uv[i * 2], o.uv[i * 2 + 1]);
+    }
+    if (o.c.length) for (const q of o.c) this.c.push(q); else if (this.c.length) for (let i = 0; i < o.vc; i++) this.c.push(1, 1, 1);
+    for (const k in this.custom) { const src = o.custom[k]; if (src && src.length) for (const q of src) this.custom[k].push(q); else for (let i = 0; i < o.vc * this.attrSizes[k]; i++) this.custom[k].push(0); }
+    for (const i of o.idx) this.idx.push(base + i);
+    this.vc += o.vc;
+  }
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
@@ -62,7 +78,9 @@ export class World {
       const o = opts[b.mat] || {};
       m.castShadow = o.cast !== false; m.receiveShadow = o.receive !== false;
       m.name = key; scene.add(m); meshes.push(m);
+      if (!opts.keep && DROP_JS) { b.p = b.n = b.uv = b.idx = b.c = null; b.custom = {}; } // v4.4: drop the JS-side arrays (heap was ~2x the GPU data)
     }
+    if (!opts.keep && DROP_JS) this.buckets.clear();
     return meshes;
   }
 }

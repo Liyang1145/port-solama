@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { U } from './env.js';
 import { LAYOUT } from './city.js';
-import { buildRegionData, shoreX, westCoast, beachOff, ISLE } from './mapgeo.js';
-import { REGION } from './mapdata.js';
+import { buildRegionData, shoreX, westCoast, beachOff, ISLE } from './maps/gta/mapgeo.js';
+import { REGION } from './maps/gta/mapdata.js';
+import { CYBER } from './mapsel.js';
 
 const vs = `
 uniform mat4 textureMatrix; varying vec4 vUvR; varying vec3 vWP;
@@ -12,10 +13,11 @@ void main(){ vUvR = textureMatrix * vec4(position, 1.0); vec4 wp = modelMatrix *
 const fs = `
 uniform sampler2D tDiffuse; uniform sampler2D tNormal; uniform float uTime; uniform vec3 uSunDir; uniform vec3 uSunCol;
 uniform vec3 fogColor; uniform float fogDensity; uniform vec3 uFogSunCol; uniform float uFogFalloff; uniform float uNight; uniform vec3 uSkyCol;
-uniform float beachX0, beachX1; uniform sampler2D tShore; uniform vec4 uShoreBox;
+uniform float beachX0, beachX1; uniform sampler2D tShore; uniform vec4 uShoreBox; uniform sampler2D tBed; uniform vec4 uBedBox; uniform float uBedOn;
 varying vec4 vUvR; varying vec3 vWP;
 float bOff(float z){ float a = abs(z); float t = clamp((a - 380.0) / 160.0, 0.0, 1.0); t = t * t * (3.0 - 2.0 * t); return t * (18.0 * sin(z * 0.0047) + 10.0 * sin(z * 0.013 + 1.3) - 6.0); }
 float bedH(vec2 p){
+  if (uBedOn > 0.5) { vec2 uv = (p - uBedBox.xy) / uBedBox.zw; if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) return texture2D(tBed, uv).r * 10.0 - 9.0; return -9.0; } // r6.0 map 霓港: bed height texture
   float off = bOff(p.y);
   if (p.x > beachX0 + off && abs(p.y) < 1540.0) { float t = clamp((p.x - beachX0 - off)/(beachX1 - beachX0), 0.0, 1.0); float y = 0.15 - pow(t,1.6)*2.9 - t*0.2; float ez = abs(p.y)-1460.0; if (ez>0.0) y -= ez*0.06; return max(y, -1.0 - 6.0*clamp((p.x-beachX1-off)/260.0,0.0,1.0) - 2.6); }
   // r5.0: bay floor from a shore-distance map (natural coasts, causeway embankment, seawalls) -> turquoise shallows
@@ -90,7 +92,7 @@ export function buildWater(scene, T, size = 0.5) {
       name: 'Water', uniforms: {
         color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null }, tNormal: { value: tn }, uTime: U.uTime,
         uSunDir: U.uSunDir, uSunCol: U.uSunCol, fogColor: { value: new THREE.Color() }, fogDensity: { value: 0.001 }, uFogSunCol: U.uFogSunCol, uFogFalloff: U.uFogFalloff,
-        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: shoreTexture() }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
+        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: CYBER ? (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.needsUpdate = true; return t; })() : shoreTexture() }, tBed: { value: null }, uBedBox: { value: new THREE.Vector4() }, uBedOn: { value: 0 }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
       }, vertexShader: vs, fragmentShader: fs,
     },
   });
@@ -120,5 +122,8 @@ export function buildWater(scene, T, size = 0.5) {
   const update = (scene) => {
     u.fogColor.value.copy(scene.fog.color); u.fogDensity.value = scene.fog.density;
   };
-  return { mesh: refl, shared, update, renderRefl };
+  // r6.0 map 霓港 (v4.5): sea pushed back in depth so land caps / terrain never lose the depth test at aerial distances
+  if (CYBER) { refl.material.polygonOffset = true; refl.material.polygonOffsetFactor = 2; refl.material.polygonOffsetUnits = 10; }
+  const setBed = (b) => { u.tBed.value = b.tex; u.uBedBox.value.copy(b.box); u.uBedOn.value = 1; };
+  return { mesh: refl, shared, update, renderRefl, setBed };
 }

@@ -4,8 +4,8 @@
 // node tools/mapgen.cjs
 const fs = require('fs'), path = require('path'), sharp = require('sharp');
 (async () => {
-  const { POI, MISSION_STARTS, REGION } = await import(path.resolve('src/mapdata.js'));
-  const G = await import(path.resolve('src/mapgeo.js'));
+  const { POI, MISSION_STARTS, REGION } = await import(path.resolve('src/maps/gta/mapdata.js'));
+  const G = await import(path.resolve('src/maps/gta/mapgeo.js'));
   const D = G.buildRegionData();
   const city = fs.readFileSync('src/city.js', 'utf8');
   const PIERS = eval(/export const PIERS = (\[.*?\]);/.exec(city)[1]);

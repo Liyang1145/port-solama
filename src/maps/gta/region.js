@@ -5,10 +5,10 @@
 // a cheap far mesh (plain extruded volumes) is always there, the detailed chunk (relief, shopfronts, canopies, roof clutter,
 // murals) is generated when the camera comes within ~320 m and disposed past ~460 m.
 import * as THREE from 'three';
-import { World, prismWalls, polyCap, box } from './geo.js';
+import { World, prismWalls, polyCap, box } from '../../geo.js';
 import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, smooth } from './mapgeo.js';
 import { REGION } from './mapdata.js';
-import { rng, rand, randi, pick, clamp } from './util.js';
+import { rng, rand, randi, pick, clamp } from '../../util.js';
 
 const SW = REGION.sw, DY = REGION.deckY;
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);

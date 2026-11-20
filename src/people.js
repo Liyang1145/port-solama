@@ -1,5 +1,6 @@
 // Characters: realistic rigged humans (MakeHuman CC0 bodies via ara3d, CMU mocap clips baked per character)
-import { REGION } from './mapdata.js';
+import { REGION } from './maps/gta/mapdata.js';
+import { pointAt } from './maps/cyber/roadgraph.js';
 import { gunMesh } from './gunmodels.js';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -179,7 +180,21 @@ const _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _wf = new THREE.Vect
 
 // ------------------------------------------------------------------------ pedestrians ----
 export class Pedestrians {
-  constructor(scene, city) { this.scene = scene; this.city = city; this.list = []; this.loops = city.blocks.filter((b) => b.area !== 'promenade' || true); }
+  constructor(scene, city) {
+    this.scene = scene; this.city = city; this.list = []; this.loops = city.blocks.filter((b) => b.area !== 'promenade' || true);
+    // r6.0 (from v4.4, map 霓港): sidewalk paths along every road-graph edge (both sides), as polylines in the sidewalk middle
+    this.paths = [];
+    if (city.graph) for (const e of city.graph.edges) {
+      if (e.legacy || !e.sw || e.L < 30) continue;
+      for (const sg of [1, -1]) {
+        const pts = []; const off = (e.hw + e.sw * 0.55) * sg; const s0 = e.n0.trim + 2, s1 = e.L - e.n1.trim - 2; if (s1 - s0 < 20) continue;
+        for (let s = s0; s <= s1; s += 3) { const q = pointAt(e, s); const x = q.x - q.tz * off, z = q.z + q.tx * off; if (!city.isLand(x, z) || city.groundH(x, z) < 0.1) { if (pts.length > 6) break; pts.length = 0; continue; } pts.push([x, z]); }
+        if (pts.length < 6) continue; const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+        this.paths.push({ pts, cum, L: cum[cum.length - 1], mx: pts[pts.length >> 1][0], mz: pts[pts.length >> 1][1] });
+      }
+    }
+  }
+  pathPoint(path, u) { u = Math.max(0, Math.min(path.L, u)); const C = path.cum; let lo = 0, hi = C.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (C[m] <= u) lo = m; else hi = m; } const a = path.pts[lo], b = path.pts[hi]; const t = (u - C[lo]) / (C[hi] - C[lo] || 1); return { x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t }; }
   spawn(near, minD = 25, maxD = 110, kinds = ['woman', 'man', 'man']) {
     // r5.0: on the mainland / causeway / island ends people walk the ribbon sidewalks (mode 'line')
     const RW = this.city.region && this.city.region.walks;
@@ -193,6 +208,20 @@ export class Pedestrians {
         this.list.push(c); return c;
       }
       if (near.x < -120 || Math.abs(near.z) > 400) return null;
+    }
+    if (this.paths.length) { // r6.0 map 霓港: road-graph sidewalks near the camera, mixed with the Deco block loops
+      const nearPaths = this.paths.filter((p) => Math.hypot(p.mx - near.x, p.mz - near.z) < maxD + p.L / 2);
+      const nearLoops = this.loops.filter((b) => Math.hypot((b.x0 + b.x1) / 2 - near.x, (b.z0 + b.z1) / 2 - near.z) < maxD + 150);
+      for (let t = 0; t < 24 && nearPaths.length; t++) {
+        if (nearLoops.length && rng() >= nearPaths.length / (nearPaths.length + nearLoops.length * 2)) break;
+        const path = pick(nearPaths); const u = rng() * path.L; const p = this.pathPoint(path, u);
+        const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
+        if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
+        const c = new Character(this.scene, pick(kinds)); c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
+        c.ai = { mode: 'walk', path, u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.25 ? rand(10, 60) : 0 };
+        this.list.push(c); return c;
+      }
+      if (!nearLoops.length) return null;
     }
     for (let t = 0; t < 20; t++) {
       const b = pick(this.loops); const sw = b.area === 'promenade' ? 3 : 2.2;
@@ -224,8 +253,9 @@ export class Pedestrians {
       if (a.mode === 'walk') {
         if (a.wait > 0) { a.wait -= dt; sp = 0; }
         else {
-          a.u += a.dir * a.speed * dt; const [x0, z0, x1, z1] = a.loop;
-          const p = this.loopPoint(x0, z0, x1, z1, a.u); const p2 = this.loopPoint(x0, z0, x1, z1, a.u + a.dir * 0.8);
+          a.u += a.dir * a.speed * dt; let p, p2;
+          if (a.path) { if (a.u > a.path.L - 0.5 || a.u < 0.5) { a.dir *= -1; a.u = Math.max(0.5, Math.min(a.path.L - 0.5, a.u)); } p = this.pathPoint(a.path, a.u); p2 = this.pathPoint(a.path, a.u + a.dir * 0.8); }
+          else { const [x0, z0, x1, z1] = a.loop; p = this.loopPoint(x0, z0, x1, z1, a.u); p2 = this.loopPoint(x0, z0, x1, z1, a.u + a.dir * 0.8); }
           const nx = p.x, nz = p.z; const yawT = Math.atan2(p2.x - p.x, p2.z - p.z);
           c.yaw += angWrap(yawT - c.yaw) * (1 - Math.exp(-8 * dt));
           // avoid obstacles: if blocked, pause briefly and turn back
@@ -248,7 +278,7 @@ export class Pedestrians {
         const nx = c.pos.x + Math.sin(c.yaw) * sp * dt, nz = c.pos.z + Math.cos(c.yaw) * sp * dt;
         const r = this.city.col.resolve(nx, nz, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z;
         if (r.hit) c.yaw += 1.2 * dt * 4;
-        a.t += dt; if (a.t > 12) { if (a.w) { a.mode = 'line'; const q = a.w.road.path.nearest(c.pos.x, c.pos.z); a.s = Math.min(a.w.s1 - 1, Math.max(a.w.s0 + 1, q.s)); } else { a.mode = 'walk'; a.u = this.nearestU(a.loop, c.pos); } }
+        a.t += dt; if (a.t > 12) { if (a.w) { a.mode = 'line'; const q = a.w.road.path.nearest(c.pos.x, c.pos.z); a.s = Math.min(a.w.s1 - 1, Math.max(a.w.s0 + 1, q.s)); } else if (a.path) { a.mode = 'walk'; let bu = 0, bd = 1e9; for (let u = 0; u < a.path.L; u += 3) { const q = this.pathPoint(a.path, u); const d = (q.x - c.pos.x) ** 2 + (q.z - c.pos.z) ** 2; if (d < bd) { bd = d; bu = u; } } a.u = bu; } else { a.mode = 'walk'; a.u = this.nearestU(a.loop, c.pos); } }
       } else if (a.mode === 'cower') { sp = 0; a.t += dt; if (a.t > 6) a.mode = 'flee'; }
       c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt));
       c.setLocomotion(sp, dt); c.update(dt);

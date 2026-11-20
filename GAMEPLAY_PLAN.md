@@ -1,5 +1,9 @@
 # GAMEPLAY_PLAN — 索拉纳港 Port Solana 玩法系统总表与分期
 
+
+> **r6.0（2026-11-20）一个游戏、两张地图**：本表所有玩法系统（武器、任务、警察、车辆、行人、手机、经济、存档、双主角、电台）在地图 A「索拉纳港」和地图 B「霓港」**共用同一份实现**（src/ 下的 game/missions/mission/world/police/weapons/vehicles/people/hud）。
+> 按地图不同的只有：点位与任务起点（`src/maps/<map>/mapdata.js`；B 图店名为原创赛博名，坐标同在两图共有的 Deco 核心区）、交通实现（A：网格 + 折线路网；B：`maps/cyber/traffic.js` 路网图 + Dijkstra 追击）、行人路径来源、小地图底图、存档键（A `portsolana_v43`，B `portsolana_cyber_v60`）。逻辑层读地图一律走 `src/mapapi.js`（两图同签名）。
+> r6.0 实测：A 图 `plans/r5_regress.json`、B 图 `plans/r6_cyber_smoke.json`（开车 79 km/h、零点堤道 1.5 km、6 种武器/枪店、3 星通缉、4 个任务 + 代客泊车），结果见 ITERATION_LOG r6.0。
 用户指令（2026-11-20 17:44）：「游戏内容玩法照着 gta6 来啊，不要就一个小手枪和一个小任务。这是个大工程啊注意。」
 同时：赛博朋克夜景取消（以后单独做一张地图），夜景保持写实的 GTA6 式海滨夜晚。
 

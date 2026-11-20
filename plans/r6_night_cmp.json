@@ -1,0 +1,1 @@
+{"query": "hour=16&ao=1&lowshadow&probe=0", "shots": [{"name": "night", "js": "__G.setHour(21.6); const g=__G.game; g.override=null; g.tp(-1000,30,0); __G.step(30); const c=__G.camera; c.position.set(-985,2.2,26); c.lookAt(-1100,3,40); c.updateMatrixWorld(); 0"}]}

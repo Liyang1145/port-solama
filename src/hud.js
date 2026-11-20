@@ -4,7 +4,12 @@
 // Everything except the minimap fades out when nothing is happening; Tab peeks all of it.
 import { LAYOUT } from './city.js';
 import { POI, MISSION_STARTS } from './mapdata.js';
-import { shoreX, beachOff, islandEndPoly, pearlPoly, districtAt } from './mapgeo.js';
+import { shoreX, beachOff, islandEndPoly, pearlPoly, districtAt as districtGTA } from './maps/gta/mapgeo.js';
+import { LANDS, DISTRICTS, beachX, BEACH_Z, districtAt as districtCyber } from './maps/cyber/mapdata.js';
+import { CYBER } from './mapsel.js';
+import { cyName } from './maps/cyber/names.js';
+// r6.0: area name of the active map ({name, sub} or null)
+const districtAt = CYBER ? (x, z) => { const d = districtCyber(x, z); return d ? { name: d.name, sub: '霓港' } : null; } : districtGTA;
 
 const AREAS = [
   { test: (x, z) => x > 335, name: '棕榈海滩', sub: '海滨' },
@@ -34,6 +39,7 @@ export class HUD {
     addEventListener('keyup', (e) => { if (e.code === 'Tab') this.peek = false; });
   }
   buildMap() {
+    if (CYBER) return this.buildMapCyber();
     // light "GPS" plate: pale blocks, white roads, light-teal water (GTA6_REFERENCE §1 minimap). r5.0: the whole bay —
     // mainland district, causeway, pearl island and the natural island ends — drawn from the same mapgeo data as the world.
     const X0 = -1520, X1 = 760, Z0 = -1520, Z1 = 1520, S = 0.62;
@@ -57,6 +63,26 @@ export class HUD {
     for (const i of this.city.inters) rect(i.x - 7, i.z - 7, i.x + 7, i.z + 7, '#ffffff');
     if (R) { g.strokeStyle = '#ffffff'; g.lineCap = 'round'; g.lineJoin = 'round';
       for (const r of R.roads) { g.lineWidth = r.hw * 2 * S; g.beginPath(); for (let k = 0; k < r.path.n; k++) { const [a, b] = P(r.path.X[k], r.path.Z[k]); if (k) g.lineTo(a, b); else g.moveTo(a, b); } g.stroke(); } }
+    this.mapCanvas = c;
+  }
+  buildMapCyber() {
+    // r6.0 map 霓港 (from v4.4): the whole open world — coast polygons, the curved beach, every road of the graph at its real
+    // width, the Deco blocks and the streamed parcel footprints, all from the same data as the 3-D world.
+    const X0 = -3500, X1 = 1000, Z0 = -2000, Z1 = 3700, S = 0.42;
+    this.map = { X0, Z0, S };
+    const c = document.createElement('canvas'); c.width = Math.round((X1 - X0) * S); c.height = Math.round((Z1 - Z0) * S); const g = c.getContext('2d');
+    const P = (x, z) => [(x - X0) * S, (z - Z0) * S];
+    g.fillStyle = '#9fcfda'; g.fillRect(0, 0, c.width, c.height);
+    const poly = (pts, col) => { g.fillStyle = col; g.beginPath(); pts.forEach((q, i) => { const [a, b] = P(q[0], q[1]); if (i) g.lineTo(a, b); else g.moveTo(a, b); }); g.closePath(); g.fill(); };
+    const rect = (x0, z0, x1, z1, col) => { const [a, b] = P(x0, z0); g.fillStyle = col; g.fillRect(a, b, (x1 - x0) * S, (z1 - z0) * S); };
+    { const bi = [], bo = []; for (let z = BEACH_Z[0]; z <= BEACH_Z[1]; z += 20) { bi.push([beachX(z), z]); bo.push([beachX(z) + 85, z]); } poly([...bi, ...bo.reverse()], '#eee2c4'); }
+    for (const l of LANDS) poly(l.poly, '#d9dde2');
+    for (const d of DISTRICTS) if (d.style === 'park' || d.style === 'golf' || d.style === 'prairie' || d.style === 'forest') poly(d.poly, d.style === 'forest' ? '#a9c9a0' : '#c3dbb5');
+    for (const b of this.city.blocks) rect(b.x0 + 1, b.z0 + 1, b.x1 - 1, b.z1 - 1, b.lotMat === 'grass' || b.area === 'promenade' || b.area === 'bayfront' ? '#c3dbb5' : '#c9ced5');
+    if (this.city.parcels) for (const p of this.city.parcels) { const cs = Math.cos(p.ang), sn = Math.sin(p.ang); poly([[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => [p.x + cs * a * p.d / 2 - sn * b * p.w / 2, p.z + sn * a * p.d / 2 + cs * b * p.w / 2]), '#b7bcc4'); }
+    g.strokeStyle = '#ffffff'; g.lineJoin = 'round'; g.lineCap = 'round';
+    for (const e of this.city.graph.edges) { g.lineWidth = e.hw * 2 * S + 0.6; g.beginPath(); e.pts.forEach((q, i) => { const [a, b] = P(q[0], q[1]); if (i) g.lineTo(a, b); else g.moveTo(a, b); }); g.stroke(); }
+    for (const i of this.city.inters) rect(i.x - 7, i.z - 7, i.x + 7, i.z + 7, '#ffffff');
     this.mapCanvas = c;
   }
   toggleBig() { this.bigMap = !this.bigMap; }
@@ -100,7 +126,7 @@ export class HUD {
     document.querySelector('#ar i').style.width = Math.max(0, P.armor) + '%';
     document.querySelector('#st i').style.width = this.stam + '%';
     // area name: fades in for a few seconds when the district changes (no permanent label)
-    const x = P.pos.x, z = P.pos.z; const a = districtAt(x, z) || AREAS.find((r) => r.test(x, z));
+    const x = P.pos.x, z = P.pos.z; let a = districtAt(x, z) || AREAS.find((r) => r.test(x, z)); if (CYBER && !a.cy) a = { name: cyName(a.name), sub: cyName(a.sub), cy: 1 };
     const h = window.__G ? window.__G.hour : 18; const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
     if (a.name !== this.lastArea) { this.lastArea = a.name; this.areaT = 5; }
     this.areaT -= dt;
@@ -114,7 +140,7 @@ export class HUD {
     const g = this.g, W = this.mm.width, H = this.mm.height; const P = G.P; const M = this.map;
     g.save(); g.clearRect(0, 0, W, H);
     g.beginPath(); g.roundRect(0, 0, W, H, 18); g.clip();
-    const zoom = (P.car ? 1.5 - Math.min(0.65, Math.abs(P.car.speed) / 40) : 1.9); // canvas px per map px
+    const zoom = (P.car ? 1.5 - Math.min(0.65, Math.abs(P.car.speed) / 40) : 1.9) * (CYBER ? 0.75 / M.S : 1); // canvas px per map px
     const yaw = G.cam.yaw + Math.PI; // camera forward
     const cx = W / 2, cy = H * 0.6;
     g.translate(cx, cy); g.rotate(Math.PI + yaw); g.scale(zoom, zoom);

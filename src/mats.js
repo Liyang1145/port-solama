@@ -1,6 +1,7 @@
 // Materials: PBR texture sets, CSM/fog preparation, procedural facade + road shaders
 import * as THREE from 'three';
 import { U } from './env.js';
+import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
@@ -45,7 +46,8 @@ attribute vec4 aWin; attribute vec3 aCol; attribute vec3 aGlass; attribute vec3 
 vWin = aWin; vCol = aCol; vGlass = aGlass; vUp = aUp; vUvM = uv; vWPb = (modelMatrix * vec4(position,1.0)).xyz;`);
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform sampler2D tConc; uniform float uNight; uniform float uTime; uniform float uDbg; flat varying vec4 vWin; flat varying vec3 vCol; flat varying vec3 vGlass; flat varying vec3 vUp; varying vec2 vUvM; varying vec3 vWPb;
+uniform sampler2D tConc; uniform float uNight; uniform float uTime; uniform float uDbg; flat varying vec4 vWin;
+vec3 neonPal(float h){ h = fract(h); return h < 0.3 ? vec3(1.0, 0.17, 0.84) : h < 0.58 ? vec3(0.1, 0.94, 1.0) : h < 0.8 ? vec3(0.55, 0.36, 1.0) : vec3(1.0, 0.32, 0.45); } flat varying vec3 vCol; flat varying vec3 vGlass; flat varying vec3 vUp; varying vec2 vUvM; varying vec3 vWPb;
 ${HASH}`)
       .replace('#include <map_fragment>', `
 float style = floor(vWin.x + 0.5); float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
@@ -96,8 +98,26 @@ if (style == 0.0) { // curtain wall: glass with thin metal mullions + spandrel b
 }
 // weathering / dirt streaks at the bottom of walls and under windows
 float grime = vnoise(vec2(vUvM.x * 0.7, vUvM.y * 0.08 + seed)) * 0.07 + smoothstep(2.0, 0.0, vUvM.y) * 0.08;
-vec3 wallCol = baseTex * min(wall, vec3(0.9)) * 0.9 * (1.0 - grime) * shade; // v4.0: stucco albedo capped (sunlit walls no longer clip)
-vec3 frameCol = style == 0.0 || style == 3.0 ? vec3(0.06, 0.065, 0.07) + wall * 0.15 : vec3(0.85, 0.85, 0.82);
+${CYBER ? `// v4.5 material layering: rain streaks running down from each sill, splash-back plinth, patchy repaint / sun bleaching,
+// concrete patches showing through the stucco, a projecting sill with its own drop shadow
+float streak = 0.0, sill = 0.0, sillSh = 0.0;
+if (style == 2.0 || style == 5.0) {
+  float x0s = style == 5.0 ? 0.0 : 0.2; float x1s = style == 5.0 ? 1.0 : 0.8;
+  float inCol = step(x0s + 0.02, f.x) * step(f.x, x1s - 0.02);
+  float sn = vnoise(vec2(vUvM.x * 9.0, cid.y * 3.1 + seed)) * 0.6 + vnoise(vec2(vUvM.x * 23.0, seed)) * 0.4;
+  streak = inCol * smoothstep(0.28, 0.0, f.y) * smoothstep(0.45, 0.8, sn) * 0.22;
+  sill = step(x0s - 0.04, f.x) * step(f.x, x1s + 0.04) * step(0.245, f.y) * step(f.y, 0.28);
+  sillSh = step(x0s - 0.03, f.x) * step(f.x, x1s + 0.03) * smoothstep(0.245, 0.225, f.y) * step(0.19, f.y);
+}
+float macro = vnoise(vUvM * vec2(0.09, 0.05) + seed * 1.7);
+float plinth = smoothstep(0.9, 0.0, vUvM.y);
+vec3 concP = texture2D(tConc, vUvM * 0.21).rgb * vec3(0.95, 0.93, 0.9);
+float patchC = smoothstep(0.66, 0.72, vnoise(vUvM * 0.33 + seed * 5.0)) * step(style, 2.5) * step(1.5, style);
+` : ``}vec3 wallCol = baseTex * min(wall, vec3(0.9)) * 0.9 * (1.0 - grime) * shade; // v4.0: stucco albedo capped (sunlit walls no longer clip)
+${CYBER ? `wallCol *= (0.9 + 0.2 * macro) * (1.0 - streak) * (1.0 - plinth * 0.22) * (1.0 - sillSh * 0.3);
+wallCol = mix(wallCol, concP * 0.8, patchC * 0.55);
+wallCol = mix(wallCol, vec3(0.86, 0.85, 0.82) * baseTex, sill * 0.85);
+` : ``}vec3 frameCol = style == 0.0 || style == 3.0 ? vec3(0.06, 0.065, 0.07) + wall * 0.15 : vec3(0.85, 0.85, 0.82);
 // interiors behind glass: blinds / curtains for residential windows
 float blind = (style == 2.0 || style == 5.0 || style == 1.0) ? step(1.0 - fract(f.y * 1.0 + 0.0), 0.0) : 0.0;
 float bl = (style == 2.0 || style == 5.0 || style == 1.0) ? step(0.55, rnd2) * step(mix(0.55, 0.95, rnd), f.y) : 0.0;
@@ -112,7 +132,7 @@ vec3 col = mix(wallCol, frameCol, frame);
 col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
-float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.42 : 0.5);
+${CYBER ? `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.36 : 0.42);` : `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.42 : 0.5);`}
 lit = max(lit, step(rnd, litChance));
 `)
       .replace('#include <roughnessmap_fragment>', `
@@ -134,7 +154,8 @@ normal = normalize(normal + vec3((rnd - 0.5) * 0.045, (rnd2 - 0.5) * 0.03, 0.0) 
 {
   vec3 warm = mix(vec3(1.0, 0.62, 0.32), vec3(0.85, 0.9, 1.0), step(0.72, rnd2));
   float n = uNight;
-  // fake room depth: darker towards the window centre, a bright ceiling band, random furniture silhouettes
+${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(0.78, rnd) * n * 0.8); // some rooms lit in magenta / cyan at night
+` : ``}  // fake room depth: darker towards the window centre, a bright ceiling band, random furniture silhouettes
   float ceil = smoothstep(0.66, 0.74, f.y) * (1.0 - smoothstep(0.76, 0.8, f.y));
   float depthF = 0.55 + 0.45 * smoothstep(0.0, 0.35, abs(f.x - 0.5));
   float furn = step(0.5, h12(vec2(floor(vUvM.x * 1.3), seed))) * step(f.y, 0.42);
@@ -197,7 +218,27 @@ normal = normalize(normal + vec3((rnd - 0.5) * 0.045, (rnd2 - 0.5) * 0.03, 0.0) 
     k *= aa; // far windows keep the old flat lit-window look
   }
   totalEmissiveRadiance += room * inside * k;
-  // coloured facade up-lighting on the Art Deco hotels at night
+${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner strip on towers, neon fascia over storefronts
+  if (n > 0.01) {
+    vec3 pc = neonPal(seed * 0.137 + 0.05);
+    float fl = cid.y;
+    if (style == 0.0 || style == 1.0 || (style == 2.0 && vUvM.y > 16.0 && fract(seed * 0.31) < 0.5)) {
+      float every = style == 1.0 ? 4.0 : 6.0;
+      // bands on absolute height so they stay continuous lines (>= 1.5 px) from the air; chase light runs along the facade
+      float per = fh * every; float yy = mod(vUvM.y + floor(seed) * fh, per);
+      float bh = max(0.22, fwidth(vUvM.y) * 1.6);
+      float bandM = smoothstep(bh, bh * 0.4, yy) * step(6.0, vUvM.y);
+      float chase = 0.55 + 0.45 * sin(vUvM.x * 0.35 - uTime * 2.2 + seed);
+      float cw = max(0.5, fwidth(vUvM.x) * 1.6);
+      float corner = smoothstep(cw, cw * 0.3, vUvM.x) * step(0.5, fract(seed * 0.73)) * step(4.0, vUvM.y);
+      totalEmissiveRadiance += pc * (bandM * chase * 4.0 + corner * 3.0) * n;
+    }
+    if (style == 3.0) {
+      float fas = smoothstep(0.835, 0.845, f.y) * smoothstep(0.875, 0.865, f.y);
+      totalEmissiveRadiance += neonPal(seed * 0.21 + cid.x * 0.37) * fas * 6.0 * n;
+    }
+  }
+` : ``}  // coloured facade up-lighting on the Art Deco hotels at night
   float wallM = (1.0 - isGlass) * (1.0 - frame * 0.5);
   float grad = 0.12 + 0.88 * exp(-max(vUvM.y - 4.4, 0.0) / 4.5); // v4.3 wash concentrated above the shop band, not a whole-facade tint
   totalEmissiveRadiance += vUp * diffuseColor.rgb * wallM * grad * n * 0.9;
@@ -216,7 +257,7 @@ if (uDbg == 5.0) gl_FragColor = vec4(diffuseColor.rgb, 1.0);
 // attributes: aRd = (across m, along m, segment length, kind) ; kind 0 = 4-lane two-way, 1 = intersection, 2 = 2-lane, 3 = 6-lane causeway
 export function roadMaterial(T, refl) {
   const ts = texSet(T, 'asphalt', 1);
-  const mat = new THREE.MeshStandardMaterial({ map: ts.map, normalMap: ts.normalMap, roughnessMap: ts.roughnessMap, roughness: 1, metalness: 0, color: 0xffffff, normalScale: new THREE.Vector2(1, 1) });
+  const mat = new THREE.MeshStandardMaterial({ map: ts.map, normalMap: ts.normalMap, roughnessMap: ts.roughnessMap, roughness: 1, metalness: 0, color: 0xffffff, normalScale: new THREE.Vector2(1, 1) , ...(CYBER ? { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 } : {}) }); // v4.5 roads win the depth test over land caps / terrain 3–4 cm below
   for (const t of [ts.map, ts.normalMap, ts.roughnessMap]) t.repeat.set(7 / 3.5, 7 / 3.5);
   const uniforms = { uWet: U.uWet, uNight: U.uNight, tRefl: refl.tex, uReflMat: refl.mat, uReflOn: refl.on };
   return prep(mat, 'road', (s) => {
@@ -274,7 +315,12 @@ float tracks = (kind == 1.0) ? 0.0 : smoothstep(0.32, 0.18, abs(lanePos - 0.25))
 // patches / sealed cracks
 float patchN = smoothstep(0.62, 0.66, vnoise(vRW.xz * 0.06 + 3.0));
 asph *= (1.0 - tracks) * (1.0 - patchN * 0.25) * (0.9 + 0.2 * wear);
-vec3 col = mix(asph, wpaint > ypaint ? paintW : paintY, paintMask);
+${CYBER ? `// v4.5 sealed crack lines + oil drips down the lane centres + lighter aggregate where the binder wore off
+float crk = smoothstep(0.035, 0.0, abs(vnoise(vRW.xz * 0.35) - 0.5)) * smoothstep(0.5, 0.7, vnoise(vRW.xz * 0.045 + 11.0));
+float oil = (kind == 1.0 ? 0.0 : smoothstep(0.18, 0.0, abs(lanePos - 0.0))) * smoothstep(0.55, 0.8, vnoise(vRW.xz * vec2(0.9, 0.9) + 3.7)) * 0.5;
+asph = mix(asph, asph * 0.45, max(crk * 0.8, oil));
+asph *= 1.0 + 0.12 * smoothstep(0.7, 0.9, vnoise(vRW.xz * 1.7));
+` : ``}vec3 col = mix(asph, wpaint > ypaint ? paintW : paintY, paintMask);
 col = mix(col, vec3(0.16, 0.42, 0.20) * (0.8 + 0.3 * wear), bikeG * (0.7 + 0.3 * smoothstep(0.2, 0.7, wear)));
 paintMask = max(paintMask, bikeG * 0.8);
 // wet: darker, puddles
@@ -324,18 +370,50 @@ export function simpleMats(T) {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSWP;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSWP = (modelMatrix * vec4(position,1.0)).xyz;');
   });
   const pav = texSet(T, 'pavers', 1); for (const t of [pav.map, pav.normalMap, pav.roughnessMap]) t.repeat.set(1 / 2.5, 1 / 2.5);
-  M.pavers = prep(new THREE.MeshStandardMaterial({ map: pav.map, normalMap: pav.normalMap, roughnessMap: pav.roughnessMap, color: 0xffffff, roughness: 1 }), 'pavers');
+  M.pavers = prep(new THREE.MeshStandardMaterial({ map: pav.map, normalMap: pav.normalMap, roughnessMap: pav.roughnessMap, color: 0xffffff, roughness: 1, ...(CYBER ? { polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -2 } : {}) }), 'pavers');
   const conc = texSet(T, 'concrete', 1); for (const t of [conc.map, conc.normalMap, conc.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
   M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete');
   const sand = texSet(T, 'sand', 1); for (const t of [sand.map, sand.normalMap, sand.roughnessMap]) t.repeat.set(1 / 6, 1 / 6);
+  if (CYBER) {
+  // v4.5: sand albedo 1.22 -> 0.98 (noon beach no longer glares), dune-scale tone variation, wind ripples (normal), a wrack line
+  // of dark debris at the high-water mark, wet sand darker + glossier toward the sea
+  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(0.90, 0.86, 0.78), roughness: 1 }), 'sand', (s) => {
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandW = (modelMatrix*vec4(position,1.0)).xyz;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;' + HASH)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+float vSandY = vSandW.y; float wetS = smoothstep(-0.55, -0.9, vSandY);
+float dune = vnoise(vSandW.xz * 0.025) * 0.6 + vnoise(vSandW.xz * 0.11) * 0.4;
+diffuseColor.rgb *= mix(vec3(0.93, 0.90, 0.85), vec3(1.04, 1.0, 0.94), dune);
+float wrack = smoothstep(0.12, 0.0, abs(vSandY + 0.42)) * smoothstep(0.45, 0.75, vnoise(vSandW.xz * vec2(0.6, 0.15)));
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.22, 0.19, 0.12), wrack * 0.55);
+diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+{ float rp = sin(vSandW.x * 2.6 + vnoise(vSandW.xz * 0.3) * 6.0) * (1.0 - wetS) * 0.12; normal = normalize(normal + (viewMatrix * vec4(rp, 0.0, rp * 0.3, 0.0)).xyz); }`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
+  });
+  } else {
   M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(1.22, 1.18, 1.10), roughness: 1 }), 'sand', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vSandY;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandY = (modelMatrix*vec4(position,1.0)).y;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vSandY;')
       .replace('#include <map_fragment>', '#include <map_fragment>\nfloat wetS = smoothstep(-0.55, -0.9, vSandY); diffuseColor.rgb *= mix(1.0, 0.55, wetS);')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
   });
+  }
   const grass = texSet(T, 'grass', 1); for (const t of [grass.map, grass.normalMap, grass.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
-  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass');
+  // v4.5 lawns: a second texture scale + world-space macro noise (greener swales, sun-dried patches, worn earth) kills the tiling
+  const lawn = (s) => {
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvLW = (modelMatrix*vec4(position,1.0)).xyz;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vLW;' + HASH).replace('#include <map_fragment>', `#include <map_fragment>
+{ vec3 t2 = texture2D(map, vMapUv * 0.27 + 0.43).rgb; diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.5 + t2 * 0.5, 0.5);
+  float m = vnoise(vLW.xz * 0.013) * 0.6 + vnoise(vLW.xz * 0.06) * 0.3 + vnoise(vLW.xz * 0.31) * 0.1;
+  diffuseColor.rgb *= mix(vec3(0.82, 0.95, 0.74), vec3(1.18, 1.08, 0.78), smoothstep(0.3, 0.75, m));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.30, 0.22), smoothstep(0.80, 0.9, vnoise(vLW.xz * 0.09 + 7.0)) * 0.3); }`);
+  };
+  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', CYBER ? lawn : undefined); // r6.0: lawn macro-variation only on map 霓港
+  // v4.4 land caps under the open world: pushed back in depth so district pavers / roads drawn just above never z-fight from the air
+  const po = { polygonOffset: false }; // v4.5: was 3 / 12 -> at grazing distances the caps fell behind the water plane 1 m below (white 'shallows' instead of land)
+  M.land = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: new THREE.Color().setRGB(0.92, 0.95, 0.86), roughness: 1, ...po }), 'grass', lawn);
+  M.landc = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1, ...po }), 'concrete');
   // r5.0 mainland / pearl-island ground: sits 6 cm below the road ribbons (polygonOffset pushed it behind the water at grazing angles)
   M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc');
   M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg');

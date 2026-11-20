@@ -8,7 +8,10 @@ export function mulberry(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-export const rng = mulberry(20261119);
+let _rng = mulberry(20261119);
+export const rng = () => _rng();
+// v4.4 streaming (map 霓港): chunks reseed the shared generator so a chunk rebuilds identically after it was unloaded
+export function withSeed(seed, fn) { const old = _rng; _rng = mulberry(seed); try { return fn(); } finally { _rng = old; } }
 export const rand = (a, b) => a + (b - a) * rng();
 export const randi = (a, b) => Math.floor(rand(a, b + 1));
 export const pick = (arr) => arr[Math.floor(rng() * arr.length)];
@@ -31,6 +34,11 @@ export class ColliderGrid {
         const k = this.key(ix, iz); let l = this.map.get(k); if (!l) this.map.set(k, l = []); l.push(b);
       }
     return b;
+  }
+  remove(b) { // v4.4 (map 霓港 streaming)
+    const c = this.cell; const i = this.boxes.indexOf(b); if (i >= 0) this.boxes.splice(i, 1);
+    for (let ix = Math.floor(b.minX / c); ix <= Math.floor(b.maxX / c); ix++)
+      for (let iz = Math.floor(b.minZ / c); iz <= Math.floor(b.maxZ / c); iz++) { const l = this.map.get(this.key(ix, iz)); if (l) { const j = l.indexOf(b); if (j >= 0) l.splice(j, 1); } }
   }
   // r5.0 oriented box (mainland buildings / causeway): centre, unit axis u (along), half length / half width
   addOBB(cx, cz, ux, uz, hl, hw, h = 100, tag = 'b') {

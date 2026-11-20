@@ -14,6 +14,8 @@ import { Missions } from './missions.js';
 import { World } from './world.js';
 import { PoliceOps } from './police.js';
 import { POI } from './mapdata.js';
+import { CYBER } from './mapsel.js';
+const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one save per map (positions differ)
 
 const HOSPITAL = POI.hospital;
 const PRECINCT = POI.precinct;
@@ -24,7 +26,7 @@ export class Game {
     this.timeScale = 30; this.trafficPhase = 0;
     prepareSport(this.G.car); prepareModels(this.G);
     prepareCharacters(this.G);
-    this.traffic = new Traffic(this.scene, this.city);
+    this.traffic = new (this.city.TrafficClass || Traffic)(this.scene, this.city); // r6.0: map 霓港 brings its road-graph traffic
     this.peds = new Pedestrians(this.scene, this.city);
     this.hud = new HUD(this.city);
     this.sfx = new Sfx();
@@ -239,6 +241,7 @@ export class Game {
     for (const c of [...this.cops]) { const d = c.pos.distanceTo(P.pos); if ((this.wanted === 0 && d > 70) || d > 250 || (c.dead && d > 90)) { this.cops.splice(this.cops.indexOf(c), 1); c.dispose(); } }
   }
   roadWaypoint(v, tx, tz) {
+    if (this.city.graph && this.traffic.waypoint) return this.traffic.waypoint(v, tx, tz); // r6.0 map 霓港: shortest path on the road graph
     // pick a point on the nearest road axis that moves toward the target: drive along the current road until aligned, then turn
     // r5.0: on a region road (causeway / mainland / pearl island) follow that road toward the target
     const rg = this.city.region; if (rg && (v.x < -22 || Math.abs(v.z) > 372)) { const w = rg.waypoint(v.x, v.z, tx, tz); if (w) return new THREE.Vector3(w.x, 0, w.z); }
@@ -490,11 +493,11 @@ export class Game {
   save() {
     if (this.SNAP) return; try {
       const pr = this.world.profiles.map((p) => ({ money: p.P.money, bank: p.P.bank, load: p.P.load, assets: p.P.assets, outfit: p.P.outfit }));
-      localStorage.setItem('portsolana_v43', JSON.stringify({ pr, done: this.missions.done, valet: this.mission.jobs }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ pr, done: this.missions.done, valet: this.mission.jobs }));
     } catch (e) { }
   }
   loadSave() {
-    try { const s = JSON.parse(localStorage.getItem('portsolana_v43') || 'null'); if (!s) return false;
+    try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (!s) return false;
       s.pr.forEach((d, i) => { const p = this.world.profiles[i]; if (!p) return; Object.assign(p.P, { money: d.money, bank: d.bank, load: d.load, assets: d.assets || [], outfit: d.outfit }); });
       this.missions.done = s.done || {}; this.hud.msg('已读取存档', 2); return true; } catch (e) { return false; }
   }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { prep } from './mats.js';
 import { U } from './env.js';
 import { mulberry } from './util.js';
+import { CYBER } from './mapsel.js';
 
 function trunkTexture() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 512; const g = c.getContext('2d');
@@ -13,7 +14,7 @@ function trunkTexture() {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
 }
 
-const foliagePatch = (s, strength = 0.6) => {
+export const foliagePatch = (s, strength = 0.6) => {
   s.uniforms.uTime = U.uTime; s.uniforms.uSunCol = U.uSunCol; s.uniforms.uNightF = U.uNight;
   s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aSway;')
     .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -43,12 +44,12 @@ const foliagePatch = (s, strength = 0.6) => {
 // --- v3.5 palms: three species (coconut / royal / sabal) with curved drooping pinnate or costapalmate fan fronds -----------------
 // Fronds are real arching surfaces: a rachis ribbon + two drooping "wings" per frond whose alpha texture is individual leaflets
 // (gaps between them), so silhouettes read as leaflets instead of flat cards. Near/far LOD swapped per instance by distance.
-function canvasTex(w, h, draw, srgb = true) {
+export function canvasTex(w, h, draw, srgb = true) {
   const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); draw(g, w, h);
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.userData.canvas = c; return t;
 }
 // height canvas -> tangent-space normal map
-function normalFromHeight(src, strength = 2.5) {
+export function normalFromHeight(src, strength = 2.5) {
   const w = src.width, h = src.height; const d = src.getContext('2d').getImageData(0, 0, w, h).data;
   const H = (x, y) => d[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
   return canvasTex(w, h, (g) => { const o = g.createImageData(w, h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -87,7 +88,7 @@ function barkTextures(kind) {
   return { map: alb, normalMap: normalFromHeight(hc, kind === 'royal' ? 1.2 : 3.0) };
 }
 // pinnate half-frond: u 0 = rachis -> 1 = leaflet tips, v 0 = base -> 1 = tip; leaflets angled toward the tip with gaps
-function pinnateTex() {
+export function pinnateTex() {
   const r = mulberry(41);
   return canvasTex(256, 1024, (g, W, H) => {
     g.clearRect(0, 0, W, H);
@@ -124,14 +125,14 @@ function fanTex() {
   });
 }
 
-function GB() { return { p: [], n: [], uv: [], i: [], c: [], s: [] }; }
-function gbBuild(o, withColor = true) {
+export function GB() { return { p: [], n: [], uv: [], i: [], c: [], s: [] }; }
+export function gbBuild(o, withColor = true) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(o.p, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(o.uv, 2)); if (withColor && o.c.length) g.setAttribute('color', new THREE.Float32BufferAttribute(o.c, 3));
   g.setAttribute('aSway', new THREE.Float32BufferAttribute(o.s, 1)); g.setIndex(o.i); g.computeVertexNormals(); return g;
 }
 // one pinnate frond: rachis ribbon + two drooping leaflet wings
-function addFrond(F, top, az, L, up, droop, S, tint, opts = {}) {
+export function addFrond(F, top, az, L, up, droop, S, tint, opts = {}) {
   const dir = new THREE.Vector3(Math.cos(az), 0, Math.sin(az)); const side = new THREE.Vector3(-dir.z, 0, dir.x);
   const P = (t) => top.clone().addScaledVector(dir, L * t * (1 - 0.18 * t * t)).add(new THREE.Vector3(0, L * (up * t - droop * t * t), 0));
   const wingDrop = opts.wingDrop ?? 0.55, maxW = opts.maxW ?? 1.0, plume = opts.plume ?? 0;
@@ -303,7 +304,7 @@ function shrubGeometry(seed, flower = 0) {
   g.setAttribute('color', new THREE.Float32BufferAttribute(cards.c, 3)); g.setIndex(cards.i);
   return g;
 }
-function mergeSimple(gs) {
+export function mergeSimple(gs) {
   const out = new THREE.BufferGeometry(); const p = [], n = [], uv = [], idx = []; let off = 0;
   for (const g0 of gs) { const g = g0.index ? g0 : g0; const P = g.attributes.position, N = g.attributes.normal, UV = g.attributes.uv;
     for (let i = 0; i < P.count; i++) { p.push(P.getX(i), P.getY(i), P.getZ(i)); n.push(N.getX(i), N.getY(i), N.getZ(i)); uv.push(UV.getX(i), UV.getY(i)); }
@@ -351,13 +352,13 @@ export function buildVegetation(scene, city, T) {
     lodSets.push(set);
   });
   // distribute instances to near/far meshes around the camera (cheap: a few thousand matrix copies, every ~0.4 s)
-  const NEAR2 = 75 * 75; let lastX = 1e9, lastZ = 1e9;
+  const NEAR2 = 75 * 75, FAR2 = CYBER ? 900 * 900 : Infinity; // r6.0: far cull only on map 霓港 (thousands of palms) let lastX = 1e9, lastZ = 1e9;
   const updateLod = (cx, cz, force) => {
     if (!force && Math.hypot(cx - lastX, cz - lastZ) < 12) return; lastX = cx; lastZ = cz;
     for (const set of lodSets) {
       let nn = 0, nf = 0;
       for (let i = 0; i < set.mats.length; i++) {
-        const d = (set.pos[i][0] - cx) ** 2 + (set.pos[i][1] - cz) ** 2; const arr = d < NEAR2 ? set.near : set.far; const idx = d < NEAR2 ? nn++ : nf++;
+        const d = (set.pos[i][0] - cx) ** 2 + (set.pos[i][1] - cz) ** 2; if (d > FAR2) continue; const arr = d < NEAR2 ? set.near : set.far; const idx = d < NEAR2 ? nn++ : nf++;
         for (const im of arr) im.setMatrixAt(idx, set.mats[i]);
       }
       for (const im of set.near) { im.count = nn; im.instanceMatrix.needsUpdate = true; }

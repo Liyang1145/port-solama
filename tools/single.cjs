@@ -19,7 +19,9 @@ const D = process.env.DIST || 'dist', OUT = process.env.OUT || 'dist_single';
   html = html.replace(", url('Anton-Regular.ttf') format('truetype')", '');
   html = html.replace("url('assets/Anton-Regular.ttf')", `url('${A['Anton-Regular.ttf']}')`);
   const assetJs = 'window.__A=' + JSON.stringify(A) + ';';
-  html = html.replace('<script src="main.js"></script>', () => `<script>${assetJs}</script>\n<script>${js}</script>`);
+  // r6.0: the bundle is stored as text and run by the start-menu loader once a map is picked (src/index.html)
+  if (!html.includes('<!--GAMEJS-->')) throw new Error('index.html lacks <!--GAMEJS-->');
+  html = html.replace('<!--GAMEJS-->', () => `<script>${assetJs}</script>\n<script type="text/plain" id="gamejs">${js}</script>`);
   fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSync(OUT + '/index.html', html);
   console.log('raw assets', (raw / 1048576).toFixed(1), 'MB -> single file', (html.length / 1048576).toFixed(1), 'MB');
 })();

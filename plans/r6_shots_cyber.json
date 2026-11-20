@@ -1,0 +1,29 @@
+{
+"query": "map=cyber&hour=15.5&lowshadow&probe=0",
+"shots": [
+{
+"name": "night_aerial",
+"js": "__G.setHour(22.0); const g=__G.game; g.tp(-1400,-200,0); __G.step(2); const c=__G.camera; c.position.set(-1050,260,-950); c.lookAt(-1850,40,-150); c.updateMatrixWorld(); 0"
+},
+{
+"name": "night_street",
+"js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); 0"
+},
+{
+"name": "night_deco",
+"js": "__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"
+},
+{
+"name": "aerial_day",
+"js": "__G.setHour(16.3); const g=__G.game; g.tp(290,-200,0); __G.step(2); const c=__G.camera; c.position.set(820,620,-1500); c.lookAt(-420,0,350); c.updateMatrixWorld(); 0"
+},
+{
+"name": "falls",
+"js": "__G.setHour(14.0); const g=__G.game; g.tp(-2470,3010,0); __G.step(3); const c=__G.camera; const y=__G.city.groundH(-2462,3048); c.position.set(-2462,y+3.0,3048); c.lookAt(-2470,16,3112); c.updateMatrixWorld(); __G.nature.update(c.position,true); __G.nature.stats"
+},
+{
+"name": "prairie2",
+"js": "__G.setHour(16.6); const g=__G.game; g.tp(-2440,1880,0); __G.step(3); const c=__G.camera; const y=__G.city.groundH(-2300,1850); c.position.set(-2300,y+1.7,1850); c.lookAt(-2550,y+3,1780); c.updateMatrixWorld(); __G.nature.update(c.position,true); __G.nature.stats"
+}
+]
+}

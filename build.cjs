@@ -2,7 +2,7 @@
 const esbuild = require('esbuild'), fs = require('fs');
 (async () => {
   const r = await esbuild.build({ entryPoints: ['src/main.js'], bundle: true, minify: !process.argv.includes('--dev'), format: 'iife', target: 'es2020', outfile: 'dist/main.js', legalComments: 'none', logLevel: 'warning' });
-  const html = fs.readFileSync('src/index.html', 'utf8').replace('<script type="module" src="main.js"></script>', '<script src="main.js"></script>');
+  const html = fs.readFileSync('src/index.html', 'utf8');  // r6.0: the start-menu loader in index.html injects main.js after the map is chosen
   fs.writeFileSync('dist/index.html', html);
   console.log('dist/main.js', (fs.statSync('dist/main.js').size / 1024).toFixed(0) + ' KB');
 })().catch((e) => { console.error(e.message); process.exit(1); });

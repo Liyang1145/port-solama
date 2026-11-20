@@ -58,7 +58,7 @@ export class PoliceOps {
   placeBlock() {
     const G = this.G, P = G.P; const v = P.car; const fx = v ? Math.sin(v.yaw) : Math.sin(P.yaw), fz = v ? Math.cos(v.yaw) : Math.cos(P.yaw);
     let best = null, bs = -1;
-    for (const it of G.city.inters) { const dx = it.x - P.pos.x, dz = it.z - P.pos.z; const d = Math.hypot(dx, dz); if (d < 55 || d > 170) continue; const s = (dx * fx + dz * fz) / d; if (s > 0.75 && s > bs) { bs = s; best = it; } }
+    for (const it of [...G.city.inters, ...(G.city.junctions || []).filter((n) => !n.legacy)]) { const dx = it.x - P.pos.x, dz = it.z - P.pos.z; const d = Math.hypot(dx, dz); if (d < 55 || d > 170) continue; const s = (dx * fx + dz * fz) / d; if (s > 0.75 && s > bs) { bs = s; best = it; } }
     if (!best) return null;
     const alongZ = Math.abs(fz) > Math.abs(fx); const sgn = alongZ ? Math.sign(fz) : Math.sign(fx);
     const cars = []; const cx = alongZ ? best.x : best.x - sgn * 10, cz = alongZ ? best.z - sgn * 10 : best.z;

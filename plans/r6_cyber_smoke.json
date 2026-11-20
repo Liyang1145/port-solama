@@ -1,0 +1,40 @@
+{
+"query": "map=cyber&hour=15&ao=0&lowshadow&probe=0",
+"shots": [
+{
+"name": "drive",
+"js": "__G.setHour(18.3); const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(75); g.override={throttle:0.4,steer:0}; __G.step(10); g.state()",
+"noshot": true
+},
+{
+"name": "cops",
+"js": "__G.setHour(17.8); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(283,-150,Math.PI); g.crime(3,'test'); __G.step(150); g.cam.pitch=-0.15; __G.step(5); g.state()",
+"noshot": true
+},
+{
+"name": "weapons",
+"noshot": true,
+"js": "const g=__G.game,P=g.P,A=g.arsenal,W=g.world; const r={}; g.tp(160.6,-100,Math.PI/2); __G.step(3); P.money=12000; r.money0=P.money; W.interact(); r.menu=W.menu&&W.menu.title; const idx=(l)=>W.menu.items.findIndex(i=>i.label.startsWith(l)); for(const l of ['冲锋枪','霰弹枪','步枪','棒球棍']) W.choose(idx(l)); r.money1=P.money; W.choose(idx('防弹衣')); r.armor=P.armor; r.owned=Object.keys(P.load.owned); W.closeMenu(); r.shopLog=W.log.slice(); const C=g.player.constructor; const tgt=(dx)=>{ const t=new C(__G.scene,'man'); t.pos.set(P.pos.x+dx,0.15,P.pos.z); t.health=10000; t.ai={mode:'cower',t:-99999,loop:[0,0,1,1,4],u:0,dir:1,speed:1,wait:0,from:P.pos.clone()}; g.peds.list.push(t); return t; }; const aimAt=(t)=>{ g.updateCamera(1,true); const c=__G.camera; c.position.set(P.pos.x-1.5,1.7,P.pos.z+0.4); c.lookAt(t.pos.x,t.pos.y+1.15,t.pos.z); c.updateMatrixWorld(); P.yaw=Math.PI/2; }; r.dmg={}; for(const id of ['pistol','smg','shotgun','rifle']){ A.equip(id); A.reloadT=0; const t=tgt(id==='shotgun'?7:9); __G.step(1); let n=0, h0=t.health; for(let i=0;i<6;i++){ A.fireT=0; aimAt(t); if(A.trigger(true,true)) n++; } r.dmg[id]={shots:n, dmgPerShot:Math.round((h0-t.health)/Math.max(1,n)), clip:A.ammo().clip, reserve:A.ammo().reserve}; t.dispose(); g.peds.list.splice(g.peds.list.indexOf(t),1); } A.equip('pistol'); const a=A.ammo(); a.clip=0; A.fireT=0; A.reloadT=0; aimAt({pos:{x:P.pos.x+9,y:0.15,z:P.pos.z}}); r.reloadStarted=!A.trigger(true,true)&&A.reloadT>0; r.reloadT=+A.reloadT.toFixed(2); __G.step(45); r.afterReload=[A.ammo().clip,A.ammo().reserve]; for(const id of ['fist','bat']){ A.equip(id); const t=tgt(1.3); t.health=100; __G.step(1); P.yaw=Math.PI/2; let k=0; let hp=[]; while(!t.dead&&k<12){ A.fireT=0; P.yaw=Math.atan2(t.pos.x-P.pos.x,t.pos.z-P.pos.z); A.trigger(true,true); hp.push(Math.round(t.health)); k++; } r[id+'Swings']=k; r[id+'HP']=hp; r[id+'Dead']=t.dead; } A.openWheel(true); r.slowmoWheel=g.slowmo; A.wheelAim(0,-100); r.wheelSel=A.wheelSel; A.openWheel(false); r.cur=P.load.cur; r.slowmoAfter=g.slowmo; A.cycle(1); r.cycled=P.load.cur; g.tp(159.0,-120,Math.PI/2); __G.step(2); r.cover=A.toggleCover(); r.coverState=!!P.cover; g.tp(166,-120,0); __G.step(2); P.cover=null; r.coverOpenStreet=A.toggleCover(); r.hitsShots=[A.hits,A.shots]; r.wantedAfter=g.wanted; g.wanted=0; r.state=g.state(); r"
+},
+{
+"name": "mission",
+"noshot": true,
+"js": "const g=__G.game, m=g.mission; const r={}; r.s0=m.state; g.tp(281,14,Math.PI); g.override={mx:0,mz:0}; __G.step(5); g.tp(281,10.5,Math.PI); __G.step(3); r.s1=m.state; r.obj1=m.el.textContent; g.override=null; g.tp(283.2,5,Math.PI); const near=g.nearestCar(); r.nearIsGuest=near===m.car; g.toggleCar(); __G.step(2); r.s2=m.state; r.target=m.target; r.timeAllowed=Math.round(m.left); const c=m.car; const t=m.target; const money0=g.P.money; c.place(t.x, t.z+12*(t.z>0?-1:1), t.z>0?0:Math.PI); g.override={throttle:0.5,steer:0}; let i=0; while(m.state==='drive'&&i<400){ const d=Math.hypot(t.x-c.x,t.z-c.z); g.override={throttle: d>4?0.35:-1, steer:0}; __G.step(1); i++; } g.override={throttle:0,steer:0}; __G.step(30); r.s3=m.state; r.log=m.log; r.paid=g.P.money-money0; r.objText=m.el.textContent; g.toggleCar(); __G.step(200); r.s4=m.state; g.tp(281,10.5,Math.PI); __G.step(3); r.s5=m.state; r.car2=!!m.car; if(m.car){ g.crime(2,'test'); __G.step(3); r.s6=m.state; r.log2=m.log[m.log.length-1]; } g.wanted=0; r"
+},
+{
+"name": "missions",
+"noshot": true,
+"js": "const g=__G.game,P=g.P,A=g.arsenal,M=g.missions; const r={}; const ready=()=>{ g.wanted=0; g.lostT=0; M.cool=0; g.override=null; __G.step(1); }; ready(); g.tp(59.5,50,Math.PI); __G.step(3); r.rob0=M.active&&M.active.id+':'+M.stage; A.equip('pistol'); g.override={aim:true}; __G.step(100); r.rob1=M.stage; r.robWanted=g.wanted; r.robCash=M.data.cash; g.override=null; g.tp(330,-340,0); let i=0; while(M.active&&i<1500){ __G.step(10); i+=10; } r.robEscapeFrames=i; r.robNaturalLose=!M.active; if(M.active){ g.wanted=0; __G.step(2);} r.robLog=M.log[M.log.length-1]; ready(); g.tp(15,-335,0); __G.step(3); r.cold0=M.active&&M.active.id+':'+M.stage; const van=M.data.van; g.tp(van.x-2.4,van.z,0); __G.step(1); g.toggleCar(); __G.step(2); r.cold1=M.stage; r.inVan=g.P.car===van; const dst=M.data.dest; r.dest=dst&&dst.name; van.place(dst.x>270?285:(dst.x<100?54:166),dst.z,0); van.vx=van.vz=0; g.override={throttle:0,steer:0}; __G.step(10); g.override=null; r.coldLog=M.log[M.log.length-1]; if(g.P.car) g.toggleCar(); ready(); g.tp(175,160,0); __G.step(3); r.debt0=M.active&&M.active.id+':'+M.stage; const dc=M.data.car; g.tp(dc.x-4,dc.z-20,0); __G.step(60); r.debt1=M.stage; r.debtCarMoved=Math.round(Math.hypot(dc.x-173.5,dc.z-200)); dc.health=35; __G.step(3); r.debt2=M.stage; g.tp(dc.x-3,dc.z,0); __G.step(3); r.debtLog=M.log[M.log.length-1]; ready(); g.tp(12,340,0); __G.step(5); r.gang0=M.active&&M.active.id+':'+M.stage; r.gangN=g.gang.filter(c=>!c.dead).length; const hp0=P.health; __G.step(90); r.gangShotAtPlayer=P.health<hp0||P.armor<40; P.health=100; for(const c of g.gang){ if(!c.dead){ c.health=0; g.killChar(c,{x:1,y:0,z:0}); } } __G.step(3); r.gangLog=M.log[M.log.length-1]; r.done=M.done; r.money=P.money; g.wanted=0; r"
+},
+{
+"name": "cy_drive",
+"noshot": true,
+"js": "const g=__G.game,G=__G.city.graph; g.tp(30,-6,-Math.PI/2); __G.step(2); g.carNearPlayer('sport',3); g.toggleCar(); const v=g.P.car; v.place(30,-1.75,-Math.PI/2); v.vx=0; v.vz=0;\nconst E=G.edges.filter(e=>e.road&&e.road.id==='cw1'); let P=[]; for(const e of E) P.push(...e.pts); P.sort((a,b)=>b[0]-a[0]); const C=[0]; for(let i=1;i<P.length;i++) C.push(C[i-1]+Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1]));\nconst at=(s)=>{ s=Math.max(0,Math.min(C[C.length-1],s)); let i=0; while(i<C.length-2&&C[i+1]<s) i++; const a=P[i],b=P[i+1]; const l=C[i+1]-C[i]||1; const t=(s-C[i])/l; return {x:a[0]+(b[0]-a[0])*t,z:a[1]+(b[1]-a[1])*t,tx:(b[0]-a[0])/l,tz:(b[1]-a[1])/l}; };\nconst near=(x,z)=>{ let bi=0,bd=1e18; for(let i=0;i<P.length;i++){ const d=(P[i][0]-x)**2+(P[i][1]-z)**2; if(d<bd){bd=d;bi=i;} } return C[bi]; };\nconst log=[]; let maxSp=0; for(let i=0;i<1800;i++){ let tx,tz; if(v.x>-22){tx=v.x-20; tz=-1.75;} else { const a=at(near(v.x,v.z)+18); tx=a.x-a.tz*5.25; tz=a.z+a.tx*5.25; } const ang=Math.atan2(tx-v.x,tz-v.z)-v.yaw; const aw=Math.atan2(Math.sin(ang),Math.cos(ang)); g.override={throttle: Math.abs(v.speed)<22?1:0.2, steer: Math.max(-1,Math.min(1,aw*2.2))}; __G.step(1); maxSp=Math.max(maxSp,v.speed*3.6); if(i%60==0) log.push([Math.round(v.x),Math.round(v.z),+v.y.toFixed(2),Math.round(v.speed*3.6),Math.round(v.health)]); if(v.x<-1500) break; }\ng.override={throttle:0,steer:0,handbrake:true}; __G.step(30); ({log, end:[Math.round(v.x),Math.round(v.z),+v.y.toFixed(2)], maxKmh:Math.round(maxSp), health:Math.round(v.health), inWater:!!v.inWater, area:document.getElementById('area').textContent, state:g.state()})"
+},
+{
+"name": "cy_world",
+"noshot": true,
+"js": "const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(-1700,-290,0); __G.step(240); const T=g.traffic; const onGraph=T.cars.filter(c=>c.ai&&(c.ai.edge||(c.ai.path&&c.ai.path.next&&c.ai.path.next.edge))).length; const peds=g.peds.list.filter(c=>c.ai&&c.ai.path).length; const sp=T.cars.map(c=>Math.round(c.speed*3.6)); const air=T.cars.filter(c=>c.y<-1).length; ({onGraph, cars:T.cars.length, inWater:air, pathPeds:peds, peds:g.peds.list.length, speeds:sp, state:g.state(), stats:__G.stats(), area:document.getElementById('area').textContent})"
+}
+]
+}

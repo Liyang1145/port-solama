@@ -6,6 +6,7 @@ import { U } from './env.js';
 import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
+import { CYBER } from './mapsel.js';
 
 function streetLightGeo() {
   const b = new GeoBucket();
@@ -97,20 +98,23 @@ export function buildProps(scene, city, T) {
   const poolGeo = new THREE.PlaneGeometry(16, 16); poolGeo.rotateX(-Math.PI / 2);
   const poolMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: { uNight: U.uNight, uCol: { value: new THREE.Color(1.0, 0.62, 0.32) } },
+    uniforms: { uNight: U.uNight, uCol: { value: CYBER ? new THREE.Color(0.45, 0.78, 1.0) : new THREE.Color(1.0, 0.62, 0.32) } }, // r6.0: cool LED lamps only on map 霓港
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position,1.0); }',
     fragmentShader: 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length(vUv-0.5)*2.0; float a = pow(max(1.0-d,0.0),2.2); gl_FragColor = vec4(uCol * a * uNight * 0.55, 1.0); }',
   });
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
+  const lampM = [];
   lamps.forEach((l, i) => {
     const ang = Math.atan2(l.dir[0], l.dir[1]);
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);
-    m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, s1); im.setMatrixAt(i, m4); glow.setMatrixAt(i, m4);
+    m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, s1); im.setMatrixAt(i, m4); glow.setMatrixAt(i, m4); const a = m4.clone();
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
-    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4);
+    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
-  for (const x of [im, glow, pools]) { x.computeBoundingSphere(); scene.add(x); }
+  for (const x of [im, glow, pools]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
+  // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
+  if (CYBER) out.lampCull = { im, glow, pools, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
   out.lampGlow = glowMat; out.pools = pools;
   // a pool of real point lights that follow the nearest lamps at night
   for (let i = 0; i < 10; i++) { const pl = new THREE.PointLight(0xffa860, 0, 30, 1.6); pl.castShadow = false; scene.add(pl); out.lampLights.push(pl); }
@@ -274,7 +278,11 @@ export function buildProps(scene, city, T) {
 
 export function updateProps(P, cam, night, phase) {
   const n = night;
-  P.lampGlow.color.setRGB(1.0 * (0.4 + 7 * n), 0.62 * (0.4 + 7 * n), 0.32 * (0.4 + 7 * n));
+  { const L = P.lampCull, cx = cam.position.x, cz = cam.position.z; if (L && Math.hypot(cx - L.lx, cz - L.lz) > 25) { L.lx = cx; L.lz = cz; let k = 0;
+    for (const [a, b, x, z] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); k++; }
+    for (const m of [L.im, L.glow, L.pools]) { m.count = k; m.instanceMatrix.needsUpdate = true; } } }
+  if (CYBER) P.lampGlow.color.setRGB(0.62 * (0.4 + 7 * n), 0.88 * (0.4 + 7 * n), 1.0 * (0.4 + 7 * n)); // v4.5 cool LED street lights (cyberpunk night)
+  else P.lampGlow.color.setRGB(1.0 * (0.4 + 7 * n), 0.62 * (0.4 + 7 * n), 0.32 * (0.4 + 7 * n));
   for (const m of P.signMats) m.emissiveIntensity = 0.05 + n * 3.5;
   if (P.signal) { // NS-green phase: z-axis roads green
     const nsGreen = phase === 0;
@@ -288,7 +296,7 @@ export function updateLampLights(P, lamps, pos, night) {
   const best = [];
   for (const l of lamps) { const d = (l.hx - pos.x) ** 2 + (l.hz - pos.z) ** 2; if (d > 90 * 90) continue; best.push([d, l]); }
   best.sort((a, b) => a[0] - b[0]);
-  P.lampLights.forEach((pl, i) => { const e = best[i]; if (!e) { pl.intensity = 0; return; } pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = 60 * night; });
+  P.lampLights.forEach((pl, i) => { const e = best[i]; if (!e) { pl.intensity = 0; return; } pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = 60 * night; if (CYBER) pl.color.setRGB(...(i % 3 === 2 ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); });
 }
 
 // ---------- street furniture: café terraces on Tideline Drive, benches, bins, hydrants, parking spots

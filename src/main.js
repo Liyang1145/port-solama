@@ -13,6 +13,12 @@ import { Game } from './game.js';
 import { addStreetTrees, buildStreet, buildShopSigns } from './street.js';
 import { CAST, charLodReady } from './people.js';
 import { setCarEnv } from './vehicles.js';
+import { CYBER, MAP } from './mapsel.js';
+// r6.0 map 霓港 (cyberpunk): streamed districts, wild nature, neon night (src/maps/cyber/)
+import { Stream } from './maps/cyber/stream.js';
+import { bedTexture } from './maps/cyber/region.js';
+import { buildNature } from './maps/cyber/nature.js';
+import { buildNeon } from './maps/cyber/neon.js';
 
 const Q = new URLSearchParams(location.search);
 const SNAP = Q.has('snap');
@@ -62,13 +68,17 @@ async function load() {
   M.building = buildingMaterial(T);
   M.road = roadMaterial(T, water.shared);
   const city = buildCity(scene, M, T);
-  const meshes = city.world.build(scene, M, { neon: { cast: false }, road: { cast: false }, sidewalk: { cast: false }, pavers: { cast: false }, grass: { cast: false }, sand: { cast: false }, glassRail: { cast: false } });
+  const meshes = city.world.build(scene, M, { neon: { cast: false }, road: { cast: false }, sidewalk: { cast: false }, pavers: { cast: false }, grass: { cast: false }, land: { cast: false }, landc: { cast: false }, sand: { cast: false }, glassRail: { cast: false } });
+  let stream = null, nature = null, neon = null;
+  if (CYBER) { water.setBed(bedTexture(city.bedH)); stream = new Stream(scene, M, city.parcels); city.stream = stream; }
   addStreetTrees(city);
-  city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
+  if (!CYBER) city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
   const veg = buildVegetation(scene, city, T);
+  if (CYBER) nature = buildNature(scene, city, T, city.wild);
   const props = buildProps(scene, city, T);
   buildFurniture(scene, city, G);
   const street = buildStreet(scene, city); const shopSigns = buildShopSigns(scene, city);
+  if (CYBER) neon = buildNeon(scene, city);
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
 
   // v3.4 reflection probe: a cube capture of the city from over the bay, used as the env map of the building material so
@@ -94,18 +104,19 @@ async function load() {
     const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0);
   };
   const game = new Game({ renderer, scene, camera, env, city, G, T, props, Q, SNAP });
-  let hour = Q.has('hour') ? +Q.get('hour') : 18.3;
+  let hour = Q.has('hour') ? +Q.get('hour') : CYBER ? 21.6 : 18.3; // r6.0: 霓港 opens at night
   env.setHour(hour, true);
   probe.update(); probe.hour = hour;
 
   const W = window.__G = {
-    game, env, city, street, scene, camera, renderer, post, U, water, sprobe,
+    game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, stream, nature, neon,
+    streamSync(x, z) { if (!stream) return 0; const p = x === undefined ? camera.position : { x, z }; return stream.sync(p); },
     setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(); sprobe.t = 99; },
     photo(on = true, focus = 0, ap = 1.2) { post.dof = on ? 1 : 0; post.focus = focus || 6; post.aperture = ap; document.body.classList.toggle('photo', !!on); },
     get hour() { return hour; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
     render() { renderFrame(0); },
-    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length, chunks: { ...city.region.stats } }; },
+    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length, ...(CYBER ? { stream: stream.tris() } : { chunks: { ...city.region.stats } }) }; },
   };
 
   const clock = new THREE.Timer(); clock.connect?.(document);
@@ -120,11 +131,14 @@ async function load() {
     if (!noRender) renderFrame(dt);
   }
   function renderFrame(dt) {
+    if (CYBER) { stream.update(camera.position, 1); if (SNAP) stream.sync(camera.position); } // 霓港: detailed chunks before the mirror pass (wet-road / sea reflections)
     env.update(dt);
     water.update(scene);
     camera.updateMatrixWorld(); water.renderRefl(renderer, scene, camera);
-    city.region.update(camera.position, SNAP ? 99 : 1);
-    veg.update?.(camera.position); updateProps(props, camera, env.look.night, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
+    if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1);
+    veg.update?.(camera.position);
+    if (CYBER) { nature.update(camera.position); nature.frame(env, scene); neon.update(env.look.night, U.uTime.value); scene.fog.density = env.look.fogD * nature.fogMul(camera.position); }
+    updateProps(props, camera, env.look.night, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
     updateNeonLights(props, city.signs, camera.position, env.look.night);
     renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;

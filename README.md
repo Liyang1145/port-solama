@@ -2,6 +2,11 @@
 
 An original, realistic open-world WebGL2 game (three.js + esbuild), aiming for the cinematic look and the gameplay depth of modern open-world crime games set in a sunny Florida-style coastal city. All names, characters and assets are original or openly licensed — no Rockstar / GTA names, characters, logos or assets.
 
+**Two maps, one game (r6.0):** pick on the start menu (or `?map=gta` / `?map=cyber`):
+- **索拉纳港 PORT SOLANA** — realistic sun-belt bay city, realistic day and night (`src/maps/gta/`).
+- **霓港 NEOPORT** — original cyberpunk night city with holographic billboards, LED towers, rainforest and prairie (`src/maps/cyber/`).
+All gameplay systems (weapons, missions, police, vehicles, pedestrians, phone, economy, saves) are shared (`src/`); the map query API `src/mapapi.js` works for both maps.
+
 ![golden hour](docs/screenshots/golden.png)
 ![night](docs/screenshots/night.png)
 

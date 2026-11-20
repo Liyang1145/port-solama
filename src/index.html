@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>索拉纳港 · PORT SOLANA</title>
+<title>索拉纳港 / 霓港 · PORT SOLANA</title>
 <style>
 @font-face { font-family: 'Anton'; src: url('assets/Anton-Regular.ttf') format('truetype'), url('Anton-Regular.ttf') format('truetype'); font-display: block; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif; color: #fff; }
@@ -53,6 +53,16 @@ body.photo #hud { display: none !important; }
 #lbar { width: 320px; height: 4px; background: rgba(255,255,255,.15); border-radius: 2px; overflow: hidden; }
 #lbar i { display: block; height: 100%; width: 0; background: #fff; }
 #start { margin-top: 18px; padding: 10px 26px; border-radius: 22px; border: 0; background: #fff; color: #111; font-size: 16px; cursor: pointer; display: none; pointer-events: auto; }
+#maps { display: flex; gap: 22px; margin: 26px 0 10px; }
+.mcard { width: 250px; padding: 22px 20px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,.25); background: rgba(10,10,16,.55); color: #fff; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: 6px; font-family: inherit; transition: transform .15s, border-color .15s; }
+.mcard:hover { transform: translateY(-3px); border-color: #fff; }
+.mcard b { font-size: 26px; letter-spacing: 2px; }
+.mcard i { font-style: normal; font-family: 'Anton', Impact, sans-serif; font-size: 15px; letter-spacing: 3px; opacity: .75; }
+.mcard span { font-size: 13px; opacity: .8; }
+.mcard.gta { background: linear-gradient(160deg, rgba(255,170,110,.35), rgba(30,60,90,.6)); }
+.mcard.cy { background: linear-gradient(160deg, rgba(255,40,200,.38), rgba(20,200,255,.25) 60%, rgba(10,8,30,.7)); }
+#load.cy { background: #07060f radial-gradient(circle at 50% 120%, #29e3ff 0, #b51ee0 28%, #2a0f4a 58%, #07060f 82%); }
+#load.cy h1 { background: linear-gradient(#7ff3ff, #ff5fd2); -webkit-background-clip: text; color: transparent; }
 </style>
 </head>
 <body>
@@ -68,7 +78,34 @@ body.photo #hud { display: none !important; }
   <div id="msg"></div>
   <div id="big"></div>
 </div>
-<div id="load"><h1>PORT SOLANA</h1><p>索拉纳港 · 正在载入城市… <small style="opacity:.6">v4.3</small></p><div id="lbar"><i></i></div><button id="start">进入城市</button></div>
-<script type="module" src="main.js"></script>
+<div id="load"><h1 id="ttl">PORT SOLANA</h1><p id="lp">选择地图 <small style="opacity:.6">r6.0</small></p>
+  <div id="maps">
+    <button data-map="gta" class="mcard gta"><b>索拉纳港</b><i>PORT SOLANA</i><span>写实 · 海湾都市 · 昼夜</span></button>
+    <button data-map="cyber" class="mcard cy"><b>霓港</b><i>NEOPORT</i><span>赛博朋克 · 霓虹夜城 · 雨林草原</span></button>
+  </div>
+  <div id="lbar"><i></i></div><button id="start">进入城市</button></div>
+<!--GAMEJS-->
+<script>
+// r6.0 start menu: pick the map BEFORE the game bundle runs (?map=gta|cyber or #map= skip the menu; headless tests default to gta)
+(function () {
+  var q = new URLSearchParams(location.search); var m = q.get('map') || (location.hash.match(/map=(\w+)/) || [])[1];
+  if (!m && navigator.webdriver && !q.has('menu')) m = 'gta';
+  var L = document.getElementById('load');
+  function go(id) {
+    id = id === 'cyber' ? 'cyber' : 'gta'; window.__PS_MAP = id;
+    try { if (!q.get('map')) history.replaceState(null, '', location.pathname + location.search + '#map=' + id); } catch (e) { }
+    document.getElementById('maps').style.display = 'none'; document.getElementById('lbar').style.display = 'block';
+    document.getElementById('ttl').textContent = id === 'cyber' ? 'NEOPORT' : 'PORT SOLANA';
+    document.getElementById('lp').innerHTML = (id === 'cyber' ? '霓港 · 正在载入夜城…' : '索拉纳港 · 正在载入城市…') + ' <small style="opacity:.6">r6.0</small>';
+    if (id === 'cyber') L.classList.add('cy');
+    document.title = id === 'cyber' ? '霓港 · NEOPORT' : '索拉纳港 · PORT SOLANA';
+    var g = document.getElementById('gamejs'); var s = document.createElement('script');
+    if (g) s.text = g.textContent; else s.src = 'main.js';
+    document.body.appendChild(s);
+  }
+  window.__PS_GO = go;
+  if (m) go(m); else { document.getElementById('lbar').style.display = 'none'; Array.prototype.forEach.call(document.querySelectorAll('#maps button'), function (b) { b.onclick = function () { go(b.getAttribute('data-map')); }; }); }
+})();
+</script>
 </body>
 </html>

@@ -4,6 +4,7 @@
 //   Grade (procedural 3-D film LUT: golden-hour warm-orange highlights / teal shadows, night cyan-magenta; vignette,
 //   chromatic aberration, film grain) -> FXAA
 import * as THREE from 'three';
+import { CYBER } from './mapsel.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -167,11 +168,18 @@ function makeLUT(kind) {
       R = s(R); G = s(G); B = s(B);
       const l2 = 0.2126 * R + 0.7152 * G + 0.0722 * B; const k = 1.08; R = l2 + (R - l2) * k; G = l2 + (G - l2) * k; B = l2 + (B - l2) * k;
     } else {
-      const sh = 1 - sm(0.0, 0.35, l), hi = sm(0.5, 1.0, l), mid = 1 - Math.abs(l - 0.35) / 0.35;
-      R += -0.02 * sh + 0.03 * hi + 0.012 * Math.max(0, mid); G += 0.008 * sh + 0.01 * hi - 0.008 * Math.max(0, mid); B += 0.05 * sh - 0.02 * hi + 0.016 * Math.max(0, mid);
+      if (CYBER) { // r6.0 map 霓港 (v4.5 cyberpunk night): teal-cyan shadows, magenta mids, pink-violet highlights, neon hues pushed
+        const sh = 1 - sm(0.0, 0.35, l), hi = sm(0.5, 1.0, l), mid = Math.max(0, 1 - Math.abs(l - 0.35) / 0.35);
+        R += -0.025 * sh + 0.035 * hi + 0.035 * mid; G += 0.022 * sh + 0.0 * hi - 0.025 * mid; B += 0.065 * sh + 0.04 * hi + 0.03 * mid;
+        const mag = Math.max(0, 1 - Math.abs(hh - 315) / 45) * sat, cyn = Math.max(0, 1 - Math.abs(hh - 185) / 35) * sat, orn = Math.max(0, 1 - Math.abs(hh - 32) / 28) * sat;
+        R += mag * 0.06 - cyn * 0.05 - orn * 0.02; G += cyn * 0.03 - mag * 0.03; B += mag * 0.05 + cyn * 0.05 + orn * 0.03;
+      } else {
+        const sh = 1 - sm(0.0, 0.35, l), hi = sm(0.5, 1.0, l), mid = 1 - Math.abs(l - 0.35) / 0.35;
+        R += -0.02 * sh + 0.03 * hi + 0.012 * Math.max(0, mid); G += 0.008 * sh + 0.01 * hi - 0.008 * Math.max(0, mid); B += 0.05 * sh - 0.02 * hi + 0.016 * Math.max(0, mid);
+      }
       const s = (x) => { x = Math.min(1, Math.max(0, x)); return Math.pow(x, 1.12) * 0.99 + 0.006; };
       R = s(R); G = s(G); B = s(B);
-      const l2 = 0.2126 * R + 0.7152 * G + 0.0722 * B; const k = 1.2; R = l2 + (R - l2) * k; G = l2 + (G - l2) * k; B = l2 + (B - l2) * k;
+      const l2 = 0.2126 * R + 0.7152 * G + 0.0722 * B; const k = CYBER ? 1.32 : 1.2; R = l2 + (R - l2) * k; G = l2 + (G - l2) * k; B = l2 + (B - l2) * k;
     }
     const o = 4 * (r + g * N + b * N * N);
     data[o] = Math.round(Math.min(1, Math.max(0, R)) * 255); data[o + 1] = Math.round(Math.min(1, Math.max(0, G)) * 255); data[o + 2] = Math.round(Math.min(1, Math.max(0, B)) * 255); data[o + 3] = 255;
@@ -223,7 +231,7 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       lens.uniforms.uBlur.value = P.blur; lens.uniforms.uDof.value = P.dof; lens.uniforms.uFocus.value = P.focus; lens.uniforms.uAperture.value = P.aperture;
       // r5.0: the bloom threshold is in scene-linear HDR, but day exposure is ~0.5 -> sunlit sand/grass (~3-7) crossed 1.3 and the
       // whole frame glowed (noon beach / open-ground whiteout). Day threshold now tracks exposure; night stays as before.
-      bloom.strength = 0.22 + night * 0.26; bloom.threshold = THREE.MathUtils.lerp(7.5, 1.7, night); bloom.radius = 0.6;
+      bloom.strength = 0.22 + night * (CYBER ? 0.4 : 0.26); bloom.threshold = THREE.MathUtils.lerp(7.5, 1.7, night); bloom.radius = 0.6;
     },
     render() { composer.render(); },
   };

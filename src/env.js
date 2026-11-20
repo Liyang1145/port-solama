@@ -1,6 +1,7 @@
 // Sky (HDRI-derived panoramas blended over the day), sun + CSM shadows, height fog, IBL.
 import * as THREE from 'three';
 import { clamp, lerp, smooth } from './util.js';
+import { CYBER } from './mapsel.js';
 
 export const U = {
   uSunDir: { value: new THREE.Vector3(0, 1, 0) },
@@ -97,6 +98,8 @@ void main(){
     c *= mix(1.0, 0.78, el2 * blueK);
   }
   if (envMode > 0.5 && d.y < 0.0) c = mix(c, groundC, smoothstep(0.0, -0.15, d.y));
+  // v4.5 cyberpunk city glow: magenta light pollution hugging the horizon, cyan higher up
+${CYBER ? `if (uNightK > 0.0) { float yy = max(d.y, 0.0); c += uNightK * (vec3(0.50, 0.06, 0.40) * exp(-yy * 7.0) * 0.07 + vec3(0.04, 0.20, 0.30) * exp(-yy * 2.2) * 0.022); }` : ''}
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -104,7 +107,7 @@ void main(){
 
 // Time-of-day keyframes: hour -> look parameters
 // sky: [texA, texB, mix, scale]; sun color (linear, before intensity), sunI, envI, fog color, fog density, exposure
-const KEYS = [
+const KEYS_GTA = [
   { h: 0.0, sky: ['dusk', 'dusk', 0, 0.012], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.016, 0.019, 0.032], fogSun: [0, 0, 0], fogD: 0.0006, exp: 1.0, night: 1 },
   { h: 5.2, sky: ['dusk', 'dusk', 0, 0.016], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.018, 0.021, 0.036], fogSun: [0, 0, 0], fogD: 0.0006, exp: 1.0, night: 1 },
   { h: 6.3, sky: ['dusk', 'sunset', 0.6, 0.45], sun: [1.0, 0.45, 0.22], sunI: 0.8, envI: 0.8, fog: [0.42, 0.36, 0.40], fogSun: [0.9, 0.45, 0.2], fogD: 0.0006, exp: 0.95, night: 0.3 },
@@ -118,6 +121,22 @@ const KEYS = [
   { h: 21.3, sky: ['dusk', 'dusk', 0, 0.014], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.016, 0.018, 0.030], fogSun: [0, 0, 0], fogD: 0.0006, exp: 0.95, night: 1 },
   { h: 24.0, sky: ['dusk', 'dusk', 0, 0.012], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.016, 0.019, 0.032], fogSun: [0, 0, 0], fogD: 0.0006, exp: 1.0, night: 1 },
 ];
+// r6.0 map 霓港 (v4.5): violet night haze, slightly lower noon exposure
+const KEYS_CYBER = [
+  { h: 0.0, sky: ['dusk', 'dusk', 0, 0.012], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.034, 0.016, 0.050], fogSun: [0, 0, 0], fogD: 0.0009, exp: 1.0, night: 1 }, // v4.5 cyberpunk night: violet haze that the neon / beams light up
+  { h: 5.2, sky: ['dusk', 'dusk', 0, 0.016], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.030, 0.018, 0.048], fogSun: [0, 0, 0], fogD: 0.0009, exp: 1.0, night: 1 },
+  { h: 6.3, sky: ['dusk', 'sunset', 0.6, 0.45], sun: [1.0, 0.45, 0.22], sunI: 0.8, envI: 0.8, fog: [0.42, 0.36, 0.40], fogSun: [0.9, 0.45, 0.2], fogD: 0.0006, exp: 0.95, night: 0.3 },
+  { h: 7.2, sky: ['golden', 'golden', 0, 0.9], sun: [1.0, 0.66, 0.40], sunI: 6.0, envI: 0.6, fog: [0.78, 0.72, 0.74], fogSun: [0.7, 0.4, 0.2], fogD: 0.00032, exp: 0.56, night: 0 },
+  { h: 9.5, sky: ['day', 'day', 0, 1.0], sun: [1.0, 0.93, 0.83], sunI: 9.0, envI: 0.55, fog: [0.70, 0.82, 1.02], fogSun: [0.45, 0.38, 0.24], fogD: 0.00034, exp: 0.43, night: 0 }, // v4.5 deeper aerial perspective, slightly lower noon exposure (beach no longer glares)
+  { h: 15.5, sky: ['day', 'day', 0, 1.0], sun: [1.0, 0.91, 0.78], sunI: 9.0, envI: 0.55, fog: [0.74, 0.83, 1.0], fogSun: [0.65, 0.5, 0.28], fogD: 0.00034, exp: 0.46, night: 0 },
+  { h: 17.3, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.72, 0.44], sunI: 8.0, envI: 0.31, fog: [0.66, 0.68, 0.76], fogSun: [0.85, 0.48, 0.22], fogD: 0.00036, exp: 0.5, night: 0 }, // v4.4 higher sun:sky ratio + denser warm aerial perspective
+  { h: 18.7, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.56, 0.26], sunI: 7.4, envI: 0.28, fog: [0.60, 0.56, 0.64], fogSun: [1.05, 0.48, 0.18], fogD: 0.00044, exp: 0.52, night: 0 },
+  { h: 19.4, sky: ['sunset', 'sunset', 0, 0.9], sun: [1.0, 0.42, 0.22], sunI: 2.5, envI: 0.7, fog: [0.7, 0.48, 0.55], fogSun: [1.4, 0.55, 0.28], fogD: 0.0006, exp: 0.85, night: 0.2 },
+  { h: 20.2, sky: ['sunset', 'dusk', 0.6, 0.35], sun: [0.8, 0.5, 0.5], sunI: 0.15, envI: 0.65, fog: [0.12, 0.06, 0.15], fogSun: [0.15, 0.06, 0.05], fogD: 0.0007, exp: 1.12, night: 0.75 },
+  { h: 21.3, sky: ['dusk', 'dusk', 0, 0.014], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.034, 0.016, 0.050], fogSun: [0, 0, 0], fogD: 0.0009, exp: 0.95, night: 1 },
+  { h: 24.0, sky: ['dusk', 'dusk', 0, 0.012], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.034, 0.016, 0.050], fogSun: [0, 0, 0], fogD: 0.0009, exp: 1.0, night: 1 },
+];
+const KEYS = CYBER ? KEYS_CYBER : KEYS_GTA;
 const TEX_SUN_U = 0.6; // azimuth of the sun in all three source panoramas
 
 export class Env {
