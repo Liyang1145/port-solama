@@ -30,7 +30,7 @@ function heliMesh() {
 export class PoliceOps {
   constructor(game) {
     this.G = game; this.heli = null; this.blocks = []; this.blockT = 10; this.escT = 0; this.log = [];
-    this.spot = new THREE.SpotLight(0xdde8ff, 0, 120, 0.22, 0.5, 1.2); this.spot.castShadow = false; game.scene.add(this.spot); game.scene.add(this.spot.target);
+    this.spot = new THREE.SpotLight(0xdde8ff, 0, 140, 0.16, 0.6, 2.0); this.spot.castShadow = false; game.scene.add(this.spot); game.scene.add(this.spot.target);
   }
   spawnHeli() {
     const G = this.G; const m = heliMesh(); G.scene.add(m); G.scene.add(m.userData.cone); const P = G.P;
@@ -50,7 +50,7 @@ export class PoliceOps {
     h.spot.x += (sx - h.spot.x) * (1 - Math.exp(-1.6 * dt)); h.spot.z += (sz - h.spot.z) * (1 - Math.exp(-1.6 * dt));
     const cone = h.m.userData.cone; const from = new THREE.Vector3(h.x, h.y - 1.4, h.z); const to = new THREE.Vector3(h.spot.x, 0, h.spot.z); const L = from.distanceTo(to);
     cone.scale.set(1, L, 1); cone.position.copy(from).lerp(to, 0.5); cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), to.clone().sub(from).normalize());
-    this.spot.position.copy(from); this.spot.target.position.copy(to); this.spot.target.updateMatrixWorld(); this.spot.intensity = 3000 * (0.15 + U.uNight.value);
+    this.spot.position.copy(from); this.spot.target.position.copy(to); this.spot.target.updateMatrixWorld(); this.spot.intensity = 5200 * (0.1 + U.uNight.value); // v4.3: ~3 lux on the ground from 48 m (was a blown-out white disc)
     const lit = Math.hypot(P.pos.x - h.spot.x, P.pos.z - h.spot.z) < 7.5;
     return lit;
   }
@@ -68,6 +68,7 @@ export class PoliceOps {
   }
   update(dt, seen) {
     const G = this.G, P = G.P;
+    if (G.wanted === 0) this.escT = 0;
     // E2 escalation: resisting in plain view slowly raises the heat
     if (G.wanted > 0 && G.wanted < 5 && seen) { this.escT += dt; if (this.escT > 40 + G.wanted * 12) { this.escT = 0; G.wanted++; G.hud.msg('警方加强追捕 · 通缉 ' + G.wanted + ' 星', 2.5); G.sfx.alert?.(); this.log.push('escalate:' + G.wanted); } } else if (!seen) this.escT = Math.max(0, this.escT - dt * 0.5);
     // E3 road blocks

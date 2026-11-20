@@ -15,6 +15,12 @@ Everything shipped in `dist/` and where it comes from. Original game: no Rocksta
 | Traffic car bodies + wheels (v3.5) | procedural lofted bodies / lathe+extrude wheels (src/carbody.js, src/vehicles.js) — original designs | original | — |
 | Palms, broadleaf trees, frond / fan / bark textures (v3.5) | procedural geometry + canvas-generated textures (src/veg.js) | original | — |
 | Facade relief, balconies, canopies, rooftop equipment, Deco curves, kerbs (v3.5) | procedural geometry (src/city.js) | original | — |
+| Mission framework + 4 missions, valet job (v4.0/v4.3) | src/missions.js, src/mission.js — original missions, names and dialogue | original | — |
+| Weapons, weapon wheel, melee, cover (v4.3) | src/weapons.js — original implementation, generic weapon names, DOM/SVG UI | original | — |
+| Phone, shops, ATM, protagonists, street event, autosave (v4.3) | src/world.js — invented shop / character names (海岸枪械行、潮汐衣橱、马特奥、伊莎…) | original | — |
+| Police helicopter, road blocks, search zone (v4.3) | src/police.js — procedural low-poly helicopter | original | — |
+| Car radio stations (v4.3) | generative WebAudio patterns (src/sfx.js), invented station names | original | — |
+| Map additions: container yards, gantry cranes, marina piers + yachts, lighthouse, Ferris wheel, alleys (v4.3) | procedural geometry (src/city.js), layout in MAP_DESIGN.md / src/mapdata.js; map image tools/mapgen.cjs | original | — |
 | Anton-Regular.ttf | Google Fonts | Vernon Adams | SIL OFL 1.1 |
 | three.js, esbuild | npm | three.js authors / Evan Wallace | MIT |
 | Audio | synthesized at runtime (src/sfx.js) | original | — |

@@ -169,3 +169,25 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - 验证：build ok；shots/v40_r3 的 golden / detail / night / drive（960×540）都用 read_file 看过，没有过曝、全黑、PAGEERROR；sim（shots/v40_r3/sim）：开车 79 km/h，犯罪 → 3 星 → 4 辆警车出动，行人死亡动画正常；car_lineup 一块两次都 OOM（只影响近景截图，不影响逻辑）。
 - 发布：dist_single 24.7 MB，16:56 CST 发布到页面 96467e5f；副本 release/port-solana-v4.0.html。
 - (main agent 17:26 CST) v4.0 published 16:56 CST (release/port-solana-v4.0.html). v4.1 lighting (env.js/post.js) + unbuilt v4.2 edits (unlit shops not black, crowd 64→84) NOT verified/published. Next: review shots/v41 backlit + cu_*; node build.cjs; verify, plans/mission.json, plans/bounds.json; single.cjs; publish v4.1/4.2; fill SELFCHECK score table; update ROADMAP, CREDITS (mission.js original); copy best shots to shots/v4_best/. RUNNING.lock removed by main agent.
+
+## v4.2 — 2026-11-20 18:17 CST 发布（含 v4.1 光影）
+- 用户 17:44 改方向：取消赛博朋克夜景（以后单独做一张地图），本轮未改动任何夜景代码，夜景保持写实。
+- 验证：shots/v41（golden/detail/night/drive/backlit，v4.1 光影）+ shots/v42/golden.png（白天未亮灯店铺不再是黑块，对比 shots/v41/golden.png 左侧黑色卷帘块）+ shots/v42/sim（驾驶 79 km/h、3 星 4 辆警车、行人死亡）+ shots/v42/mission（代客泊车 $348 + 通缉失败分支），无 PAGEERROR。人群 84。
+- 工具：无头 Chromium 在完整画质下渲染即被全局 OOM 杀掉（container-server 常驻约 2.2 GB）；截图改用 `&lowshadow&probe=0` + `CAP=canvas`（只影响测试截图，发布版仍是完整画质）。tools/single.cjs 支持 `DIST=`/`OUT=`。
+- 发布：dist_single_v42 23.5 MB → 页面 96467e5f；副本 release/port-solana-v4.2.html；GitHub 同步 a92c00c。
+
+## v4.3 — 2026-11-20（GTA6 式玩法第 1 期 + 地图设计第 1 期）
+用户 17:44：「游戏内容玩法照着 gta6 来…这是个大工程」；17:48：「地图设计好。参考gta6」。总表 GAMEPLAY_PLAN.md，地图 MAP_DESIGN.md + shots/map/port_solana_map.png。
+- **武器（src/weapons.js）**：拳头、棒球棍、手枪、冲锋枪、霰弹枪（9 弹丸）、步枪；独立弹匣/备弹/射速/扩散/射程/换弹；数字键 1–6、滚轮、按住 Q 武器轮盘（25% 慢动作）；近战扇形判定；命中标记（爆头红叉）、受击硬直、后坐力；C 掩体（受击概率 ×0.35、相机降低）。
+- **武器店「海岸枪械行」**：E 打开菜单买枪/弹药/防弹衣，通缉中拒绝营业。
+- **任务（src/missions.js）**：地图字母标记 + 光柱起点、目标条、GPS、大字结算卡。夜班收银（持枪抢便利店 → 3 星 → 甩掉）、冷链急送（冷藏车限时送餐厅）、追债（撞停/打坏逃跑跑车后收钱）、码头火并（6 名持枪帮派成员）；代客泊车保留。
+- **开放世界（src/world.js）**：两家便利店店员可被持枪抢劫（瞄准 2.5 s）；ATM 存取款（现金/银行分开，死亡只扣现金）；服装店换衣清除"衣"证据并在搜索中降一星；修车坊修理/喷漆（降一星）；手机（↑/I）：任务导航、地图、联系人（技工送车、律师降星）、银行、资产、车行买车、电台；随机抢包贼事件；双主角马特奥/伊莎（Z 切换，各自现金、武器、通缉、位置）；体力（冲刺耗尽后需恢复到 25）；localStorage 自动存档。
+- **电台（src/sfx.js）**：三个原创生成式电台，开车时播放，句号键切台。
+- **警察（src/police.js + game.js）**：失去视线后去最后目击点搜索（增援也刷在那里），离开 95 m 红圈并躲够时间才消星，静止躲藏 1.5 倍速冷却；视线内抵抗按时间升星；3 星前方路口路障；4 星直升机 + 探照灯（照到即"被看见"）。
+- **地图第 1 期（src/city.js, src/mapdata.js）**：内侧街区中间 6 m 步行小巷；西南「南湾货运站」（冷库、装卸台、集装箱、龙门吊）和西北「北湾旧船坞」（集装箱迷宫、铁皮棚）；「鹈鹕游艇港」3 条可行走栈桥 + 游艇；南防波堤灯塔、北海滩摩天轮「海风之眼」；商店招牌和地面标记、ATM 机。
+- 实测：shots/v43/gp/{weapons,missions,phone,police}.json（数值见 SELFCHECK v4.3 证据）；回归 shots/v43/mission（代客泊车 $369）+ shots/v43/sim。
+- 本轮修的 bug：商店 B/服装店标记在建筑内；冷藏车刷在集装箱里；搜索中的警察可在最后目击点"逮捕"不在场的玩家；警察增援刷在玩家真实位置导致永远甩不掉；escT 跨通缉残留。
+- 截图（1280×720，`&lowshadow&probe=0` + CAP=canvas，均已人工检查）：shots/v43/heli.png（夜间直升机 + 探照灯，初版探照灯强度过高出现白斑 → 改为 decay 2、约 3 lux 后重拍）、gang.png（旧船坞火并；初版逆光发白 → 改 15:12 朝东重拍）、marina.png、gunshop.png、landmarks.png（摩天轮；正午沙滩偏亮，未选为最佳）。
+- 中途沙盒重启：/tmp 与 Playwright 浏览器被清空，重新安装 chromium-headless-shell 和系统依赖后继续。
+- 发布：dist_single 23.6 MB → 页面 96467e5f（18:59 CST）；副本 release/port-solana-v4.3.html。
+- 剩余短板：没有持枪/瞄准动画和手上武器模型；近战没有挥击动作；店铺没有室内；直升机不会开火；日光堤道/市中心未做；贴图和精细建模本轮未推进。

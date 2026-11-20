@@ -1,0 +1,7 @@
+{"query":"hour=17.8&ao=1&lowshadow&probe=0","shots":[
+{"name":"gang","js":"__G.setHour(17.6); const g=__G.game,M=g.missions; g.tp(12,340,Math.PI); __G.step(5); g.arsenal.give('rifle',90); g.arsenal.equip('rifle'); g.tp(10,322,0); g.cam.yaw=Math.PI+0.15; g.cam.pitch=-0.08; g.override={aim:true}; __G.step(40); [M.active&&M.active.id, M.stage, g.gang.filter(c=>!c.dead).length, g.state().health]"},
+{"name":"heli","js":"__G.setHour(20.6); const g=__G.game; g.override=null; g.wanted=0; for(const c of g.gang){c.hostile=false;} g.tp(283,100,Math.PI); __G.step(2); g.crime(4,'test'); __G.step(240); g.cam.yaw=0.2; g.cam.pitch=-0.42; __G.step(4); [g.state().heli, g.state().policeCars, g.state().roadblocks]"},
+{"name":"landmarks","js":"__G.setHour(18.4); const g=__G.game; g.wanted=0; __G.step(1); g.tp(300,250,0); __G.step(3); const c=__G.camera; c.position.set(298,5,230); c.lookAt(384,14,352); c.updateMatrixWorld(); 0"},
+{"name":"marina","js":"__G.setHour(17.9); const g=__G.game; g.tp(-24,10,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-15,4,-12); c.lookAt(-60,0,40); c.updateMatrixWorld(); 0"},
+{"name":"gunshop","js":"__G.setHour(16.5); const g=__G.game; g.tp(162,-108,0); __G.step(3); const c=__G.camera; c.position.set(167,2.2,-112); c.lookAt(158.5,2.6,-100); c.updateMatrixWorld(); 0"}
+]}

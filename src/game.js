@@ -170,7 +170,7 @@ export class Game {
     // dispatch
     if (this.policeCars.length < want && rng() < dt * 0.8) {
       const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
-      const v = this.traffic.spawnCar('police', P.pos, 70, 170, null);
+      const v = this.traffic.spawnCar('police', this.lostT > 1.5 && this.lastSeen ? this.lastSeen : P.pos, 70, 170, null); // v4.3: reinforcements go to the last sighting
       if (v) { v.siren = true; v.ai.mode = 'chase'; v.ai.chaseSpeed = 22 + this.wanted * 3; v.crew = 2; this.policeCars.push(v); }
     }
     // police cars: chase the player; stop and deploy officers when close

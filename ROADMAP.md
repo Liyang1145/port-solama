@@ -18,9 +18,16 @@ shots side by side with `ref/gta6/` stills.
 6. **Character animation set** — aim/fire for player & cops, hit reactions, enter/exit car, sprint, jump; skin/hair shading.
 7. **Night extras** — police light bars washing the street red/blue (real lights), lit billboards, tower window patterns.
 8. **Performance** — LOD/culling/texture streaming; target 60 fps mid GPUs (probe + more props cost draw calls).
-9. **Gameplay depth** — missions, shops (clothes change clears "衣" evidence), phone UI, radio, more weapons, melee, fuel.
+9. **Gameplay depth** — 第 1 期已在 v4.3 落地（见 GAMEPLAY_PLAN.md）。下一步第 2 期：持枪/瞄准动画、车上射击、燃油、特警/钉刺带、目击者报警、车辆起火爆炸。
+10. **Map phase 2** (MAP_DESIGN.md) — 日光堤道 + 灯塔小岛 + 加油站；椰影区彩色低层街区风格；船可驾驶。之后第 3 期湾对岸市中心 3 条街。
+11. **Cyberpunk night** — 用户 17:44 决定以后单独做一张地图，不放进本城。
 
 ## Done
+- v4.3 (2026-11-20): GTA6-style gameplay phase 1 — 6 weapons + wheel + melee + cover + gun shop; mission framework + 4 missions
+  (store hold-up, cold-chain delivery, debt chase, shipyard gang fight) + valet; phone, ATM/bank, clothes, body shop, car dealer,
+  radio, purse-snatcher event, two protagonists, stamina, autosave; police search zone, escalation, road blocks, helicopter.
+  Map phase 1: alleys, two container yards, marina piers + yachts, lighthouse, Ferris wheel, shop fronts (MAP_DESIGN.md).
+- v4.2 (2026-11-20): v4.1 lighting + unlit shops no longer black + crowd 84.
 - v3.4 (2026-11-20): GTA6 research doc + refs; neutral-filmic grade + Florida-blue sky; darker night with shop/neon/headlight light
   pools; GTA6-layout HUD (original styling); street clutter (utility poles + power lines, ~500 signs, shelters, boxes, drains);
   storefront interiors + 32 shop signs; bike lanes + lane arrows; +500 broadleaf trees; dense beach; tower-glass reflection probe;

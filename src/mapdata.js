@@ -5,9 +5,9 @@ export const POI = {
   gunshop: { x: 160.5, z: -100, name: '海岸枪械行', icon: '枪', col: '#e04a3a', face: 1 },
   stores: [
     { id: 'A', x: 59.5, z: 50, name: '椰林 24 小时', icon: '店', col: '#2f9e5b', face: -1 },
-    { id: 'B', x: 183.5, z: -225, name: '海风便利', icon: '店', col: '#2f9e5b', face: -1 },
+    { id: 'B', x: 179.5, z: -225, name: '海风便利', icon: '店', col: '#2f9e5b', face: -1 },
   ],
-  clothes: { x: 183.5, z: 100, name: '潮汐衣橱', icon: '衣', col: '#b04fc7', face: -1 },
+  clothes: { x: 179.5, z: 100, name: '潮汐衣橱', icon: '衣', col: '#b04fc7', face: -1 },
   modshop: { x: 57, z: -225, name: '快修车坊', icon: '修', col: '#3b7bd8', face: -1 },
   atms: [{ x: 160.5, z: -50 }, { x: 281, z: -30 }, { x: 59.5, z: 95 }],
   hospital: { x: 120, z: 75, yaw: Math.PI / 2, name: '海岸医疗中心' },
