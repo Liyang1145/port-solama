@@ -8,6 +8,7 @@ import { U } from './env.js';
 import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
 import { mulberry } from './util.js';
+import { CYBER } from './mapsel.js';
 
 const RH = LAYOUT.roadHW;
 const STREETS_Z = ['北滨路', '珊瑚街', '鹈鹕路', '海葡萄街', '第五大道', '棕榈巷', '日落街', '灯塔路', '贝壳街']; // EW roads by index
@@ -260,7 +261,7 @@ export function buildStreet(scene, city) {
 
 // ---------------- shop sign boards above every awning (dense, unique storefront signage — GTA6_REFERENCE §6)
 export function buildShopSigns(scene, city) {
-  const names = ['古巴咖啡馆', '海风冲浪店', '珍珠洗衣', '日落药房', '椰林便利店', '霓虹理发', '蓝鲸海鲜', '旧城当铺', '火烈鸟酒吧', '太阳眼镜屋', '比基尼精品', '老街雪茄',
+  const names = ['古巴咖啡馆', '海风冲浪店', '珍珠洗衣', '日落药房', '椰林便利店', CYBER ? '霓虹理发' : '海湾理发', /* r6.1 map A: no "neon" even in shop names */ '蓝鲸海鲜', '旧城当铺', '火烈鸟酒吧', '太阳眼镜屋', '比基尼精品', '老街雪茄',
     '24小时便利', '金沙珠宝', '冰淇淋工坊', '彩虹奶昔', '码头渔具', '热带果汁', '幸运彩票', '手机维修', '卷饼小站', '铁人健身', '美甲沙龙', '刺青工作室',
     '海盐面包房', '午夜唱片', '椰子按摩', '潮汐酒店', '白沙公寓', '星光影院', '粉红火烈鸟', '小哈瓦那'];
   const sub = ['CAFE', 'SURF', 'LAUNDRY', 'PHARMACY', 'MARKET', 'BARBER', 'SEAFOOD', 'PAWN', 'BAR', 'OPTICS', 'BOUTIQUE', 'CIGARS', 'OPEN 24H', 'JEWELRY', 'GELATO', 'SMOOTHIE',

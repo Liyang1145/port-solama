@@ -560,7 +560,8 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   const wall = pick(PASTEL); const accent = pick(ACCENT);
   const seed = rand(0, 99);
   const frontX = facing > 0 ? x1 : x0;
-  const up = small ? [0, 0, 0] : pick(NEON).map((v) => v * 0.6 + 0.15);
+  const up0 = small ? null : pick(NEON); const upK = (seed * 7.31) % 1; // (pick kept so the layout RNG sequence is unchanged)
+  const up = !up0 || upK < 0.35 ? [0, 0, 0] : [0.62, 0.47, 0.30].map((v) => v * (0.55 + 0.35 * upK)); void up0; // r6.1 warm halogen façade floodlights (no coloured neon wash on 索拉纳港)
   const dStyle = rng() < 0.5 ? 5 : 2, dWw = rand(2.6, 3.6);
   const R = (z1 - z0 > 14 && rng() < (small ? 0.35 : 0.7)) ? Math.min(3.2, (z1 - z0) / 5) : 0;
   const poly = R ? roundFront(x0, z0, x1, z1, facing, R) : rect(x0, z0, x1, z1);
@@ -587,23 +588,23 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   for (const zz of [z0 + 0.6 + R * 0.4, z1 - 0.6 - R * 0.4]) { const pxa = s > 0 ? fx - 1.6 - R * 0.3 : fx + 0.2 + R * 0.3; box(tb, pxa, top + 1.2, zz - 0.5, pxa + 1.4, top + 1.9, zz + 0.5, {}, lighter); box(tb, pxa + 0.25, top + 1.9, zz - 0.3, pxa + 1.15, top + 2.4, zz + 0.3, {}, accent); }
   // accent stripes on the parapet front
   for (const yy of [top + 0.45, top + 0.8]) ledge(tb, fpts.slice(1, -1), false, -0.01, 0.08, yy, yy + 0.12, accent);
-  // neon tubes: under the cornice + along the top eyebrow (iconic night look)
-  const neon = W.b('neon', frontX, (z0 + z1) / 2); const nc = pick(NEON);
-  const nx = s > 0 ? fx + 0.33 : fx - 0.33;
-  ledge(neon, fpts.slice(1, -1), false, 0.29, 0.37, top - 0.32, top - 0.24, nc); void nx;
-  if (floors > 2) { const y = 0.15 + ground + (floors - 2) * fh + fh * 0.86 - 0.08; ledge(neon, fpts, false, 0.74, 0.82, y, y + 0.07, nc); }
+  // r6.1: painted Deco accent bands where v4.x had neon tubes (map A is strictly non-neon): a slim colour band under the
+  // cornice + a pin-stripe along the top eyebrow, both plain painted stucco (lit only by the warm façade floodlights at night)
+  const nx = s > 0 ? fx + 0.33 : fx - 0.33; void nx; void pick(NEON); // (RNG sequence kept)
+  ledge(tb, fpts.slice(1, -1), false, 0.29, 0.37, top - 0.34, top - 0.22, accent);
+  if (floors > 2) { const y = 0.15 + ground + (floors - 2) * fh + fh * 0.86 - 0.08; ledge(tb, fpts, false, 0.74, 0.82, y, y + 0.07, accent); }
   // central pylon / fin rising above the roof
   const zc = (z0 + z1) / 2; const pw = rand(2.2, 3.4); const ph = rand(3.5, 8);
   if (!small || rng() < 0.4) {
     if (s > 0) box(tb, fx - 1.5, 0.15 + ground, zc - pw / 2, fx + 0.9, top + ph, zc + pw / 2, {}, lighter);
     else box(tb, fx - 0.9, 0.15 + ground, zc - pw / 2, fx + 1.5, top + ph, zc + pw / 2, {}, lighter);
-    // neon edges on the pylon
-    const pxF = s > 0 ? fx + 0.93 : fx - 0.93; const nc2 = pick(NEON);
-    for (const zz of [zc - pw / 2 - 0.03, zc + pw / 2 + 0.03]) box(neon, pxF - 0.04, 0.15 + ground + 0.5, zz - 0.04, pxF + 0.04, top + ph, zz + 0.04, {}, nc2);
+    // r6.1: painted accent edges on the pylon (were neon tubes)
+    const pxF = s > 0 ? fx + 0.93 : fx - 0.93; void pick(NEON); // (RNG sequence kept)
+    for (const zz of [zc - pw / 2 - 0.03, zc + pw / 2 + 0.03]) box(tb, pxF - 0.05, 0.15 + ground + 0.5, zz - 0.05, pxF + 0.05, top + ph, zz + 0.05, {}, accent);
     // stepped crown
     box(tb, (s > 0 ? fx - 1.2 : fx - 0.6), top + ph, zc - pw / 2 + 0.3, (s > 0 ? fx + 0.6 : fx + 1.2), top + ph + 1.2, zc + pw / 2 - 0.3, {}, accent);
     // vertical sign on the pylon
-    signs.push({ x: fx + s * 0.95, y: 0.15 + ground + (top + ph - ground) * 0.5, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: pw * 0.8, h: Math.min(10, (top + ph - ground - 1) * 0.8), vertical: true, color: pick(['#ff5fa2', '#59f3ff', '#ffb347', '#b78cff', '#ff6f61', '#7dffb2']) });
+    signs.push({ x: fx + s * 0.95, y: 0.15 + ground + (top + ph - ground) * 0.5, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: pw * 0.8, h: Math.min(10, (top + ph - ground - 1) * 0.8), vertical: true, color: pick(['#ffd49a', '#ffc77e', '#ffe2b8']) }); // r6.1 warm incandescent letters
   }
   // awnings over storefront + cafe umbrellas on the sidewalk (front only)
   if (!small) {
@@ -611,7 +612,7 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     const yA = 0.15 + ground - 0.3;
     awnings.push({ x0: fx, z0: z0 + 1, z1: z1 - 1, y: yA, out: 2.2 * s, color: aw });
     // horizontal name sign above awning
-    signs.push({ x: fx + s * 0.06, y: yA + 0.75, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: Math.min(14, z1 - z0 - 4), h: 1.1, vertical: false, color: pick(['#ff5fa2', '#59f3ff', '#ffe6a0', '#b78cff']) });
+    signs.push({ x: fx + s * 0.06, y: yA + 0.75, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: Math.min(14, z1 - z0 - 4), h: 1.1, vertical: false, color: pick(['#ffd49a', '#ffe2b8', '#ffc77e']) });
   }
 }
 
@@ -669,7 +670,7 @@ function downtownBlock(ctx, b, palms, trees) {
     const tw = Math.min(pw - 8, rand(26, 44)), td = Math.min(pd - 8, rand(26, 44));
     const tx0 = cx - tw / 2, tx1 = cx + tw / 2, tz0 = cz - td / 2, tz1 = cz + td / 2;
     rooftop(ctx, x0 + 1, z0 + 1, x1 - 1, z1 - 1, podH, 'pod', [[tx0 - 2, tz0 - 2, tx1 + 2, tz1 + 2]]);
-    const lightCol = pick([[0.9, 0.95, 1.0], [0.3, 0.8, 1.0], [1.0, 0.35, 0.8], [0.7, 0.5, 1.0], [1.0, 0.85, 0.6]]);
+    const lightCol = pick([[0.62, 0.6, 0.56], [0.7, 0.6, 0.45]]); // r6.1 plain white / warm crown floodlights (no coloured LED crowns on 索拉纳港)
     if (kind < 0.3) { // glass curtain-wall tower, chamfered, setback, vertical fins
       const glass = pick(GLASS); const ch = rng() < 0.6 ? rand(2, 6) : 0;
       const poly = ch ? chamfer(tx0, tz0, tx1, tz1, ch) : rect(tx0, tz0, tx1, tz1);
@@ -782,7 +783,7 @@ function districtEdges(ctx, deco) {
 // (no relief, no colliders, no roofs clutter) — the whole skyline costs a few thousand triangles.
 function skyline(ctx) {
   const glassT = [[0.10, 0.20, 0.24], [0.16, 0.24, 0.30], [0.22, 0.26, 0.28], [0.12, 0.18, 0.22]];
-  const lightCols = [[0.9, 0.95, 1.0], [0.3, 0.8, 1.0], [1.0, 0.35, 0.8], [0.7, 0.5, 1.0], [1.0, 0.85, 0.6]];
+  const lightCols = [[0.62, 0.6, 0.56], [0.7, 0.6, 0.45]];
   const tower = (cx, cz, w, d, h, kind) => {
     const opt = { collide: false, relief: false };
     ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); // r5.0: the far skyline is reachable now (causeway / island ends)
@@ -891,7 +892,7 @@ function landmarks(ctx) {
   { const x = 384, z = 352, R = 16, H = R + 3; const v = W.b('vcol', x, z); const n = W.b('neon', x, z);
     for (const sz of [-1.2, 1.2]) {
       const rim = new THREE.TorusGeometry(R, 0.22, 6, 64); gput(v, rim, x, H, z + sz, [0.95, 0.95, 0.95]);
-      const rim2 = new THREE.TorusGeometry(R + 0.35, 0.07, 4, 64); gput(n, rim2, x, H, z + sz, [1.0, 0.45, 0.7]);
+      const rim2 = new THREE.TorusGeometry(R + 0.35, 0.07, 4, 64); gput(n, rim2, x, H, z + sz, [0.9, 0.72, 0.45]); // r6.1 warm bulb ring
       for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.07, 0.07, R, 4); sp.translate(0, R / 2, 0); sp.rotateZ(a); gput(v, sp, x, H, z + sz, [0.9, 0.9, 0.9]); }
       for (const dx of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.3, 0.45, Math.hypot(H, R * 0.55), 6); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, Math.hypot(H, R * 0.55) / 2, 0); leg.rotateZ(ang); gput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
     }

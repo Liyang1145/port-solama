@@ -1,0 +1,38 @@
+{
+"query": "map=cyber&hour=15.5&lowshadow&probe=0",
+"shots": [
+{
+"name": "rf2",
+"js": "__G.setHour(10.5); const g=__G.game; g.tp(-2600,2950,0); __G.step(3); const c=__G.camera; const y=__G.city.groundH(-2600,2950); c.position.set(-2600,y+1.7,2950); c.lookAt(-2660,y+5,3010); c.updateMatrixWorld(); __G.nature.update(c.position,true); __G.nature.stats"
+},
+{
+"name": "rf2_noao",
+"js": "__G.post.gtao.blendIntensity=0; 0"
+},
+{
+"name": "rf2_norock",
+"js": "__G.post.gtao.blendIntensity=1; __G.nature.meshes.forEach(m=>{ if (m.geometry && m.geometry.type==='IcosahedronGeometry') m.visible=false }); 0"
+},
+{
+"name": "rf2_info",
+"noshot": true,
+"js": "__G.nature.meshes.forEach(m=>{ if (m.geometry && m.geometry.type==='IcosahedronGeometry') m.visible=true }); const c=__G.camera; const r=[]; __G.nature.meshes.forEach(m=>{ if (m.geometry && m.geometry.type==='IcosahedronGeometry') r.push(m.count) }); [__G.scene.environmentIntensity, __G.renderer.toneMappingExposure, r]"
+},
+{
+"name": "falls_close",
+"js": "__G.setHour(14.0); const g=__G.game; g.tp(-2470,3010,0); __G.step(3); const c=__G.camera; c.position.set(-2457,__G.city.groundH(-2457,3072)+2.2,3072); c.lookAt(-2470,13,3110); c.updateMatrixWorld(); __G.nature.update(c.position,true); __G.nature.stats"
+},
+{
+"name": "rainforest",
+"js": "__G.setHour(11.0); const g=__G.game; g.tp(-2560,2900,0); __G.step(3); const c=__G.camera; const y=__G.city.groundH(-2560,2900); c.position.set(-2560,y+1.7,2900); c.lookAt(-2520,y+4,2990); c.updateMatrixWorld(); __G.nature.update(c.position,true); __G.nature.stats"
+},
+{
+"name": "night_street",
+"js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); 0"
+},
+{
+"name": "day_street",
+"js": "__G.setHour(13.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); 0"
+}
+]
+}

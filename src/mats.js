@@ -58,6 +58,15 @@ vec3 wall = vCol;
 vec4 texelColor = texture2D(map, vMapUv);
 vec3 baseTex = texelColor.rgb / 0.82;
 vec3 conc = baseTex;
+// r6.1 tangent frame from screen derivatives (window recess parallax)
+vec3 rP_ = vWPb; vec3 rdp1 = dFdx(rP_), rdp2 = dFdy(rP_); vec2 rdu1 = dFdx(vUvM), rdu2 = dFdy(vUvM);
+vec3 rNg = normalize(cross(rdp1, rdp2) + 1e-7); if (dot(rNg, cameraPosition - rP_) < 0.0) rNg = -rNg;
+vec3 rd2p = cross(rdp2, rNg), rd1p = cross(rNg, rdp1);
+vec3 rTt = normalize(rd2p * rdu1.x + rd1p * rdu2.x + 1e-6), rBt = normalize(rd2p * rdu1.y + rd1p * rdu2.y + 1e-6);
+vec3 rV = normalize(rP_ - cameraPosition);
+vec3 vt_ = vec3(dot(rV, rTt), dot(rV, rBt), max(dot(rV, -rNg), 0.08));
+float reveal = 0.0, revealK = 1.0;
+float age = fract(seed * 0.618 + 0.13); // per-building age: grime, bleaching, streak strength
 if (style == 0.0) { // curtain wall: glass with thin metal mullions + spandrel bands
   float mx = 1.0 - step(0.03, f.x) * step(f.x, 0.97);
   float my = 1.0 - step(0.035, f.y) * step(f.y, 0.985);
@@ -73,9 +82,17 @@ if (style == 0.0) { // curtain wall: glass with thin metal mullions + spandrel b
 } else if (style == 2.0 || style == 5.0) { // punched / ribbon windows in stucco
   float x0 = style == 5.0 ? 0.0 : 0.2; float x1 = style == 5.0 ? 1.0 : 0.8;
   float wx = step(x0, f.x) * step(f.x, x1); float wy = step(0.28, f.y) * step(f.y, 0.80);
-  float inner = step(x0 + 0.03, f.x) * step(f.x, x1 - 0.03) * step(0.31, f.y) * step(f.y, 0.77);
-  isGlass = inner; frame = wx * wy * (1.0 - inner);
-  if (style == 5.0) { float mul = 1.0 - step(0.02, fract(f.x * 3.0)) * step(fract(f.x * 3.0), 0.98); frame = max(frame, mul * wx * wy); isGlass *= 1.0 - mul; }
+  // r6.1 recessed openings: march the view ray D metres into the wall; outside the opening at that depth it hits the reveal
+  // (jamb / head soffit / sill) instead of the frame + glass, so windows read as holes in a thick wall at any angle
+  float open_ = wx * wy; float Dr = style == 5.0 ? 0.13 : 0.21;
+  vec2 g = f + vt_.xy * (Dr / vt_.z) / vec2(ww, fh) * open_;
+  if (style == 5.0) g.x = clamp(g.x, 0.0, 1.0);
+  float gin = step(x0, g.x) * step(g.x, x1) * step(0.28, g.y) * step(g.y, 0.80);
+  reveal = open_ * (1.0 - gin); revealK = g.y > 0.80 ? 0.40 : (g.y < 0.28 ? 1.02 : 0.72);
+  f = mix(f, g, open_ * gin);
+  float inner = step(x0 + 0.03, f.x) * step(f.x, x1 - 0.03) * step(0.31, f.y) * step(f.y, 0.77) * (1.0 - reveal);
+  isGlass = inner; frame = wx * wy * (1.0 - inner) * (1.0 - reveal);
+  if (style == 5.0) { float mul = 1.0 - step(0.02, fract(f.x * 3.0)) * step(fract(f.x * 3.0), 0.98); frame = max(frame, mul * wx * wy * (1.0 - reveal)); isGlass *= 1.0 - mul; }
   else { float sash = inner * max(step(abs(f.x - 0.5), 0.011), step(abs(f.y - 0.555), 0.010)); frame = max(frame, sash); isGlass *= 1.0 - sash; } // v4.1 casement mullion + meeting rail
   // reveal shadow under the eyebrow
   shade = 1.0 - 0.35 * step(0.80, f.y) * step(f.y, 0.86) * wx;
@@ -98,37 +115,52 @@ if (style == 0.0) { // curtain wall: glass with thin metal mullions + spandrel b
 }
 // weathering / dirt streaks at the bottom of walls and under windows
 float grime = vnoise(vec2(vUvM.x * 0.7, vUvM.y * 0.08 + seed)) * 0.07 + smoothstep(2.0, 0.0, vUvM.y) * 0.08;
-${CYBER ? `// v4.5 material layering: rain streaks running down from each sill, splash-back plinth, patchy repaint / sun bleaching,
-// concrete patches showing through the stucco, a projecting sill with its own drop shadow
+// r6.1 material layering on both maps (the v4.5 霓港 layer generalised): water streaks running down from each sill,
+// splash-back plinth, macro repaint / sun-bleach variation, per-building age, concrete patches, projecting sill + drop shadow
 float streak = 0.0, sill = 0.0, sillSh = 0.0;
+float sn0 = vnoise(vec2(vUvM.x * 9.0, cid.y * 3.1 + seed)) * 0.6 + vnoise(vec2(vUvM.x * 23.0, seed)) * 0.4;
 if (style == 2.0 || style == 5.0) {
   float x0s = style == 5.0 ? 0.0 : 0.2; float x1s = style == 5.0 ? 1.0 : 0.8;
-  float inCol = step(x0s + 0.02, f.x) * step(f.x, x1s - 0.02);
-  float sn = vnoise(vec2(vUvM.x * 9.0, cid.y * 3.1 + seed)) * 0.6 + vnoise(vec2(vUvM.x * 23.0, seed)) * 0.4;
-  streak = inCol * smoothstep(0.28, 0.0, f.y) * smoothstep(0.45, 0.8, sn) * 0.22;
-  sill = step(x0s - 0.04, f.x) * step(f.x, x1s + 0.04) * step(0.245, f.y) * step(f.y, 0.28);
-  sillSh = step(x0s - 0.03, f.x) * step(f.x, x1s + 0.03) * smoothstep(0.245, 0.225, f.y) * step(0.19, f.y);
+  float fx_ = fract(cf.x), fy_ = fract(cf.y);
+  float inCol = step(x0s + 0.02, fx_) * step(fx_, x1s - 0.02);
+  streak = inCol * smoothstep(0.28, 0.0, fy_) * smoothstep(0.45, 0.8, sn0) * ${CYBER ? '0.26' : '0.15'} * (0.5 + age);
+  sill = step(x0s - 0.04, fx_) * step(fx_, x1s + 0.04) * step(0.245, fy_) * step(fy_, 0.28);
+  sillSh = step(x0s - 0.03, fx_) * step(fx_, x1s + 0.03) * smoothstep(0.245, 0.225, fy_) * step(0.19, fy_);
 }
+// long run-off streaks below the parapet / every few floors (stronger on 霓港's rain-soaked concrete)
+float roofStreak = smoothstep(0.55, 0.85, vnoise(vec2(vUvM.x * 1.3, seed * 2.0)) * 0.7 + vnoise(vec2(vUvM.x * 5.1, vUvM.y * 0.05)) * 0.3) * (style == 3.0 || style == 4.0 ? 0.0 : 1.0);
 float macro = vnoise(vUvM * vec2(0.09, 0.05) + seed * 1.7);
-float plinth = smoothstep(0.9, 0.0, vUvM.y);
+float micro = vnoise(vUvM * vec2(1.9, 2.3) + seed) * 0.6 + vnoise(vUvM * 7.0) * 0.4;
+float plinth = smoothstep(${CYBER ? '1.1' : '0.75'}, 0.0, vUvM.y) * (0.6 + 0.4 * vnoise(vec2(vUvM.x * 2.0, seed)));
 vec3 concP = texture2D(tConc, vUvM * 0.21).rgb * vec3(0.95, 0.93, 0.9);
 float patchC = smoothstep(0.66, 0.72, vnoise(vUvM * 0.33 + seed * 5.0)) * step(style, 2.5) * step(1.5, style);
-` : ``}vec3 wallCol = baseTex * min(wall, vec3(0.9)) * 0.9 * (1.0 - grime) * shade; // v4.0: stucco albedo capped (sunlit walls no longer clip)
-${CYBER ? `wallCol *= (0.9 + 0.2 * macro) * (1.0 - streak) * (1.0 - plinth * 0.22) * (1.0 - sillSh * 0.3);
-wallCol = mix(wallCol, concP * 0.8, patchC * 0.55);
+vec3 wallCol = baseTex * min(wall, vec3(0.9)) * 0.9 * (1.0 - grime) * shade; // v4.0: stucco albedo capped (sunlit walls no longer clip)
+wallCol *= (0.9 + 0.2 * macro) * (0.95 + 0.1 * micro) * (1.0 - streak) * (1.0 - plinth * ${CYBER ? '0.30' : '0.20'}) * (1.0 - sillSh * 0.3);
+${CYBER ? `wallCol *= 1.0 - roofStreak * smoothstep(30.0, 6.0, mod(vUvM.y, 36.0)) * 0.18 * (0.4 + age); // rain run-off
+wallCol = mix(wallCol, concP * 0.8, patchC * 0.55);` : `// 索拉纳港: sun-bleached stucco (paler + less saturated high up and on old buildings), warm dust at the foot
+{ float lumW = dot(wallCol, vec3(0.299, 0.587, 0.114)); float bleach = (0.15 + 0.35 * age) * smoothstep(3.0, 18.0, vUvM.y) * (0.6 + 0.4 * macro);
+  wallCol = mix(wallCol, vec3(lumW) * vec3(1.06, 1.04, 1.0), bleach * 0.45);
+  wallCol = mix(wallCol, wallCol * vec3(0.86, 0.80, 0.72), plinth * 0.5);
+  wallCol *= 1.0 - roofStreak * smoothstep(14.0, 4.0, mod(vUvM.y, 18.0)) * 0.07 * age;
+  wallCol = mix(wallCol, concP * vec3(0.95, 0.92, 0.86), patchC * 0.25 * age); }`}
 wallCol = mix(wallCol, vec3(0.86, 0.85, 0.82) * baseTex, sill * 0.85);
-` : ``}vec3 frameCol = style == 0.0 || style == 3.0 ? vec3(0.06, 0.065, 0.07) + wall * 0.15 : vec3(0.85, 0.85, 0.82);
+vec3 frameCol = style == 0.0 || style == 3.0 ? vec3(0.06, 0.065, 0.07) + wall * 0.15 : vec3(0.85, 0.85, 0.82);
 // interiors behind glass: blinds / curtains for residential windows
 float blind = (style == 2.0 || style == 5.0 || style == 1.0) ? step(1.0 - fract(f.y * 1.0 + 0.0), 0.0) : 0.0;
 float bl = (style == 2.0 || style == 5.0 || style == 1.0) ? step(0.55, rnd2) * step(mix(0.55, 0.95, rnd), f.y) : 0.0;
 vec3 glassCol = vGlass * (0.8 + 0.4 * rnd2);
+float gEdge = 1.0 - smoothstep(0.0, 0.09, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)) * 1.6); // dust at the pane edges
+float gDirt = gEdge * 0.5 + smoothstep(0.55, 0.9, vnoise(vUvM * 3.1 + seed)) * 0.25;
+glassCol = mix(glassCol, glassCol * vec3(1.05, 1.0, 0.92) + 0.015, gDirt * 0.5);
 glassCol *= 1.0 - 0.45 * smoothstep(0.70, 0.77, f.y) * step(1.5, style) * step(style, 2.5); // reveal shadow under the lintel
 glassCol = mix(glassCol, vec3(0.55, 0.52, 0.47), bl * 0.8);
 // fade the procedural grid to its average when it gets smaller than a pixel (prevents moire)
 vec2 fw = fwidth(cf); float aa = smoothstep(0.18, 0.6, max(fw.x, fw.y));
 float avgG = style == 0.0 ? 0.80 : (style == 1.0 ? 0.76 : (style == 5.0 ? 0.48 : (style == 3.0 ? 0.70 : (style == 2.0 ? 0.22 : 0.0))));
 isGlass = mix(isGlass, avgG, aa); frame = mix(frame, (1.0 - avgG) * (style == 2.0 || style == 5.0 ? 0.15 : 0.7), aa); shade = mix(shade, 1.0, aa); bl *= 1.0 - aa;
+frameCol *= 0.88 + 0.24 * vnoise(vUvM * vec2(13.0, 17.0) + seed); // r6.1 paint wear / dirt on frames
 vec3 col = mix(wallCol, frameCol, frame);
+reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
 col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
@@ -138,8 +170,10 @@ lit = max(lit, step(rnd, litChance));
       .replace('#include <roughnessmap_fragment>', `
 float roughnessFactor = roughness;
 vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );
-roughnessFactor *= mix(texelRoughness.g * 0.9 + 0.1, 0.35, frame);
-roughnessFactor = mix(roughnessFactor, mix(0.02 + 0.06 * rnd2, 0.6, bl), isGlass);
+roughnessFactor *= mix(texelRoughness.g * 0.9 + 0.1, 0.35 + 0.2 * micro, frame);
+roughnessFactor *= 0.9 + 0.2 * micro;
+${CYBER ? `roughnessFactor = mix(roughnessFactor, 0.32, clamp(streak * 3.0 + roofStreak * 0.5 + plinth * 0.6, 0.0, 1.0) * (0.35 + 0.65 * uNight)); // wet run-off / splash zone` : ``}
+roughnessFactor = mix(roughnessFactor, mix(0.02 + 0.06 * rnd2 + gDirt * 0.25, 0.6, bl), isGlass);
 `)
       .replace('#include <metalnessmap_fragment>', `
 float metalnessFactor = mix(isMetal * 0.7, (style == 0.0 ? 0.9 : (style == 3.0 ? 0.45 : 0.6)) * (1.0 - bl), isGlass);
@@ -147,8 +181,23 @@ float metalnessFactor = mix(isMetal * 0.7, (style == 0.0 ? 0.9 : (style == 3.0 ?
       .replace('#include <normal_fragment_maps>', `
 #include <normal_fragment_maps>
 normal = normalize(mix(normal, nonPerturbedNormal, max(isGlass, frame)));
-normal = normalize(normal + vec3((rnd - 0.5) * 0.045, (rnd2 - 0.5) * 0.03, 0.0) * isGlass);
+// r6.1 procedural relief on the wall: trowelled stucco (索拉纳港) / board-formed concrete with tie holes (霓港), fades out with distance
+{ float wallOnly = (1.0 - isGlass) * (1.0 - frame) * (1.0 - reveal) * (1.0 - aa);
+${CYBER ? `  float hb = (vnoise(vUvM * vec2(3.0, 1.2) + seed) * 0.5 + vnoise(vUvM * 9.0) * 0.25) * 0.006 - smoothstep(0.035, 0.0, abs(fract(vUvM.y / 1.2) - 0.5) - 0.465) * 0.004
+           - smoothstep(0.06, 0.0, length(fract(vUvM / vec2(0.9, 0.6)) - 0.5)) * 0.003;` : `  float hb = (vnoise(vUvM * vec2(2.3, 2.9) + seed) * 0.55 + vnoise(vUvM * 8.5 + 3.0) * 0.3 + vnoise(vUvM * 23.0) * 0.15) * 0.007;`}
+  hb *= wallOnly;
+  vec2 dH = vec2(dFdx(hb), dFdy(hb));
+  vec3 sX = dFdx(-vViewPosition), sY = dFdy(-vViewPosition); vec3 R1 = cross(sY, normal), R2 = cross(normal, sX);
+  float fDet = dot(sX, R1) * faceDirection; vec3 vGrad = sign(fDet) * (dH.x * R1 + dH.y * R2);
+  normal = normalize(abs(fDet) * normal - vGrad); }
+// per-pane tilt: neighbouring panes reflect slightly different parts of the sky/street (real glazing is never perfectly flat)
+normal = normalize(normal + vec3((rnd - 0.5) * 0.06 + (vnoise(vUvM * 0.7) - 0.5) * 0.02, (rnd2 - 0.5) * 0.04, 0.0) * isGlass);
 `)
+      .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+{ // r6.1 ambient occlusion on the indirect light only: wall foot, recess reveals, under sills (sunlit faces keep their direct light)
+  float aoB = mix(0.50, 1.0, smoothstep(0.1, 2.4, vUvM.y)) * (1.0 - reveal * 0.45) * (1.0 - sillSh * 0.35);
+  reflectedLight.indirectDiffuse *= aoB; reflectedLight.indirectSpecular *= mix(1.0, aoB, 0.7);
+}`)
       .replace('#include <emissivemap_fragment>', `
 #include <emissivemap_fragment>
 {
@@ -174,6 +223,31 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
     room = wallC * mix(0.40, 0.2, uNight) * depthF + shelfBand * (1.0 - aisle) * (goods * item * 0.75 + shelfLine * 0.28)
          + vec3(1.0, 0.98, 0.92) * troffer * 1.1 + vec3(0.9, 0.85, 0.78) * step(f.y, 0.2) * aisle * 0.3;
     room *= mix(vec3(1.0), warm, 0.45);
+    // r6.1 not every shop is a grocery: per-shop interior type (2-bay units) -> café / boutique / office as well
+    float stype = floor(h12(vec2(seed * 3.7, floor(cid.x * 0.5))) * 4.0);
+    if (stype == 1.0) { // café / restaurant: warm darker room, table + chair silhouettes, pendant lamps, a counter at the back
+      vec3 wc = vec3(0.55, 0.38, 0.26) * (0.8 + 0.4 * rnd2);
+      float tx = fract(vUvM.x * 0.55); float table = step(0.28, f.y) * step(f.y, 0.31) * step(0.2, tx) * step(tx, 0.62) + step(f.y, 0.29) * step(abs(tx - 0.41), 0.02);
+      float chair = step(f.y, 0.36) * step(0.12, f.y) * (step(abs(tx - 0.12), 0.03) + step(abs(tx - 0.72), 0.03));
+      float pend = smoothstep(0.05, 0.0, length(vec2((tx - 0.41) * 2.0, f.y - 0.6))) ;
+      float cord = step(0.6, f.y) * step(abs(tx - 0.41), 0.004);
+      room = wc * mix(0.30, 0.18, uNight) * depthF; room = mix(room, vec3(0.06, 0.04, 0.03), clamp(table + chair + cord, 0.0, 1.0));
+      room += vec3(1.0, 0.72, 0.4) * pend * 2.2 + vec3(1.0, 0.75, 0.45) * smoothstep(0.6, 0.0, abs(f.y - 0.58)) * 0.12;
+    } else if (stype == 2.0) { // boutique: bright white room, clothes on rails, track spots
+      vec3 wc = vec3(0.92, 0.9, 0.88);
+      float rail = step(abs(f.y - 0.58), 0.006); float gx = fract(vUvM.x * 4.0); vec2 gid2 = vec2(floor(vUvM.x * 4.0), seed);
+      float cloth = step(0.30, f.y) * step(f.y, 0.57) * step(0.15, gx) * step(gx, 0.85) * step(0.25, h12(gid2));
+      vec3 cc = 0.25 + 0.6 * vec3(h12(gid2 + 1.3), h12(gid2 + 2.1), h12(gid2 + 3.7));
+      float spot = smoothstep(0.08, 0.0, abs(fract(vUvM.x * 0.7) - 0.5) * 0.3 + abs(f.y - 0.73) * 0.6);
+      room = wc * mix(0.30, 0.22, uNight) * depthF; room = mix(room, cc * 0.45, cloth); room = mix(room, vec3(0.1), rail);
+      room += vec3(1.0, 0.95, 0.85) * spot * 0.8;
+    } else if (stype == 3.0) { // office / bank: cool white, reception desk, a plant, ceiling panels
+      vec3 wc = vec3(0.78, 0.82, 0.86);
+      float desk = step(0.12, f.y) * step(f.y, 0.30) * step(0.25, fract(vUvM.x * 0.3)) * step(fract(vUvM.x * 0.3), 0.75);
+      float plant = smoothstep(0.09, 0.0, length(vec2((fract(vUvM.x * 0.3 + 0.37) - 0.5) * 2.5, (f.y - 0.36) * 1.6)));
+      room = wc * mix(0.32, 0.22, uNight) * depthF; room = mix(room, vec3(0.32, 0.28, 0.25), desk); room = mix(room, vec3(0.08, 0.2, 0.07), plant * step(f.y, 0.5));
+      room += vec3(0.9, 0.95, 1.0) * troffer * 1.2;
+    }
   }
   float inside = isGlass * interior * (style == 3.0 ? max(lit, 1.0 - n) : lit) * (0.55 + 0.45 * rnd2); // v4.4 shops are open by day (unlit bays read as black slabs)
   float k = style == 3.0 ? (0.95 - n * 0.25) : (n * 0.8); // v4.3 lit shop interiors read through the glass by day (no black storefronts)
@@ -237,6 +311,15 @@ ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner stri
       float fas = smoothstep(0.835, 0.845, f.y) * smoothstep(0.875, 0.865, f.y);
       totalEmissiveRadiance += neonPal(seed * 0.21 + cid.x * 0.37) * fas * 6.0 * n;
     }
+    // r6.1 neon light actually falling on the surfaces around it: each storefront fascia throws its own colour up the wall
+    // above it and down over the frames / piers (falls off with distance from the tube), weighted by the surface albedo
+    { float wallLit = (1.0 - isGlass * 0.85);
+      float bay = floor(vUvM.x / max(ww, 0.5));
+      float yF = style == 3.0 ? fh * 0.855 : 4.0; float dy = vUvM.y - yF;
+      float fall = exp(-max(dy, 0.0) / 2.2) * step(-0.2, dy) + exp(min(dy, 0.0) / 1.4) * (1.0 - step(-0.2, dy)) * 0.8;
+      fall *= smoothstep(13.0, 2.0, vUvM.y);
+      vec3 spillC = neonPal(seed * 0.21 + bay * 0.37);
+      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6; }
   }
 ` : ``}  // coloured facade up-lighting on the Art Deco hotels at night
   float wallM = (1.0 - isGlass) * (1.0 - frame * 0.5);
@@ -335,7 +418,7 @@ float roughnessFactor = roughness;
 vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );
 roughnessFactor = clamp(texelRoughness.g * 1.05, 0.55, 1.0) - tracks * 0.25;
 roughnessFactor = mix(roughnessFactor, 0.55, paintF);
-roughnessFactor = mix(roughnessFactor, mix(0.32, 0.03, pud), wet);
+roughnessFactor = mix(roughnessFactor, mix(0.32, ${CYBER ? '0.11' : '0.03'}, pud), wet); // r6.1 B: puddles 0.03 -> 0.11 (lamp specular was a tiny over-bright hot spot)
 `)
       .replace('#include <normal_fragment_maps>', `
 #include <normal_fragment_maps>
@@ -428,7 +511,29 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor.rgb * (0.25 + uNight * 5.0);');
   });
-  M.vcol = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), 'vcol');
+  // r6.1: building trims / piers / cornices / pylons (vertex-coloured relief geometry) were flat plastic next to the textured
+  // walls -> tri-planar plaster (索拉纳港) / concrete (霓港) texture, macro colour noise, dirt at the foot, soot under ledges
+  { const tpl = CYBER ? T.concrete_d : T.plaster_d; tpl.wrapS = tpl.wrapT = THREE.RepeatWrapping;
+  M.vcol = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), 'vcol', (s) => {
+    s.uniforms.tPl = { value: tpl };
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vVW; varying vec3 vVN;')
+      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
+  { vec4 wq = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+    wq = instanceMatrix * wq;
+  #endif
+    vVW = (modelMatrix * wq).xyz; vVN = normalize(mat3(modelMatrix) * objectNormal); }`);
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; varying vec3 vVW; varying vec3 vVN;' + HASH)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+  { vec3 bw = pow(abs(vVN), vec3(4.0)); bw /= (bw.x + bw.y + bw.z);
+    vec3 tx = texture2D(tPl, vVW.zy * 0.25).rgb * bw.x + texture2D(tPl, vVW.xz * 0.25).rgb * bw.y + texture2D(tPl, vVW.xy * 0.25).rgb * bw.z;
+    float cl = dot(vColor.rgb, vec3(0.299, 0.587, 0.114)); float k = smoothstep(0.18, 0.55, cl);
+    float mac = vnoise(vVW.xz * 0.07 + vVW.y * 0.05) * 0.6 + vnoise(vVW.xy * 0.9 + vVW.zz * 0.7) * 0.4;
+    diffuseColor.rgb *= mix(vec3(1.0), clamp(tx / ${CYBER ? '0.44' : '0.63'}, 0.6, 1.25), 0.55 * k) * (0.92 + 0.14 * mac);
+    diffuseColor.rgb *= 1.0 - smoothstep(${CYBER ? '1.2' : '0.8'}, 0.0, vVW.y) * 0.22 * k;           // splash / dust at the foot
+    diffuseColor.rgb *= 1.0 - smoothstep(-0.2, -0.9, vVN.y) * 0.18;                                    // soffits / undersides darker
+  }`).replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor *= 0.9 + 0.2 * vnoise(vVW.xz * 2.1 + vVW.y);');
+  }); }
   M.vcolCloth = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }), 'vcolc');
   M.bark = prep(new THREE.MeshStandardMaterial({ map: T.bark_d, color: 0xb0a490, roughness: 0.95 }), 'bark');
   T.bark_d.colorSpace = THREE.SRGBColorSpace; T.bark_d.wrapS = T.bark_d.wrapT = THREE.RepeatWrapping;

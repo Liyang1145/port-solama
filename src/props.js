@@ -155,8 +155,25 @@ export function buildProps(scene, city, T) {
   // ---------- neon / letter signs (canvas atlas)
   {
     const cellsV = [], cellsH = [];
-    const cv = document.createElement('canvas'); cv.width = 2048; cv.height = 1024; const gv = cv.getContext('2d');
-    const ch = document.createElement('canvas'); ch.width = 2048; ch.height = 2048; const gh = ch.getContext('2d');
+    const cv = document.createElement('canvas'); cv.width = 2048; cv.height = 1024; const gv0 = cv.getContext('2d');
+    const ch = document.createElement('canvas'); ch.width = 2048; ch.height = 2048; const gh0 = ch.getContext('2d');
+    // r6.1 索拉纳港 (map A, strictly non-neon): painted enamel channel letters by day (deep Deco colours, cream edge, no glow);
+    // a second, warm-only canvas is the emissive map -> at night the letters glow like incandescent marquee bulbs, never neon
+    const PAINT = ['#1f3f5b', '#0f5a57', '#8a3b2a', '#23262b', '#6a2f4f', '#b0662a', '#2f4d2a', '#1b2f4a'];
+    const cvE = CYBER ? null : document.createElement('canvas'), chE = CYBER ? null : document.createElement('canvas');
+    if (!CYBER) { cvE.width = 2048; cvE.height = 1024; chE.width = 2048; chE.height = 2048; }
+    const gvE = cvE && cvE.getContext('2d'), ghE = chE && chE.getContext('2d');
+    const both = (a, b, fn) => { fn(a, false); if (b) fn(b, true); };
+    const gv = { set font(v) { gv0.font = v; if (gvE) gvE.font = v; }, set textAlign(v) { gv0.textAlign = v; if (gvE) gvE.textAlign = v; }, set textBaseline(v) { gv0.textBaseline = v; if (gvE) gvE.textBaseline = v; },
+      save() { gv0.save(); gvE && gvE.save(); }, restore() { gv0.restore(); gvE && gvE.restore(); }, translate(x, y) { gv0.translate(x, y); gvE && gvE.translate(x, y); } };
+    const gh = { set font(v) { gh0.font = v; if (ghE) ghE.font = v; }, set textAlign(v) { gh0.textAlign = v; if (ghE) ghE.textAlign = v; }, set textBaseline(v) { gh0.textBaseline = v; if (ghE) ghE.textBaseline = v; },
+      save() { gh0.save(); ghE && ghE.save(); }, restore() { gh0.restore(); ghE && ghE.restore(); }, translate(x, y) { gh0.translate(x, y); ghE && ghE.translate(x, y); } };
+    const letter = (g0, gE, txt, x, y, c, i, maxW) => {
+      if (CYBER) { g0.shadowColor = c; g0.shadowBlur = maxW ? 22 : 18; g0.fillStyle = c; g0.fillText(txt, x, y, maxW); g0.shadowBlur = 0; g0.fillStyle = '#fff'; g0.globalAlpha = maxW ? 0.6 : 0.65; g0.fillText(txt, x, y, maxW); g0.globalAlpha = 1; return; }
+      const pc = PAINT[i % PAINT.length];
+      both(g0, gE, (g, em) => { g.lineJoin = 'round'; g.lineWidth = 10; g.strokeStyle = em ? '#7a4a1c' : '#f1e6cf'; g.strokeText(txt, x, y, maxW); // cream return edge
+        g.fillStyle = em ? '#ffd59c' : pc; g.fillText(txt, x, y, maxW); });
+    };
     const names = ['CORALINE', 'SANDPIPER', 'LA PALOMA', 'SEAGRAPE', 'BRISA MAR', 'ALBATROSS', 'STARLIGHT', 'MARIGOLD', 'HALCYON', 'SOLANA', 'BLUE HERON', 'CASA LUNA', 'HOTEL', 'CAFE', 'OCEAN GRILL', 'SURF SHOP'];
     const colors = ['#ff5fa2', '#59f3ff', '#ffb347', '#b78cff', '#ff6f61', '#7dffb2', '#ffe6a0', '#ff8ad8'];
     for (let i = 0; i < 8; i++) { // vertical cells 256x1024
@@ -164,7 +181,7 @@ export function buildProps(scene, city, T) {
       gv.save(); gv.translate(i * 256, 0);
       gv.font = 'bold 120px "Anton", Impact, sans-serif'; gv.textAlign = 'center'; gv.textBaseline = 'middle';
       const letters = name.replace(' ', '').split('').slice(0, 8); const step = 1000 / letters.length;
-      letters.forEach((L, k) => { gv.shadowColor = c; gv.shadowBlur = 18; gv.fillStyle = c; gv.fillText(L, 128, 30 + step * (k + 0.5)); gv.shadowBlur = 0; gv.fillStyle = '#ffffff'; gv.globalAlpha = 0.65; gv.fillText(L, 128, 30 + step * (k + 0.5)); gv.globalAlpha = 1; });
+      letters.forEach((L, k) => letter(gv0, gvE, L, 128, 30 + step * (k + 0.5), c, i, undefined));
       gv.restore(); cellsV.push(i);
     }
     for (let i = 0; i < 16; i++) { // horizontal cells 1024x256
@@ -172,14 +189,15 @@ export function buildProps(scene, city, T) {
       const x = (i % 2) * 1024, y = Math.floor(i / 2) * 256;
       gh.save(); gh.translate(x, y);
       gh.font = (i % 3 === 0 ? 'italic ' : '') + 'bold 150px "Anton", Impact, sans-serif'; gh.textAlign = 'center'; gh.textBaseline = 'middle';
-      gh.shadowColor = c; gh.shadowBlur = 22; gh.fillStyle = c; gh.fillText(name, 512, 130, 980); gh.shadowBlur = 0; gh.fillStyle = '#fff'; gh.globalAlpha = 0.6; gh.fillText(name, 512, 130, 980); gh.globalAlpha = 1;
+      letter(gh0, ghE, name, 512, 130, c, i + 3, 980);
       gh.restore(); cellsH.push(i);
     }
-    const mkMat = (cv) => {
+    const mkMat = (cv, cvE2) => {
       const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
-      return prep(new THREE.MeshStandardMaterial({ map: t, emissiveMap: t, emissive: 0xffffff, emissiveIntensity: 0.0, transparent: true, alphaTest: 0.08, roughness: 0.4, metalness: 0.2, side: THREE.DoubleSide, depthWrite: false }), 'sign');
+      let te = t; if (cvE2) { te = new THREE.CanvasTexture(cvE2); te.colorSpace = THREE.SRGBColorSpace; te.anisotropy = 8; }
+      return prep(new THREE.MeshStandardMaterial({ map: t, emissiveMap: te, emissive: 0xffffff, emissiveIntensity: 0.0, transparent: true, alphaTest: 0.08, roughness: CYBER ? 0.4 : 0.55, metalness: CYBER ? 0.2 : 0.1, side: THREE.DoubleSide, depthWrite: false }), CYBER ? 'sign' : 'signp');
     };
-    const mv = mkMat(cv), mh = mkMat(ch); out.signMats = [mv, mh];
+    const mv = mkMat(cv, cvE), mh = mkMat(ch, chE); out.signMats = [mv, mh];
     const bv = new GeoBucket(), bh = new GeoBucket();
     let iv = 0, ih = 0;
     for (const s of city.signs) {
@@ -283,7 +301,7 @@ export function updateProps(P, cam, night, phase) {
     for (const m of [L.im, L.glow, L.pools]) { m.count = k; m.instanceMatrix.needsUpdate = true; } } }
   if (CYBER) P.lampGlow.color.setRGB(0.62 * (0.4 + 7 * n), 0.88 * (0.4 + 7 * n), 1.0 * (0.4 + 7 * n)); // v4.5 cool LED street lights (cyberpunk night)
   else P.lampGlow.color.setRGB(1.0 * (0.4 + 7 * n), 0.62 * (0.4 + 7 * n), 0.32 * (0.4 + 7 * n));
-  for (const m of P.signMats) m.emissiveIntensity = 0.05 + n * 3.5;
+  for (const m of P.signMats) m.emissiveIntensity = CYBER ? 0.05 + n * 3.5 : n * 1.5; // r6.1 map A: unlit painted letters by day, warm bulb glow at night
   if (P.signal) { // NS-green phase: z-axis roads green
     const nsGreen = phase === 0;
     P.signal.red.color.setRGB(nsGreen ? 0.08 : 3.0, nsGreen ? 0.01 : 0.15, nsGreen ? 0.01 : 0.08);
@@ -366,5 +384,5 @@ export function updateNeonLights(P, signs, pos, night) {
   for (const s of signs) { if (!s.color) continue; const d = (s.x - pos.x) ** 2 + (s.z - pos.z) ** 2; if (d > 70 * 70) continue; best.push([d, s]); }
   best.sort((a, b) => a[0] - b[0]);
   P.neonLights.forEach((pl, i) => { const e = best[i]; if (!e) { pl.intensity = 0; return; } const sg = e[1];
-    const ox = Math.sin(sg.ry) * 3.0, oz = Math.cos(sg.ry) * 3.0; pl.position.set(sg.x + ox, Math.min(sg.y, 4.2), sg.z + oz); pl.color.set(sg.color); pl.intensity = 9 * night; /* v4.3: off the wall (was a blown-out hotspot 1.2 m from the stucco) */ });
+    const ox = Math.sin(sg.ry) * 3.0, oz = Math.cos(sg.ry) * 3.0; pl.position.set(sg.x + ox, Math.min(sg.y, 4.2), sg.z + oz); pl.color.set(sg.color); pl.intensity = (CYBER ? 9 : 5) * night; /* v4.3: off the wall (was a blown-out hotspot 1.2 m from the stucco) */ });
 }

@@ -63,7 +63,7 @@ THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begi
 // ---- sky material ---------------------------------------------------------------------
 const skyVS = `varying vec3 vDir; void main(){ vDir = normalize((modelMatrix*vec4(position,0.0)).xyz); vec4 p = projectionMatrix*viewMatrix*modelMatrix*vec4(position,1.0); gl_Position = p.xyww; }`;
 const skyFS = `
-uniform sampler2D tA, tB; uniform float mixAB, skyScale, rotU, envMode, uNightK, uDeep;
+uniform sampler2D tA, tB; uniform float mixAB, skyScale, rotU, envMode, uNightK, uDeep, uHazeSky, uHazeAmt;
 uniform vec3 uSunDir, uSunCol, fogC, fogSunC, groundC; uniform float fogD, fogK;
 varying vec3 vDir;
 #define PI 3.14159265
@@ -81,14 +81,18 @@ void main(){
     float st = step(0.9965, h) * smoothstep(0.5, 0.0, length(fract(q)-0.5)); c += vec3(0.8,0.85,1.0)*st*uNightK*(0.5+h21(id.yz)*2.0)*smoothstep(0.0,0.25,d.y); }
   float cs = dot(d, uSunDir);
   if (envMode < 0.5) {
-    c += uSunCol * (smoothstep(0.99993, 0.99997, cs) * 60.0);  // sun disc
+    c += uSunCol * (smoothstep(0.99993, 0.99997, cs) * 22.0);  // sun disc (r6.1: 60 -> 22; the bloom of a 60x disc whited out backlit dunes/towers)
   }
   c += uSunCol * (pow(max(cs,0.0), 600.0)*1.0 + pow(max(cs,0.0), 60.0)*0.045);
   // horizon haze matching scene fog (distant ray through the same height fog)
   float dist = 2600.0; float t = fogK * max(d.y, 0.0) * dist; float f = t > 1e-4 ? (1.0-exp(-t))/t : 1.0;
   float amt = 1.0 - exp(-fogD * dist * f);
   vec3 fc = fogC + fogSunC * pow(max(cs,0.0), 7.0);
-  c = mix(c, fc, clamp(amt,0.0,1.0) * 0.85 * (1.0 - 0.55*smoothstep(0.02, 0.35, d.y)));
+  // r6.1: the haze takes part of its colour from the sky behind it (no flat grey band above the horizon in aerials / golden hour)
+  fc = mix(fc, c * (0.85 + 0.25 * max(cs, 0.0)), uHazeSky);
+  // away from the sun the haze is a pale sky-blue, toward it warm (fogSunC) -> no flat grey band in aerials / at golden hour
+  { float lf = dot(fc, vec3(0.2126, 0.7152, 0.0722)); fc = mix(fc, vec3(0.80, 0.90, 1.08) * lf, 0.35 * (1.0 - max(cs, 0.0)) * (1.0 - uNightK)); }
+  c = mix(c, fc, clamp(amt,0.0,1.0) * uHazeAmt * (1.0 - 0.55*smoothstep(0.02, 0.35, d.y)));
   // v3.4: Florida-blue zenith — deepen + saturate blue sky pixels while keeping neutral clouds white
   if (envMode < 0.5 && d.y > 0.0) {
     float el2 = smoothstep(0.03, 0.55, d.y) * uDeep;
@@ -97,9 +101,14 @@ void main(){
     c = mix(vec3(lum), c, 1.0 + 0.55 * el2 * blueK);
     c *= mix(1.0, 0.78, el2 * blueK);
   }
+  // r6.1: IBL lower hemisphere = sun + sky light bounced off the ground (warm sand / stucco on 索拉纳港, wet grey concrete on 霓港),
+  // so shadowed walls, eyebrow soffits and the undersides of awnings get a warm fill instead of a flat blue-grey
   if (envMode > 0.5 && d.y < 0.0) c = mix(c, groundC, smoothstep(0.0, -0.15, d.y));
+  // r6.1 view below the horizon beyond the far water edge (aerials): continue the sea into the haze instead of the panorama's ground
+  if (envMode < 0.5 && d.y < 0.0) { vec3 sea = mix(fogC * vec3(0.55, 0.66, 0.78), fogC, 0.5) + fogSunC * pow(max(cs, 0.0), 7.0) * 0.4; c = mix(c, sea, smoothstep(0.0, -0.03, d.y)); }
   // v4.5 cyberpunk city glow: magenta light pollution hugging the horizon, cyan higher up
 ${CYBER ? `if (uNightK > 0.0) { float yy = max(d.y, 0.0); c += uNightK * (vec3(0.50, 0.06, 0.40) * exp(-yy * 7.0) * 0.07 + vec3(0.04, 0.20, 0.30) * exp(-yy * 2.2) * 0.022); }` : ''}
+  c = min(c, vec3(48.0)); // r6.1 cap so the sun never floods the bloom chain
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -114,8 +123,8 @@ const KEYS_GTA = [
   { h: 7.2, sky: ['golden', 'golden', 0, 0.9], sun: [1.0, 0.66, 0.40], sunI: 6.0, envI: 0.6, fog: [0.78, 0.72, 0.74], fogSun: [0.7, 0.4, 0.2], fogD: 0.00032, exp: 0.56, night: 0 },
   { h: 9.5, sky: ['day', 'day', 0, 1.0], sun: [1.0, 0.94, 0.86], sunI: 9.0, envI: 0.6, fog: [0.78, 0.90, 1.08], fogSun: [0.6, 0.5, 0.3], fogD: 0.00026, exp: 0.5, night: 0 },
   { h: 15.5, sky: ['day', 'day', 0, 1.0], sun: [1.0, 0.92, 0.80], sunI: 9.0, envI: 0.6, fog: [0.80, 0.90, 1.05], fogSun: [0.7, 0.55, 0.3], fogD: 0.00028, exp: 0.5, night: 0 },
-  { h: 17.3, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.72, 0.44], sunI: 8.0, envI: 0.31, fog: [0.66, 0.68, 0.76], fogSun: [0.85, 0.48, 0.22], fogD: 0.00036, exp: 0.5, night: 0 }, // v4.4 higher sun:sky ratio + denser warm aerial perspective
-  { h: 18.7, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.56, 0.26], sunI: 7.4, envI: 0.28, fog: [0.60, 0.56, 0.64], fogSun: [1.05, 0.48, 0.18], fogD: 0.00044, exp: 0.52, night: 0 },
+  { h: 17.3, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.72, 0.44], sunI: 8.0, envI: 0.31, fog: [0.62, 0.66, 0.78], fogSun: [0.80, 0.46, 0.22], fogD: 0.00036, exp: 0.5, night: 0 }, // v4.4 higher sun:sky ratio + denser warm aerial perspective
+  { h: 18.7, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.56, 0.26], sunI: 7.4, envI: 0.28, fog: [0.56, 0.56, 0.68], fogSun: [0.88, 0.42, 0.16], fogD: 0.00044, exp: 0.52, night: 0 } /* r6.1 cooler base haze + softer sun lobe: warm only toward the sun */,
   { h: 19.4, sky: ['sunset', 'sunset', 0, 0.9], sun: [1.0, 0.42, 0.22], sunI: 2.5, envI: 0.7, fog: [0.7, 0.48, 0.55], fogSun: [1.4, 0.55, 0.28], fogD: 0.0006, exp: 0.85, night: 0.2 },
   { h: 20.2, sky: ['sunset', 'dusk', 0.6, 0.35], sun: [0.8, 0.5, 0.5], sunI: 0.15, envI: 0.65, fog: [0.10, 0.08, 0.13], fogSun: [0.15, 0.06, 0.05], fogD: 0.0006, exp: 1.12, night: 0.75 },
   { h: 21.3, sky: ['dusk', 'dusk', 0, 0.014], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.016, 0.018, 0.030], fogSun: [0, 0, 0], fogD: 0.0006, exp: 0.95, night: 1 },
@@ -129,8 +138,8 @@ const KEYS_CYBER = [
   { h: 7.2, sky: ['golden', 'golden', 0, 0.9], sun: [1.0, 0.66, 0.40], sunI: 6.0, envI: 0.6, fog: [0.78, 0.72, 0.74], fogSun: [0.7, 0.4, 0.2], fogD: 0.00032, exp: 0.56, night: 0 },
   { h: 9.5, sky: ['day', 'day', 0, 1.0], sun: [1.0, 0.93, 0.83], sunI: 9.0, envI: 0.55, fog: [0.70, 0.82, 1.02], fogSun: [0.45, 0.38, 0.24], fogD: 0.00034, exp: 0.43, night: 0 }, // v4.5 deeper aerial perspective, slightly lower noon exposure (beach no longer glares)
   { h: 15.5, sky: ['day', 'day', 0, 1.0], sun: [1.0, 0.91, 0.78], sunI: 9.0, envI: 0.55, fog: [0.74, 0.83, 1.0], fogSun: [0.65, 0.5, 0.28], fogD: 0.00034, exp: 0.46, night: 0 },
-  { h: 17.3, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.72, 0.44], sunI: 8.0, envI: 0.31, fog: [0.66, 0.68, 0.76], fogSun: [0.85, 0.48, 0.22], fogD: 0.00036, exp: 0.5, night: 0 }, // v4.4 higher sun:sky ratio + denser warm aerial perspective
-  { h: 18.7, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.56, 0.26], sunI: 7.4, envI: 0.28, fog: [0.60, 0.56, 0.64], fogSun: [1.05, 0.48, 0.18], fogD: 0.00044, exp: 0.52, night: 0 },
+  { h: 17.3, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.72, 0.44], sunI: 8.0, envI: 0.31, fog: [0.62, 0.66, 0.78], fogSun: [0.80, 0.46, 0.22], fogD: 0.00036, exp: 0.5, night: 0 }, // v4.4 higher sun:sky ratio + denser warm aerial perspective
+  { h: 18.7, sky: ['golden', 'golden', 0, 1.0], sun: [1.0, 0.56, 0.26], sunI: 7.4, envI: 0.28, fog: [0.56, 0.56, 0.68], fogSun: [0.88, 0.42, 0.16], fogD: 0.00044, exp: 0.52, night: 0 } /* r6.1 cooler base haze + softer sun lobe: warm only toward the sun */,
   { h: 19.4, sky: ['sunset', 'sunset', 0, 0.9], sun: [1.0, 0.42, 0.22], sunI: 2.5, envI: 0.7, fog: [0.7, 0.48, 0.55], fogSun: [1.4, 0.55, 0.28], fogD: 0.0006, exp: 0.85, night: 0.2 },
   { h: 20.2, sky: ['sunset', 'dusk', 0.6, 0.35], sun: [0.8, 0.5, 0.5], sunI: 0.15, envI: 0.65, fog: [0.12, 0.06, 0.15], fogSun: [0.15, 0.06, 0.05], fogD: 0.0007, exp: 1.12, night: 0.75 },
   { h: 21.3, sky: ['dusk', 'dusk', 0, 0.014], sun: [0.55, 0.62, 0.9], sunI: 0.05, envI: 0.3, fog: [0.034, 0.016, 0.050], fogSun: [0, 0, 0], fogD: 0.0009, exp: 0.95, night: 1 },
@@ -148,7 +157,7 @@ export class Env {
       uniforms: {
         tA: { value: tex.sunset }, tB: { value: tex.sunset }, mixAB: { value: 0 }, skyScale: { value: 1 }, rotU: { value: 0 }, envMode: { value: envMode },
         uNightK: { value: 0 }, uDeep: { value: 1 }, uSunDir: U.uSunDir, uSunCol: { value: new THREE.Color() }, fogC: { value: new THREE.Color() }, fogSunC: { value: new THREE.Color() },
-        groundC: { value: new THREE.Color(0.13, 0.12, 0.11) }, fogD: { value: 0.001 }, fogK: { value: 0.01 },
+        groundC: { value: new THREE.Color(0.13, 0.12, 0.11) }, fogD: { value: 0.001 }, fogK: { value: 0.01 }, uHazeSky: { value: 0.45 }, uHazeAmt: { value: 0.72 },
       },
     });
     this.skyMat = mk(0); this.envSkyMat = mk(1);
@@ -175,6 +184,9 @@ export class Env {
     this.csm = { lights: [sun], lightDirection: this.lightDir, setupMaterial() {}, update: () => this.updateShadowFrustum() };
     this.hemi = new THREE.HemisphereLight(0x8899aa, 0x332822, 0); scene.add(this.hemi);
     this.hour = -1; this.lastEnvHour = -99; this.look = {};
+    // r6.1 natural-light tunables (window.__G.env.tune; lab plans tweak them live)
+    this.tune = CYBER ? { albedo: 0.2, bounce: 1.0, groundTint: [0.86, 0.88, 0.92], nightGround: new THREE.Color(0.085, 0.055, 0.10), hazeSky: 0.4, hazeAmt: 0.75 }
+      : { albedo: 0.26, bounce: 1.0, groundTint: [1.0, 0.86, 0.68], nightGround: new THREE.Color(0.11, 0.075, 0.045), hazeSky: 0.45, hazeAmt: 0.72 };
   }
   sample(h) {
     let a = KEYS[0], b = KEYS[KEYS.length - 1];
@@ -231,6 +243,14 @@ export class Env {
       u.fogD.value = L.fogD * 0.5; u.fogK.value = 0.004;
       void wB1;
     }
+    // r6.1 ground bounce for the IBL (radiance units of the env sky, which is scaled by envIntensity afterwards):
+    //   L_bounce = albedo * (E_sun + E_sky) / pi ;  E_sun = sunI * max(sun.y, 0), E_sky ~ pi * L_sky (fog colour as a proxy)
+    { const T = this.tune; const A = T.albedo; const tint = T.groundTint; const eSun = L.sunI * sunUp * Math.max(sd.y, 0);
+      const k = A * eSun / (Math.PI * Math.max(L.envI, 0.05)) * T.bounce;
+      const g = this.envSkyMat.uniforms.groundC.value;
+      g.setRGB(tint[0] * (sunCol.r * k + A * L.fog[0] * 0.9), tint[1] * (sunCol.g * k + A * L.fog[1] * 0.9), tint[2] * (sunCol.b * k + A * L.fog[2] * 0.9));
+      if (night > 0.5) g.lerp(T.nightGround, smooth(0.5, 1.0, night)); // street-lit ground at night (sodium on 索拉纳港, neon spill on 霓港)
+      for (const m of [this.skyMat, this.envSkyMat]) { m.uniforms.uHazeSky.value = T.hazeSky; m.uniforms.uHazeAmt.value = T.hazeAmt; } }
     this.scene.fog.color.setRGB(L.fog[0], L.fog[1], L.fog[2]);
     this.scene.fog.density = L.fogD;
     U.uFogSunCol.value.setRGB(L.fogSun[0], L.fogSun[1], L.fogSun[2]);
@@ -243,7 +263,7 @@ export class Env {
     this.csm.lightDirection.copy(ld).negate();
     for (const l of this.csm.lights) { l.intensity = li; l.color.copy(lc); }
     this.sunFar.intensity = 0;
-    this.exposure = L.exp;
+    this.exposure = L.exp * (CYBER ? 1 : lerp(1.25, 1.1, night)); // r6.1 PBR-Neutral needs ~25% more exposure than ACES for the same mid-grey
     this.envIntensity = L.envI;
     if (force || Math.abs(h - this.lastEnvHour) > 0.08) this.updateEnv();
   }

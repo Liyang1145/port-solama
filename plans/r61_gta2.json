@@ -1,0 +1,37 @@
+{
+"query": "hour=16&ao=1&lowshadow&probe=0",
+"shots": [
+{
+"name": "street_day",
+"js": "__G.setHour(11.0); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"
+},
+{
+"name": "mainland_day",
+"js": "__G.setHour(16.4); const g=__G.game; g.tp(-1048,-95,0); __G.step(60); const c=__G.camera; c.position.set(-1046.5,1.8,-98); c.lookAt(-1052,4,-20); c.updateMatrixWorld(); 0"
+},
+{
+"name": "golden_aerial",
+"js": "__G.setHour(18.3); const g=__G.game; g.tp(-430,-150,0); __G.step(2); const c=__G.camera; c.position.set(-150,430,560); c.lookAt(-600,0,-60); c.updateMatrixWorld(); 0"
+},
+{
+"name": "aerial_day",
+"js": "__G.setHour(15.6); const g=__G.game; g.tp(-430,-150,0); __G.step(2); const c=__G.camera; c.position.set(-150,430,560); c.lookAt(-600,0,-60); c.updateMatrixWorld(); 0"
+},
+{
+"name": "golden_street",
+"js": "__G.setHour(18.4); const g=__G.game; g.tp(282,-20,0); g.cam.yaw=2.25; g.cam.pitch=-0.03; __G.step(10); 0"
+},
+{
+"name": "dunes",
+"js": "__G.setHour(17.0); const g=__G.game; g.tp(60,480,0); __G.step(3); const c=__G.camera; c.position.set(-60,7,470); c.lookAt(100,0,640); c.updateMatrixWorld(); 0"
+},
+{
+"name": "night",
+"js": "__G.setHour(21.6); const g=__G.game; g.override=null; g.tp(-1000,30,0); __G.step(30); const c=__G.camera; c.position.set(-985,2.2,26); c.lookAt(-1100,3,40); c.updateMatrixWorld(); 0"
+},
+{
+"name": "night_deco",
+"js": "__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"
+}
+]
+}

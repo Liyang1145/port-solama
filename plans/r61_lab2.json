@@ -1,0 +1,7 @@
+{
+"query": "map=cyber&hour=15.5&lowshadow&probe=0",
+"shots": [
+{"name": "rf2", "js": "__G.setHour(10.5); const g=__G.game; g.tp(-2600,2950,0); __G.step(3); const c=__G.camera; const y=__G.city.groundH(-2600,2950); c.position.set(-2600,y+1.7,2950); c.lookAt(-2660,y+5,3010); c.updateMatrixWorld(); __G.nature.update(c.position,true); 0"},
+{"name": "rf2_probe", "noshot": true, "js": "const c=__G.camera; const P=c.position; const out=[]; const v={x:0,y:0,z:0}; __G.scene.traverse(o=>{ if(!o.isMesh||!o.visible) return; if(o.isInstancedMesh){ const a=o.instanceMatrix.array; for(let i=0;i<o.count;i++){ const x=a[i*16+12],y=a[i*16+13],z=a[i*16+14]; const d=Math.hypot(x-P.x,z-P.z); if(d<9){ const sx=Math.hypot(a[i*16],a[i*16+1],a[i*16+2]); out.push(['I',o.name,o.geometry.type,o.material.type,o.material.name||'',i,d.toFixed(1),sx.toFixed(2),(y-P.y).toFixed(1)]); } } } else { if(!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); const s=o.geometry.boundingSphere; const w=s.center.clone().applyMatrix4(o.matrixWorld); const d=w.distanceTo(P); if(d-s.radius<6 && s.radius<200) out.push(['M',o.name,o.geometry.type,o.material.type,d.toFixed(1),s.radius.toFixed(1)]); } }); out.slice(0,60)"}
+]
+}

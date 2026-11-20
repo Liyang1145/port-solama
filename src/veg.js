@@ -14,7 +14,7 @@ function trunkTexture() {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
 }
 
-export const foliagePatch = (s, strength = 0.6) => {
+export const foliagePatch = (s, strength = 0.6, transK = 1) => {
   s.uniforms.uTime = U.uTime; s.uniforms.uSunCol = U.uSunCol; s.uniforms.uNightF = U.uNight;
   s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aSway;')
     .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -30,6 +30,13 @@ export const foliagePatch = (s, strength = 0.6) => {
     .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
   objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), ${strength.toFixed(2)}));`);
   s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uSunCol; uniform float uNightF;')
+    // r6.1: back faces of double-sided leaf cards get their normal bent toward the sky (still facing the viewer, so the BRDF
+    // stays well-behaved): crown undersides are lit by the sky/canopy fill instead of reading as black from below
+    .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+#ifdef DOUBLE_SIDED
+  if (!gl_FrontFacing) { vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz); vec3 vv = normalize(vViewPosition);
+    normal = normalize(normal + upV * 0.7); float nv = dot(normal, vv); if (nv < 0.12) normal = normalize(normal + vv * (0.12 - nv) * 1.5); }
+#endif`)
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   { vec3 vd = normalize(vViewPosition); // translucency when backlit by the sun
     vec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
@@ -38,7 +45,7 @@ export const foliagePatch = (s, strength = 0.6) => {
     // plus a sky-fill so undersides read green instead of black
     vec3 nF = normal; float trans = clamp(-dot(nF, sunV), 0.0, 1.0);
     vec3 tcol = diffuseColor.rgb * vec3(1.05, 1.25, 0.55);
-    totalEmissiveRadiance += tcol * uSunCol * (back * 0.5 + trans * trans * 0.22) * ${(strength > 0 ? 1 : 0).toFixed(1)} + diffuseColor.rgb * vec3(0.05, 0.065, 0.075) * (1.0 - uNightF); }`);
+    totalEmissiveRadiance += tcol * uSunCol * (back * 0.5 + trans * trans * 0.22) * ${(strength > 0 ? transK : 0).toFixed(2)} + diffuseColor.rgb * vec3(0.05, 0.065, 0.075) * (1.0 - uNightF); }`);
 };
 
 // --- v3.5 palms: three species (coconut / royal / sabal) with curved drooping pinnate or costapalmate fan fronds -----------------

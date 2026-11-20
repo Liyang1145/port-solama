@@ -1,0 +1,6 @@
+{
+"query": "hour=16&ao=1&lowshadow&probe=0",
+"shots": [
+{"name": "aerial_day", "js": "__G.setHour(15.6); const g=__G.game; g.tp(-430,-150,0); __G.step(2); const c=__G.camera; c.position.set(-150,430,560); c.lookAt(-600,0,-60); c.updateMatrixWorld(); 0"}
+]
+}

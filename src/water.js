@@ -59,6 +59,9 @@ void main(){
   float amt = 1.0 - exp(-fogDensity * dist * exp(-k * max(cameraPosition.y, 0.0)) * f);
   vec3 fc = fogColor + uFogSunCol * pow(max(dot(rd, uSunDir), 0.0), 7.0);
   col = mix(col, fc, clamp(amt, 0.0, 1.0));
+  // r6.1 (map A): fade the far sea into the sky's below-horizon sea colour (env.js) so aerials show no hard line where the
+  // water plane meets the camera far plane
+  if (uBedOn < 0.5) { vec3 sea = mix(fogColor * vec3(0.55, 0.66, 0.78), fogColor, 0.5) + uFogSunCol * pow(max(dot(rd, uSunDir), 0.0), 7.0) * 0.4; col = mix(col, sea, smoothstep(2300.0, 4000.0, dist)); }
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

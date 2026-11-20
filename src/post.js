@@ -36,6 +36,9 @@ const LightFXShader = {
     vec4 base = texture2D(tDiffuse, vUv); vec3 col = base.rgb;
     // v4.3 NaN/Inf guard: one bad pixel must never spread through bloom into a black frame
     col = (col.r >= 0.0 && col.g >= 0.0 && col.b >= 0.0 && col.r < 60000.0 && col.g < 60000.0 && col.b < 60000.0) ? col : vec3(0.0);
+    // r6.1 highlight clamp before bloom: sun glints on chrome / headlight lenses / glass reached 1000s and bloomed into
+    // 200 px white blobs over backlit dunes and streets; any channel above 24 (HDR, pre-exposure) is scaled down
+    { float mx = max(col.r, max(col.g, col.b)); col *= min(1.0, 24.0 / max(mx, 1e-4)); }
     float d = rawD(vUv);
     // --- screen-space contact shadows: short ray march toward the sun; catches the fine occlusion the shadow map misses
     if (uContact > 0.0 && d < 0.99999) {
@@ -225,7 +228,7 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       sp.copy(camera.position).addScaledVector(sunDir, 1000).project(camera);
       const vis = sp.z < 1 && sunDir.y > -0.02 ? THREE.MathUtils.smoothstep(1.2, 0.6, Math.max(Math.abs(sp.x), Math.abs(sp.y))) : 0; // r5.0: 1.2/0.6 (was 1.7/0.5): no ray fans from a sun well off-screen (aerial shots)
       lfx.uniforms.uSunUV.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
-      lfx.uniforms.uSunOn.value = vis * (1 - night) * (0.35 + gold * 0.85); // v4.4 stronger golden-hour shafts
+      lfx.uniforms.uSunOn.value = vis * (1 - night) * (0.22 + gold * 0.5); // r6.1 softer shafts (backlit golden hour was a white wash) // v4.4 stronger golden-hour shafts
       lfx.uniforms.uRayCol.value.copy(sunCol).multiplyScalar(0.02);
       lens.uniforms.uCamWorld.value.copy(camera.matrixWorld); lens.uniforms.uPrevVP.value.copy(P.prevVP);
       lens.uniforms.uBlur.value = P.blur; lens.uniforms.uDof.value = P.dof; lens.uniforms.uFocus.value = P.focus; lens.uniforms.uAperture.value = P.aperture;

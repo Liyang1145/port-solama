@@ -1,0 +1,9 @@
+{
+"query": "map=cyber&hour=15.5&lowshadow&probe=0",
+"shots": [
+{
+"name": "night_street",
+"js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); 0"
+}
+]
+}

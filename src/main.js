@@ -27,7 +27,8 @@ const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SNAP });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.has('dpr') ? +Q.get('dpr') : 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = Q.get('tm') === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
+// r6.1: 索拉纳港 uses the Khronos PBR-Neutral curve (hue-true, no ACES over-saturated sky / clipped sidewalks); 霓港 keeps ACES for neon punch
+renderer.toneMapping = Q.get('tm') === 'agx' ? THREE.AgXToneMapping : Q.get('tm') === 'neutral' ? THREE.NeutralToneMapping : Q.get('tm') === 'aces' ? THREE.ACESFilmicToneMapping : CYBER ? THREE.ACESFilmicToneMapping : THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
