@@ -9,9 +9,14 @@ import { clamp, lerp, rand, pick, angWrap, rng, damp } from './util.js';
 import { LAYOUT } from './city.js';
 import { U } from './env.js';
 import { Valet } from './mission.js';
+import { Arsenal, newLoadout, WBY } from './weapons.js';
+import { Missions } from './missions.js';
+import { World } from './world.js';
+import { PoliceOps } from './police.js';
+import { POI } from './mapdata.js';
 
-const HOSPITAL = { x: 120, z: 75, yaw: Math.PI / 2 };
-const PRECINCT = { x: -20, z: -225, yaw: 0 };
+const HOSPITAL = POI.hospital;
+const PRECINCT = POI.precinct;
 
 export class Game {
   constructor(o) {
@@ -25,7 +30,7 @@ export class Game {
     this.sfx = new Sfx();
     // player
     this.player = new Character(this.scene, 'man', { player: true });
-    this.P = { pos: this.player.pos, yaw: 0, vy: 0, onFoot: true, car: null, health: 100, armor: 40, money: 5000, ammo: 12, clip: 12, reserve: 96, reloadT: 0, fireT: 0, grounded: true, sprint: false };
+    this.P = { pos: this.player.pos, yaw: 0, vy: 0, onFoot: true, car: null, health: 100, armor: 40, money: 5000, bank: 12000, stamina: 100, load: newLoadout(['fist', 'pistol']), assets: [], outfit: null, reloadT: 0, fireT: 0, grounded: true, sprint: false };
     this.cam = { yaw: Math.PI, pitch: -0.12, dist: 3.4, lastMouse: 0, mode: 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
     this.keys = {}; this.mouse = { down: false, aim: false };
     this.wanted = 0; this.lostT = 0; this.wantedFlash = false; this.cops = []; this.policeCars = []; this.crimeCooldown = 0;
@@ -35,29 +40,46 @@ export class Game {
     this.sirenLights = [new THREE.PointLight(0xff2020, 0, 22, 2), new THREE.PointLight(0x2040ff, 0, 22, 2)]; for (const l of this.sirenLights) this.scene.add(l);
     this.headlight = new THREE.SpotLight(0xfff0dd, 0, 60, 0.55, 0.5, 1.4); this.headlight.castShadow = false; this.scene.add(this.headlight); this.scene.add(this.headlight.target);
     this.tracerMat = new THREE.LineBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.9 });
+    this.extras = []; this.gang = []; this.slowmo = 1; this.waypoint = null;
+    this.arsenal = new Arsenal(this);
     this.bindInput();
     this.mission = new Valet(this);
+    this.world = new World(this); this.world.initProfiles();
+    this.missions = new Missions(this);
+    this.police = new PoliceOps(this);
   }
   // ------------------------------------------------------------------ setup / input ----
   bindInput() {
     const c = this.renderer.domElement;
     addEventListener('keydown', (e) => {
+      if (this.world.phoneOpen) { if (/Arrow|Enter|Backspace/.test(e.code)) { this.world.phoneKey(e.code); e.preventDefault(); return; } if (e.code === 'Escape' || e.code === 'KeyI') { this.world.togglePhone(false); return; } }
+      if (this.world.menu) { const m = /^Digit(\d)$/.exec(e.code); if (m) { this.world.choose(+m[1] - 1); return; } if (e.code === 'Escape' || e.code === 'KeyE') { this.world.closeMenu(); return; } }
+      if (e.repeat) return;
       this.keys[e.code] = true;
+      { const m = /^Digit([1-6])$/.exec(e.code); if (m) this.arsenal.equip(['fist', 'bat', 'pistol', 'smg', 'shotgun', 'rifle'][+m[1] - 1]); }
+      if (e.code === 'KeyQ') { this.arsenal.openWheel(true); this.wheelM = [0, 0]; }
+      if (e.code === 'KeyC') this.arsenal.toggleCover();
+      if (e.code === 'KeyE' && this.P.onFoot) this.world.interact();
+      if (e.code === 'KeyI' || (e.code === 'ArrowUp' && this.P.onFoot)) this.world.togglePhone(true);
+      if (e.code === 'KeyZ') this.world.switchChar();
+      if (e.code === 'Period') { const n = this.world.station + 1; this.world.station = n >= 3 ? -1 : n; this.sfx.setStation(this.world.station); this.hud.msg(this.world.station < 0 ? '电台已关闭' : '电台：' + ['海浪 FM 93.1', '霓光 101.7', '午夜慢调 88.5'][this.world.station], 1.5); }
       if (e.code === 'KeyF') this.toggleCar();
-      if (e.code === 'KeyR') this.reload();
+      if (e.code === 'KeyR') this.arsenal.reload();
       if (e.code === 'KeyT') this.skipTime(1);
       if (e.code === 'KeyV') this.cam.mode = (this.cam.mode + 1) % 2;
       if (e.code === 'KeyH' && this.P.car) this.sfx.horn();
       if (e.code === 'KeyM') this.hud.toggleBig();
       if (e.code === 'Space') e.preventDefault();
     });
-    addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+    addEventListener('keyup', (e) => { this.keys[e.code] = false; if (e.code === 'KeyQ' && this.arsenal.wheelOpen) this.arsenal.openWheel(false); });
+    addEventListener('wheel', (e) => { if (document.pointerLockElement === c && this.P.onFoot) this.arsenal.cycle(e.deltaY > 0 ? 1 : -1); });
     c.addEventListener('click', () => { if (document.pointerLockElement !== c) c.requestPointerLock?.(); this.sfx.resume(); });
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== c) return;
+      if (this.arsenal.wheelOpen) { this.wheelM[0] += e.movementX; this.wheelM[1] += e.movementY; this.arsenal.wheelAim(this.wheelM[0], this.wheelM[1]); return; }
       this.cam.yaw -= e.movementX * 0.0024; this.cam.pitch = clamp(this.cam.pitch - e.movementY * 0.0022, -1.2, 0.6); this.cam.lastMouse = performance.now();
     });
-    addEventListener('mousedown', (e) => { if (document.pointerLockElement !== c) return; if (e.button === 0) this.mouse.down = true; if (e.button === 2) this.mouse.aim = true; });
+    addEventListener('mousedown', (e) => { if (document.pointerLockElement !== c) return; if (e.button === 0) { this.mouse.down = true; this.mouse.edge = true; } if (e.button === 2) this.mouse.aim = true; });
     addEventListener('mouseup', (e) => { if (e.button === 0) this.mouse.down = false; if (e.button === 2) this.mouse.aim = false; });
     addEventListener('contextmenu', (e) => e.preventDefault());
   }
@@ -71,7 +93,7 @@ export class Game {
     this.hud.msg('欢迎来到索拉纳港 · 走近车辆按 F 上车', 5);
     const help = document.getElementById('help'); if (snap) help.style.display = 'none'; else setTimeout(() => { help.style.transition = 'opacity 1s'; help.style.opacity = 0; }, 20000);
     this.started = true;
-    if (!snap) this.sfx.resume();
+    if (!snap) { this.sfx.resume(); this.loadSave(); }
   }
   tp(x, z, yaw = 0) { this.P.pos.set(x, this.city.groundH(x, z), z); this.P.yaw = yaw; this.cam.yaw = yaw + Math.PI; this.player.pos.copy(this.P.pos); this.player.yaw = yaw; this.updateCamera(1, true); }
   skipTime(h) { window.__G.setHour((window.__G.hour + h) % 24); this.hud.msg('时间快进 1 小时', 1.5); }
@@ -108,36 +130,26 @@ export class Game {
     if (v.type === 'police') v.siren = false;
   }
   // ------------------------------------------------------------------ combat ----
-  reload() { const P = this.P; if (P.clip >= 12 || P.reserve <= 0 || P.reloadT > 0) return; P.reloadT = 1.3; this.sfx.reload(); }
+  reload() { return this.arsenal.reload(); }
   aimRay() {
     const o = this.camera.position.clone(); const d = new THREE.Vector3(); this.camera.getWorldDirection(d);
     return { o, d };
   }
-  shoot() {
-    const P = this.P; if (!P.onFoot || P.reloadT > 0 || P.fireT > 0 || this.deadT > 0) return false;
-    if (P.clip <= 0) { this.reload(); return false; }
-    P.clip--; P.fireT = 0.22; this.sfx.shot();
-    const { o, d } = this.aimRay();
-    // start the ray at the player's shoulder depth to avoid hitting things behind the player
-    const ds = o.distanceTo(this.player.pos) ; o.addScaledVector(d, Math.max(0, ds - 0.5));
-    const maxD = 120; let hitT = maxD; let hitWhat = null;
-    const tb = this.city.col.raycast(o.x, o.y, o.z, o.x + d.x * maxD, o.y + d.y * maxD, o.z + d.z * maxD); hitT = tb * maxD;
-    const testChar = (c) => { if (c.dead) return; const cp = c.pos.clone(); cp.y += 1.0; const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) return; const q = o.clone().addScaledVector(d, t); const lat = Math.hypot(q.x - cp.x, q.z - cp.z); if (lat < 0.42 && q.y > c.pos.y && q.y < c.pos.y + 1.85) { hitT = t; hitWhat = { c, head: q.y > c.pos.y + 1.5 }; } };
-    for (const c of this.peds.list) testChar(c); for (const c of this.cops) testChar(c);
-    for (const v of this.traffic.cars) { if (v === P.car) continue; const cp = new THREE.Vector3(v.x, v.y + 0.8, v.z); const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) continue; const q = o.clone().addScaledVector(d, t); if (q.distanceTo(cp) < v.dims.W * 0.6) { hitT = t; hitWhat = { v }; } }
-    const end = o.clone().addScaledVector(d, hitT);
-    this.addTracer(this.player.pos.clone().add(new THREE.Vector3(Math.sin(P.yaw) * 0.5, 1.45, Math.cos(P.yaw) * 0.5)), end);
-    this.flash.position.copy(this.player.pos).add(new THREE.Vector3(Math.sin(P.yaw) * 0.6, 1.5, Math.cos(P.yaw) * 0.6)); this.flash.intensity = 30;
-    this.peds.panic(this.P.pos, 45);
-    if (this.policeNear(60) || this.peds.list.some((c) => !c.dead && c.pos.distanceTo(this.P.pos) < 30)) this.crime(1, '当街开枪');
-    if (hitWhat) {
-      if (hitWhat.c) { const c = hitWhat.c; c.health -= hitWhat.head ? 100 : 45; if (c.health <= 0) this.killChar(c, d); }
-      if (hitWhat.v) { const v = hitWhat.v; v.health -= 12; if (v.ai && v.ai.mode === 'lane') { v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - this.P.pos.x, 0, v.z * 2 - this.P.pos.z); } }
-    }
-    return true;
+  shoot() { return this.arsenal.trigger(true, true); }
+  hostiles() { return this.gang.filter((c) => !c.dead); }
+  // one hitscan ray against buildings, characters (peds, cops, gang, clerks) and cars
+  castShot(o, d, maxD) {
+    const P = this.P; const tb = this.city.col.raycast(o.x, o.y, o.z, o.x + d.x * maxD, o.y + d.y * maxD, o.z + d.z * maxD); let hitT = tb * maxD; let what = null;
+    const testChar = (c) => { if (c.dead || c === this.player) return; const cp = c.pos.clone(); cp.y += 1.0; const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) return; const q = o.clone().addScaledVector(d, t); const lat = Math.hypot(q.x - cp.x, q.z - cp.z); if (lat < 0.42 && q.y > c.pos.y && q.y < c.pos.y + 1.85) { hitT = t; what = { c, head: q.y > c.pos.y + 1.5 }; } };
+    for (const c of this.peds.list) testChar(c); for (const c of this.cops) testChar(c); for (const c of this.gang) testChar(c); for (const c of this.extras) testChar(c);
+    for (const pr of this.world.profiles) if (pr.char !== this.player && !pr.car) testChar(pr.char);
+    for (const v of this.traffic.cars) { if (v === P.car) continue; const cp = new THREE.Vector3(v.x, v.y + 0.8, v.z); const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) continue; const q = o.clone().addScaledVector(d, t); if (q.distanceTo(cp) < v.dims.W * 0.6) { hitT = t; what = { v }; } }
+    return { t: hitT, what };
   }
-  killChar(c, d) {
+  hitReact(c, d, push = 0.15) { if (c.dead) return; const r = this.city.col.resolve(c.pos.x + d.x * push, c.pos.z + d.z * push, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; c.yaw += (rng() - 0.5) * 0.6; c.hitT = 0.3; if (c.ai && c.ai.mode === 'gang') c.ai.fireT = Math.max(c.ai.fireT, 0.4); }
+  killChar(c, d, melee = false) {
     const fwd = Math.sin(c.yaw) * d.x + Math.cos(c.yaw) * d.z; c.kill(fwd > 0 ? -1 : 1);
+    if (c.thief || c.hostile) { if (c.hostile) this.dropCash(c.pos); return; }
     if (c.isCop) { this.crime(Math.max(this.wanted + 1, 3), '击毙警察'); }
     else { this.crime(Math.max(this.wanted, 2), '谋杀'); this.dropCash(c.pos); }
   }
@@ -163,15 +175,18 @@ export class Game {
     }
     // police cars: chase the player; stop and deploy officers when close
     let seen = false;
+    // v4.3 search: once police lose sight they go to the last sighting, not to where you really are
+    const searching = this.lostT > 1.5 && this.lastSeen;
+    const px = P.car ? P.car.x : P.pos.x, pz = P.car ? P.car.z : P.pos.z;
     for (const v of this.policeCars) {
       if (!v.ai) continue;
-      const tx = P.car ? P.car.x : P.pos.x, tz = P.car ? P.car.z : P.pos.z; const d = Math.hypot(tx - v.x, tz - v.z);
+      const tx = searching ? this.lastSeen.x + Math.sin(this.lostT * 0.3 + v.x) * 20 : px, tz = searching ? this.lastSeen.z + Math.cos(this.lostT * 0.3 + v.z) * 20 : pz; const d = Math.hypot(tx - v.x, tz - v.z);
       if (this.wanted === 0) { v.siren = false; v.ai.mode = 'lane'; v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - tx, 0, v.z * 2 - tz); continue; }
       // route: follow the road grid towards the player (aim at the nearest road point beyond 40 m), direct pursuit when close
       v.ai.target = d < 45 ? new THREE.Vector3(tx, 0, tz) : this.roadWaypoint(v, tx, tz);
       v.ai.chaseSpeed = d < 30 ? (P.car ? 26 : 9) : 22 + this.wanted * 3;
-      if (this.los(v.x, 1.2, v.z, tx, 1.2, tz) && d < 90) seen = true;
-      if (!P.car && d < 16 && v.crew > 0 && Math.abs(v.speed) < 3) { // deploy
+      if (Math.hypot(px - v.x, pz - v.z) < 90 && this.los(v.x, 1.2, v.z, px, 1.2, pz)) seen = true;
+      if (!P.car && !searching && d < 16 && v.crew > 0 && Math.abs(v.speed) < 3) { // deploy
         for (let i = 0; i < v.crew; i++) {
           const c = new Character(this.scene, 'cop'); const side = i ? 1 : -1; const lx = Math.cos(v.yaw) * side, lz = -Math.sin(v.yaw) * side;
           c.pos.set(v.x + lx * 2, this.city.groundH(v.x, v.z), v.z + lz * 2); c.isCop = true; c.ai = { mode: 'cop', fireT: rand(0.8, 2) }; c.health = 100; this.cops.push(c);
@@ -185,8 +200,9 @@ export class Game {
     // officers on foot
     for (const c of this.cops) {
       if (c.dead) { c.update(dt); continue; }
-      const tx = P.car ? P.car.x : P.pos.x, tz = P.car ? P.car.z : P.pos.z; const dx = tx - c.pos.x, dz = tz - c.pos.z; const d = Math.hypot(dx, dz);
-      const vis = d < 60 && this.los(c.pos.x, 1.6, c.pos.z, tx, 1.2, tz);
+      const rd = Math.hypot(px - c.pos.x, pz - c.pos.z);
+      const vis = rd < 60 && this.los(c.pos.x, 1.6, c.pos.z, px, 1.2, pz);
+      const tx = !vis && searching ? this.lastSeen.x : px, tz = !vis && searching ? this.lastSeen.z : pz; const dx = tx - c.pos.x, dz = tz - c.pos.z; const d = Math.hypot(dx, dz);
       if (vis) seen = true;
       c.yaw += angWrap(Math.atan2(dx, dz) - c.yaw) * (1 - Math.exp(-8 * dt));
       let sp = 0;
@@ -199,16 +215,23 @@ export class Game {
       if (this.wanted > 0 && vis && d < 40 && c.ai.fireT <= 0) {
         c.ai.fireT = rand(0.7, 1.5) / (0.6 + this.wanted * 0.2); this.sfx.shot(0.5);
         const from = c.pos.clone().add(new THREE.Vector3(Math.sin(c.yaw) * 0.5, 1.45, Math.cos(c.yaw) * 0.5));
-        const hit = rng() < clamp(0.45 - d * 0.008, 0.08, 0.45) * (P.car ? 0.5 : 1);
+        const hit = rng() < clamp(0.45 - d * 0.008, 0.08, 0.45) * (P.car ? 0.5 : 1) * (P.cover ? 0.35 : 1);
         const to = new THREE.Vector3(tx + (hit ? 0 : rand(-2, 2)), 1.1 + (hit ? 0 : rand(-0.6, 1)), tz + (hit ? 0 : rand(-2, 2)));
         this.addTracer(from, to); if (hit) this.damagePlayer(rand(5, 11));
       }
       // arrest
-      if (!P.car && this.wanted <= 2 && d < 1.8 && this.playerSpeed < 0.8) { this.bustT = (this.bustT || 0) + dt; if (this.bustT > 1.6) this.busted(); } 
+      if (!P.car && this.wanted <= 2 && rd < 1.8 && this.playerSpeed < 0.8) { this.bustT = (this.bustT || 0) + dt; if (this.bustT > 1.6) this.busted(); } 
     }
+    if (this.wanted > 0 && this.police.update(dt, seen)) seen = true; // helicopter spotlight
+    else if (this.wanted === 0) this.police.update(dt, false);
     if (this.wanted > 0) {
       if (seen) { this.lostT = 0; this.lastSeen = P.pos.clone(); }
-      else { this.lostT += dt; if (this.lostT > 9 + this.wanted * 3) { this.hud.msg('你甩掉了警察', 2.5); this.wanted = 0; this.lostT = 0; } }
+      else {
+        // hiding still out of sight cools down faster; you must also be outside the red search circle (95 m) unless you wait it out
+        const still = (this.playerSpeed || 0) < 0.5; this.lostT += dt * (still ? 1.5 : 1);
+        const need = 9 + this.wanted * 3; const out = !this.lastSeen || Math.hypot(P.pos.x - this.lastSeen.x, P.pos.z - this.lastSeen.z) > 95;
+        if ((this.lostT > need && out) || this.lostT > need * 1.8) { this.hud.msg('你甩掉了警察', 2.5); this.wanted = 0; this.lostT = 0; this.police.log.push('lost'); }
+      }
     }
     this.wantedFlash = this.wanted > 0 && this.lostT > 1.5;
     // clean up: far / out of action police
@@ -246,14 +269,15 @@ export class Game {
     const P = this.P; const busted = this.busting; this.busting = false;
     if (P.car) { P.car.driver = null; P.car = null; }
     P.onFoot = true; this.player.root.visible = true; this.player.revive();
-    P.health = 100; P.armor = busted ? P.armor : 0; P.money = Math.max(0, P.money - (busted ? Math.floor(P.money * 0.08) : 500));
-    this.wanted = 0; this.lostT = 0; P.clip = 12; P.reserve = Math.max(P.reserve, 48);
+    P.health = 100; P.armor = busted ? P.armor : 0; P.money = Math.max(0, P.money - (busted ? Math.floor(P.money * 0.08) : 500)); if (busted) { for (const id of ['smg', 'shotgun', 'rifle']) delete P.load.owned[id]; if (!P.load.owned[P.load.cur]) P.load.cur = 'pistol'; }
+    this.wanted = 0; this.lostT = 0; P.cover = null; const pa = P.load.owned.pistol; if (pa) pa.reserve = Math.max(pa.reserve, 48);
     const s = busted ? PRECINCT : HOSPITAL; this.tp(s.x, s.z, s.yaw);
     this.hud.big('', '#fff'); this.hud.msg(busted ? '你被保释出狱 · 罚款已扣除' : '你在医院醒来 · 医药费 $500', 3.5);
   }
   // ------------------------------------------------------------------ main update ----
   update(dt) {
     if (!this.started) return;
+    dt *= this.slowmo;
     const P = this.P;
     this.input(dt);
     if (this.deadT > 0) { this.deadT -= dt; if (this.deadT <= 0) this.respawn(); }
@@ -277,9 +301,9 @@ export class Game {
     if (P.onFoot) this.updateOnFoot(dt);
     else { const v = P.car; P.pos.set(v.x, v.y, v.z); this.playerSpeed = Math.abs(v.speed); if (v.inWater && v.y < -2) { this.toggleCar(); this.tp(v.x, v.z); this.damagePlayer(30); } }
     this.player.update(dt);
-    this.mission.update(dt);
-    // timers
-    P.fireT -= dt; if (P.reloadT > 0) { P.reloadT -= dt; if (P.reloadT <= 0) { const n = Math.min(12 - P.clip, P.reserve); P.clip += n; P.reserve -= n; } }
+    this.mission.update(dt); this.missions.update(dt); this.world.update(dt); this.updateGang(dt);
+    this.arsenal.update(dt); P.reloadT = this.arsenal.reloadT;
+    if (this.saveT === undefined) this.saveT = 30; this.saveT -= dt; if (this.saveT <= 0) { this.saveT = 30; this.save(); }
     this.flash.intensity *= Math.exp(-dt * 40);
     for (const t of [...this.tracers]) { t.t -= dt; if (t.t <= 0) { this.scene.remove(t.l); t.l.geometry.dispose(); this.tracers.splice(this.tracers.indexOf(t), 1); } }
     this.crimeCooldown -= dt;
@@ -306,7 +330,7 @@ export class Game {
       v.input.steer = ov ? ov.steer : (k.KeyA || k.ArrowLeft ? 1 : 0) - (k.KeyD || k.ArrowRight ? 1 : 0);
       v.input.handbrake = ov ? !!ov.handbrake : !!k.Space;
       if (v.type === 'police' && k.KeyE) { v.siren = !v.siren; k.KeyE = false; }
-    } else if (this.mouse.down) this.shoot();
+    } else if ((this.mouse.down || (ov && ov.fire)) && !this.world.menu && !this.world.phoneOpen) { this.arsenal.trigger(true, this.mouse.edge || (ov && ov.fire === 'edge')); this.mouse.edge = false; if (ov && ov.fire === 'edge') ov.fire = false; }
   }
   updateOnFoot(dt) {
     const P = this.P, k = this.keys, c = this.player; const ov = this.override;
@@ -317,13 +341,18 @@ export class Game {
     const yawC = this.cam.yaw + Math.PI; // camera forward yaw
     const fx = Math.sin(yawC), fz = Math.cos(yawC), rx = -Math.cos(yawC), rz = Math.sin(yawC);
     let dx = fx * mz + rx * mx, dz = fz * mz + rz * mx; const len = Math.hypot(dx, dz);
-    const sprint = ov ? !!ov.sprint : !!(k.ShiftLeft || k.ShiftRight); const walk = !!(k.ControlLeft || k.AltLeft);
+    let sprint = ov ? !!ov.sprint : !!(k.ShiftLeft || k.ShiftRight); const walk = !!(k.ControlLeft || k.AltLeft);
+    // v4.3 stamina: sprinting drains it; at 0 you can't sprint until it refills past 25
+    if (P.stamina === undefined) P.stamina = 100;
+    if (P.tired && P.stamina > 25) P.tired = false; if (P.stamina <= 0.5) P.tired = true; if (P.tired) sprint = false;
+    P.stamina = clamp(P.stamina + ((sprint && Math.hypot(mx, mz) > 0.01) ? -12 : 16) * dt, 0, 100);
+    if (P.cover) { if (Math.hypot(mx, mz) > 0.01 && Math.hypot(P.pos.x - P.cover.x, P.pos.z - P.cover.z) > 0.8) P.cover = null; else if (Math.hypot(mx, mz) > 0.01) { mx *= 0.35; mz *= 0.35; sprint = false; } }
     let sp = 0;
     const gh = this.city.groundH(P.pos.x, P.pos.z);
     const swim = gh < -1.25;
     if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0; P.yaw += angWrap(Math.atan2(dx, dz) - P.yaw) * (1 - Math.exp(-12 * dt)); }
     P.sprint = sprint && len > 0.01 && !swim;
-    if (this.mouse.aim || this.mouse.down) P.yaw = yawC; // face aim direction
+    if (this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire))) P.yaw = yawC; // face aim direction
     this.curSpeed = damp(this.curSpeed || 0, sp, 10, dt);
     const nx = P.pos.x + Math.sin(P.yaw) * this.curSpeed * dt * (len > 0.01 ? 1 : 0), nz = P.pos.z + Math.cos(P.yaw) * this.curSpeed * dt * (len > 0.01 ? 1 : 0);
     const r = this.city.col.resolve(nx, nz, 0.35, P.pos.y + 0.5);
@@ -399,7 +428,7 @@ export class Game {
         this.camera.position.copy(p); this.camera.lookAt(p.clone().addScaledVector(f, 10).add(new THREE.Vector3(0, -0.3, 0))); return;
       }
     } else {
-      target = P.pos.clone(); target.y += 1.55; const aim = this.mouse.aim; dist = aim ? 2.0 : 3.3; side = aim ? 0.55 : 0.42; height = 0;
+      target = P.pos.clone(); target.y += P.cover ? 1.0 : 1.55; const aim = this.mouse.aim || (this.override && this.override.aim); dist = aim ? 2.0 : 3.3; side = aim ? 0.55 : 0.42; height = 0;
     }
     const cp = Math.cos(C.pitch), sp = Math.sin(C.pitch);
     const off = new THREE.Vector3(Math.sin(C.yaw) * cp, -sp, Math.cos(C.yaw) * cp).multiplyScalar(dist);
@@ -419,8 +448,47 @@ export class Game {
     const P = this.P; return {
       pos: [+P.pos.x.toFixed(1), +P.pos.y.toFixed(2), +P.pos.z.toFixed(1)], inCar: !!P.car, carType: P.car && P.car.type, speedKmh: P.car ? Math.round(Math.abs(P.car.speed) * 3.6) : 0,
       wanted: this.wanted, policeCars: this.policeCars.length, cops: this.cops.filter((c) => !c.dead).length, health: Math.round(P.health), armor: Math.round(P.armor), money: P.money,
-      traffic: this.traffic.cars.length, peds: this.peds.list.length, deadPeds: this.peds.list.filter((c) => c.dead).length, clip: P.clip,
+      traffic: this.traffic.cars.length, peds: this.peds.list.length, deadPeds: this.peds.list.filter((c) => c.dead).length,
+      weapon: P.load.cur, clip: (P.load.owned[P.load.cur] || {}).clip, reserve: (P.load.owned[P.load.cur] || {}).reserve, bank: P.bank, stamina: Math.round(P.stamina || 0),
+      who: this.world.profiles[this.world.cur] ? this.world.profiles[this.world.cur].name : '', mission: this.missions.active ? this.missions.active.id + ':' + this.missions.stage : '', cover: !!P.cover,
+      heli: !!this.police.heli, roadblocks: this.police.blocks.length, gang: this.gang.filter((c) => !c.dead).length,
     };
+  }
+  // v4.3 hostile gang members (码头火并): hold near their cover spot, strafe, fire when they can see you
+  updateGang(dt) {
+    const P = this.P; const px = P.car ? P.car.x : P.pos.x, pz = P.car ? P.car.z : P.pos.z;
+    for (const c of [...this.gang]) {
+      if (c.dead) { c.update(dt); if (c.pos.distanceTo(P.pos) > 160) { this.gang.splice(this.gang.indexOf(c), 1); c.dispose(); } continue; }
+      if (!c.hostile) { c.setLocomotion(0, dt); c.update(dt); continue; }
+      const dx = px - c.pos.x, dz = pz - c.pos.z; const d = Math.hypot(dx, dz);
+      const vis = d < 50 && this.los(c.pos.x, 1.5, c.pos.z, px, 1.2, pz);
+      c.yaw += angWrap(Math.atan2(dx, dz) - c.yaw) * (1 - Math.exp(-6 * dt));
+      // strafe around the home cover spot
+      const h = c.ai.home; c.ai.st = (c.ai.st || rand(0, 6)) + dt; const tx = h.x + Math.sin(c.ai.st * 0.7) * 2.2, tz = h.z + Math.cos(c.ai.st * 0.5) * 1.5;
+      const mvx = tx - c.pos.x, mvz = tz - c.pos.z; const md = Math.hypot(mvx, mvz); let sp = 0;
+      if (md > 0.3) { sp = Math.min(3, md * 2); const r = this.city.col.resolve(c.pos.x + mvx / md * sp * dt, c.pos.z + mvz / md * sp * dt, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; }
+      c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt));
+      c.setLocomotion(sp, dt); c.update(dt);
+      c.ai.fireT -= dt;
+      if (vis && d < 45 && c.ai.fireT <= 0 && this.deadT <= 0) {
+        c.ai.fireT = rand(0.9, 1.8); this.sfx.shot(0.45);
+        const from = c.pos.clone().add(new THREE.Vector3(Math.sin(c.yaw) * 0.5, 1.45, Math.cos(c.yaw) * 0.5));
+        const hit = rng() < clamp(0.4 - d * 0.008, 0.06, 0.4) * (P.cover ? 0.35 : 1) * (P.car ? 0.5 : 1);
+        this.addTracer(from, new THREE.Vector3(px + (hit ? 0 : rand(-2, 2)), 1.1 + (hit ? 0 : rand(-0.6, 1)), pz + (hit ? 0 : rand(-2, 2)))); if (hit) this.damagePlayer(rand(4, 9));
+      }
+    }
+  }
+  // v4.3 autosave (localStorage): cash, bank, guns, assets, mission record for both protagonists
+  save() {
+    if (this.SNAP) return; try {
+      const pr = this.world.profiles.map((p) => ({ money: p.P.money, bank: p.P.bank, load: p.P.load, assets: p.P.assets, outfit: p.P.outfit }));
+      localStorage.setItem('portsolana_v43', JSON.stringify({ pr, done: this.missions.done, valet: this.mission.jobs }));
+    } catch (e) { }
+  }
+  loadSave() {
+    try { const s = JSON.parse(localStorage.getItem('portsolana_v43') || 'null'); if (!s) return false;
+      s.pr.forEach((d, i) => { const p = this.world.profiles[i]; if (!p) return; Object.assign(p.P, { money: d.money, bank: d.bank, load: d.load, assets: d.assets || [], outfit: d.outfit }); });
+      this.missions.done = s.done || {}; this.hud.msg('已读取存档', 2); return true; } catch (e) { return false; }
   }
   // ---- test helpers
   carNearPlayer(type = 'sedan', dist = 5) {

@@ -75,6 +75,7 @@ export function prepareCharacters(G) {
   }
 }
 const pickKind = (kind, opt) => {
+  if (opt.proto && PROTOS[opt.proto]) return opt.proto;
   if (opt.player) return 'hero';
   if (kind === 'cop') return 'cop';
   const pool = Object.keys(PROTOS).filter((k) => k !== 'hero' && k !== 'cop' && (kind === 'man' ? PROTOS[k].sex === 'm' : kind === 'woman' ? PROTOS[k].sex === 'f' : true));
@@ -87,7 +88,7 @@ export class Character {
     const pk = pickKind(kind, opt); const P = PROTOS[pk]; this.kind = kind; this.proto = pk; this.id = CID++; this.isCop = kind === 'cop';
     this.model = SkeletonUtils.clone(P.scene);
     this.root = new THREE.Group(); this.root.add(this.model); scene.add(this.root); this.scene = scene;
-    if (!opt.player && kind !== 'cop' && rng() < 0.75) {
+    if (!opt.player && !opt.player2 && kind !== 'cop' && rng() < 0.75) {
       // wardrobe variety: shift the hue / value of clothing (never skin, eyes or hair)
       const t = pick([[rand(-0.5, 0.5), rand(0.7, 1.3), rand(0.75, 1.2)], [0, rand(0.2, 0.6), rand(1.1, 1.4)], [rand(-0.5, 0.5), 1, rand(0.5, 0.8)]]);
       this.model.traverse((o) => {

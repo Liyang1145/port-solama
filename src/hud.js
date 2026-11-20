@@ -3,6 +3,7 @@
 // bottom-left light translucent rounded-rect minimap that tints blue in a chase and shows a red search zone once police lose you.
 // Everything except the minimap fades out when nothing is happening; Tab peeks all of it.
 import { LAYOUT } from './city.js';
+import { POI, MISSION_STARTS } from './mapdata.js';
 
 const AREAS = [
   { test: (x, z) => x > 335, name: '棕榈海滩', sub: '海滨' },
@@ -60,8 +61,8 @@ export class HUD {
     this.cashT -= dt; if (this.cashT <= 0) this.cashEl.style.opacity = 0;
     this.hurtT -= dt; this.hurtEl.style.opacity = this.hurtT > 0 ? 1 : (P.health < 25 ? 0.5 : 0);
     // stamina (visual only): drains while sprinting, refills otherwise
-    this.stam = Math.max(0, Math.min(100, this.stam + (P.sprint ? -9 : 14) * dt));
-    const combat = G.wanted > 0 || G.mouse.aim || G.mouse.down || P.reloadT > 0;
+    this.stam = P.stamina ?? 100;
+    const combat = G.wanted > 0 || G.mouse.aim || G.mouse.down || P.reloadT > 0 || (G.arsenal && G.arsenal.fireT > -2);
     if (combat || P.health < 60 || P.health !== this.lastHP) this.statT = Math.max(this.statT, 4);
     if (P.money !== this.lastMoney) { if (this.lastMoney >= 0) this.statT = Math.max(this.statT, 3.5); this.lastMoney = P.money; }
     this.lastHP = P.health;
@@ -75,14 +76,14 @@ export class HUD {
     this.stars.forEach((s, i) => s.classList.toggle('on', i < G.wanted));
     this.$('stars').classList.toggle('lost', G.wantedFlash);
     if (G.wanted > 0) {
-      const ev = ['脸', '衣'];
+      const ev = ['脸']; if (!G.evidenceOutfitCleared) ev.push('衣');
       if (P.car || G.lastCrimeInCar) ev.push('车');
-      if (G.mouse.down || P.fireT > -2) ev.push('枪');
+      if (G.lastWeaponCrime) ev.push('枪');
       const key = ev.join('');
       if (key !== this.evKey) { this.evKey = key; this.$('evid').innerHTML = ev.map((e) => `<i>${e}</i>`).join(''); }
     }
     this.$('cashv').textContent = '$' + P.money.toLocaleString('en-US');
-    this.$('ammo').innerHTML = P.reloadT > 0 ? '换弹中' : `${P.clip}<small> / ${P.reserve}</small>`;
+    { const A = G.arsenal, w = A.cur, a = A.ammo(); this.$('ammo').innerHTML = `<small style="font-size:13px;margin-right:6px">${w.name}</small>` + (w.melee ? '' : A.reloadT > 0 ? '换弹中' : `${a.clip}<small> / ${a.reserve}</small>`); }
     const v = this.$('veh');
     if (P.car) { v.innerHTML = Math.round(Math.abs(P.car.speed) * 3.6) + '<small>km/h</small>'; v.style.opacity = 1; } else v.style.opacity = 0;
     this.$('cross').style.display = P.onFoot && (G.mouse.aim || G.mouse.down) ? 'block' : 'none';
@@ -115,10 +116,16 @@ export class HUD {
       g.fillStyle = `rgba(235,40,60,${0.28 + Math.sin(t * 3) * 0.06})`;
       g.beginPath(); g.arc((this.searchPos.x - M.X0) * M.S, (this.searchPos.z - M.Z0) * M.S, 95 * M.S, 0, 7); g.fill();
     }
-    const tg = G.mission && (G.mission.target || (G.mission.state === 'idle' ? { x: 281, z: 10 } : null));
+    // v4.3 map icons: shops (letters in coloured discs) + mission starts (yellow letters)
+    const icon = (x, z, t, col, r = 7) => { const ix = (x - M.X0) * M.S, iz = (z - M.Z0) * M.S; g.save(); g.translate(ix, iz); g.rotate(-(Math.PI + yaw)); g.fillStyle = col; g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 1.2 / zoom; g.beginPath(); g.arc(0, 0, r / zoom, 0, 7); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.font = `bold ${10 / zoom}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, 0, 0.5 / zoom); g.restore(); };
+    for (const p of [POI.gunshop, POI.clothes, POI.modshop, ...POI.stores]) icon(p.x, p.z, p.icon, p.col);
+    for (const a of POI.atms) icon(a.x, a.z, '$', '#2f9e5b', 5);
+    if (G.missions && !G.missions.active) for (const s of MISSION_STARTS) icon(s.x, s.z, s.letter, '#e0a91f', 8);
+    const tg = (G.missions && G.missions.target) || (G.mission && G.mission.target) || G.waypoint || (G.mission && G.mission.state === 'idle' ? { x: 281, z: 10 } : null);
+    if (G.waypoint && Math.hypot(G.waypoint.x - P.pos.x, G.waypoint.z - P.pos.z) < 8) G.waypoint = null;
     if (tg) { // v4.3 mission GPS: magenta route hint + yellow blip
       const tx = (tg.x - M.X0) * M.S, tz = (tg.z - M.Z0) * M.S, px = (P.pos.x - M.X0) * M.S, pz = (P.pos.z - M.Z0) * M.S;
-      if (G.mission.target) { g.strokeStyle = 'rgba(214,60,190,.85)'; g.lineWidth = 3.2 / zoom; g.setLineDash([5 / zoom, 4 / zoom]); g.beginPath(); g.moveTo(px, pz); g.lineTo(tx, tz); g.stroke(); g.setLineDash([]); }
+      if (tg !== undefined && (G.mission.target || (G.missions && G.missions.target) || G.waypoint)) { g.strokeStyle = 'rgba(214,60,190,.85)'; g.lineWidth = 3.2 / zoom; g.setLineDash([5 / zoom, 4 / zoom]); g.beginPath(); g.moveTo(px, pz); g.lineTo(tx, tz); g.stroke(); g.setLineDash([]); }
       g.fillStyle = '#ffc34d'; g.strokeStyle = '#3a2a00'; g.lineWidth = 1.5 / zoom; g.beginPath(); g.arc(tx, tz, 6 / zoom, 0, 7); g.fill(); g.stroke();
     }
     g.restore();

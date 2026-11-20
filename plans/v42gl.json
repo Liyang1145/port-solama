@@ -1,0 +1,1 @@
+{"query": "hour=18.3&ao=1&lowshadow&probe=0", "shots": [{"name": "golden", "js": "__G.setHour(18.3); const g=__G.game; g.tp(283,40,Math.PI); g.cam.yaw=0.15; g.cam.pitch=-0.05; __G.step(12); 0"}]}
