@@ -388,6 +388,54 @@ export class Traffic {
     this.scene = scene; this.city = city; this.cars = []; this.phase = 0; this.phaseT = 0;
     this.segs = city.segs;
     this.inter = new Map(); for (const i of city.inters) this.inter.set(Math.round(i.x) + ',' + Math.round(i.z), i);
+    // r5.0 ribbon road graph (causeway, pearl island, mainland curved/diagonal streets): pieces between junctions
+    const R = city.region && city.region.data;
+    if (R) {
+      this.rib = { pieces: R.pieces, nodes: new Map(), total: 0, J: new Map(R.junctions.map((J) => [J.id, J])) };
+      for (const pc of R.pieces) { for (const [end, node] of [['a', pc.a], ['b', pc.b]]) { if (!this.rib.nodes.has(node)) this.rib.nodes.set(node, []); this.rib.nodes.get(node).push({ pc, end }); } this.rib.total += pc.s1 - pc.s0; }
+      this.rib.portal = R.pieces.find((pc) => pc.road.id === 'sun' && pc.s0 === 0);
+    }
+    this._nq = {};
+  }
+  ribLanes(pc) { return pc.kind === 0 ? [1.75, 5.25] : [2.2]; }
+  ribPoint(pc, dir, lane, s, out = new THREE.Vector3()) {
+    const p = pc.road.path.at(s); const fx = p.tx * dir, fz = p.tz * dir; const L = this.ribLanes(pc); const off = L[Math.min(lane, L.length - 1)];
+    return out.set(p.x - fz * off, 0, p.z + fx * off);
+  }
+  bez(from, ctrl, to) { const pts = []; for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3().copy(from).multiplyScalar((1 - t) ** 2).addScaledVector(ctrl, 2 * t * (1 - t)).addScaledVector(to, t * t)); } return pts; }
+  planRib(v) {
+    const a = v.ai, pc = a.pc; const endS = a.dir > 0 ? pc.s1 : pc.s0; const node = a.dir > 0 ? pc.b : pc.a;
+    const from = this.ribPoint(pc, a.dir, a.lane, endS); const f = pc.road.path.at(endS); const fx = f.tx * a.dir, fz = f.tz * a.dir;
+    if (pc === this.rib.portal && a.dir < 0) { // causeway -> island grid street z=0
+      const seg = this.findSeg('x', 0, -15);
+      if (seg) { const to = this.lanePoint(seg, 1, a.lane, seg.a0 + 6); return { pts: this.bez(from, from.clone().add(to).multiplyScalar(0.5), to), next: { mode: 'lane', seg, dir: 1, lane: a.lane }, straight: true }; }
+    }
+    const opts = (this.rib.nodes.get(node) || []).filter((o) => !(o.pc === pc && o.end === (a.dir > 0 ? 'b' : 'a')));
+    let ch = null, g = 0;
+    if (opts.length) {
+      const W = opts.map((o) => { const dir2 = o.end === 'a' ? 1 : -1; const q = o.pc.road.path.at(o.end === 'a' ? o.pc.s0 : o.pc.s1); const gg = q.tx * dir2 * fx + q.tz * dir2 * fz; return { o, dir2, gg, w: 0.25 + Math.max(0, gg) * 3 }; });
+      let r = rng() * W.reduce((t, x) => t + x.w, 0); for (const x of W) { r -= x.w; if (r <= 0) { ch = { pc: x.o.pc, dir: x.dir2 }; g = x.gg; break; } } if (!ch) { ch = { pc: W[0].o.pc, dir: W[0].dir2 }; g = W[0].gg; }
+    } else ch = { pc, dir: -a.dir, uturn: true };
+    const lanes = this.ribLanes(ch.pc).length; const lane = ch.uturn ? 0 : Math.min(a.lane, lanes - 1);
+    const startS = ch.uturn ? endS : (ch.dir > 0 ? ch.pc.s0 : ch.pc.s1);
+    const to = this.ribPoint(ch.pc, ch.dir, lane, startS);
+    const J = this.rib.J.get(node);
+    const ctrl = ch.uturn ? from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(fx * 9, 0, fz * 9)) : (g > 0.95 || !J ? from.clone().add(to).multiplyScalar(0.5) : new THREE.Vector3(J.x, 0, J.z));
+    return { pts: this.bez(from, ctrl, to), next: { mode: 'rib', pc: ch.pc, dir: ch.dir, lane, s: startS }, straight: !ch.uturn && g > 0.9 };
+  }
+  spawnRib(type, nearPos, minD, maxD, avoidDir) {
+    const R = this.rib; let t = rng() * R.total, pc = R.pieces[0]; for (const p of R.pieces) { t -= p.s1 - p.s0; if (t <= 0) { pc = p; break; } }
+    if (pc.s1 - pc.s0 < 16) return null;
+    const dir = rng() < 0.5 ? 1 : -1; const lane = rng() < 0.5 ? 0 : this.ribLanes(pc).length - 1; const s = lerp(pc.s0 + 6, pc.s1 - 6, rng());
+    const p = this.ribPoint(pc, dir, lane, s); const d = Math.hypot(p.x - nearPos.x, p.z - nearPos.z);
+    if (d < minD || d > maxD) return null;
+    if (avoidDir && (p.x - nearPos.x) * avoidDir.x + (p.z - nearPos.z) * avoidDir.z > d * 0.5 && d < 160) return null;
+    if (this.cars.some((c) => Math.hypot(c.x - p.x, c.z - p.z) < 12)) return null;
+    const q = pc.road.path.at(s); const yaw = Math.atan2(q.tx * dir, q.tz * dir);
+    const v = new Vehicle(this.scene, type); v.place(p.x, p.z, yaw);
+    const sp = pc.kind === 0 ? rand(13, 19) : rand(9, 12.5); v.vx = Math.sin(yaw) * sp * 0.8; v.vz = Math.cos(yaw) * sp * 0.8;
+    v.ai = { mode: 'rib', pc, dir, lane, s, cruise: sp, path: null, pi: 0, stuck: 0 };
+    this.cars.push(v); return v;
   }
   laneOffset(seg, dir, lane) { return 1.75 + lane * 3.5; }
   // world point on a lane at coordinate s along the segment axis
@@ -400,7 +448,9 @@ export class Traffic {
   }
   findSeg(axis, c, s) { return this.segs.find((g) => g.axis === axis && Math.abs(g.c - c) < 0.5 && s >= g.a0 - 0.5 && s <= g.a1 + 0.5); }
   spawnCar(type, nearPos, minD = 110, maxD = 240, avoidDir = null) {
+    const ribP = this.rib ? (nearPos.x < -120 || Math.abs(nearPos.z) > 400 ? 0.92 : 0.12) : 0;
     for (let tries = 0; tries < 30; tries++) {
+      if (rng() < ribP) { const r = this.spawnRib(type, nearPos, minD, maxD, avoidDir); if (r) return r; continue; }
       const seg = pick(this.segs); const dir = rng() < 0.5 ? 1 : -1; let lane = rng() < 0.5 ? 0 : 1; if (seg.axis === 'z' && seg.c === 290 && dir > 0) lane = 0;
       const s = lerp(seg.a0 + 6, seg.a1 - 6, rng());
       const p = this.lanePoint(seg, dir, lane, s);
@@ -434,6 +484,11 @@ export class Traffic {
         const ss = this.findSeg(other, other === 'z' ? it.x : it.z, (other === 'z' ? it.z : it.x) + d * 15);
         if (ss) options.push({ seg: ss, dir: d, w: 1 });
       }
+    }
+    // r5.0: the west end of the z=0 street continues onto the causeway (ribbon graph)
+    if (!it && this.rib && this.rib.portal && seg.axis === 'x' && Math.abs(seg.c) < 0.5 && a.dir < 0 && Math.abs(endS - seg.a0) < 1) {
+      const to = this.ribPoint(this.rib.portal, 1, a.lane, 8);
+      return { pts: this.bez(from, from.clone().add(to).multiplyScalar(0.5), to), next: { mode: 'rib', pc: this.rib.portal, dir: 1, lane: a.lane, s: 8 }, straight: true };
     }
     let ch;
     if (!options.length) { ch = { seg, dir: -a.dir, uturn: true }; }
@@ -469,7 +524,14 @@ export class Traffic {
         const P = a.path.pts; let p = P[a.pi];
         while (a.pi < P.length - 1 && Math.hypot(p.x - v.x, p.z - v.z) < 4.5) { a.pi++; p = P[a.pi]; }
         tgt.copy(p); desired = a.path.straight ? a.cruise : 6.5;
-        if (a.pi >= P.length - 1 && Math.hypot(p.x - v.x, p.z - v.z) < 4.5) { Object.assign(a, a.path.next); a.mode = 'lane'; a.path = null; }
+        if (a.pi >= P.length - 1 && Math.hypot(p.x - v.x, p.z - v.z) < 4.5) { const nx = a.path.next; Object.assign(a, nx); a.mode = nx.mode || 'lane'; a.path = null; }
+      } else if (a.mode === 'rib') {
+        const pc = a.pc; const path = pc.road.path; path.nearest(v.x, v.z, this._nq, a.s, 20); a.s = this._nq.s;
+        const remain = a.dir > 0 ? pc.s1 - a.s : a.s - pc.s0;
+        if (remain < 3) { a.path = this.planRib(v); a.mode = 'turn'; a.pi = 1; continue; }
+        if (remain < 18) desired = Math.min(desired, 9);
+        const p1 = path.at(a.s), p2 = path.at(a.s + a.dir * 30); const bend = Math.abs(p1.tx * p2.tz - p1.tz * p2.tx); desired = Math.min(desired, a.cruise * (1 - bend * 0.6));
+        this.ribPoint(pc, a.dir, a.lane, a.s + a.dir * (7 + Math.abs(v.speed) * 0.5), tgt);
       } else if (a.mode === 'chase' || a.mode === 'flee') {
         tgt.copy(a.target || player.pos); desired = a.mode === 'chase' ? a.chaseSpeed || 24 : 26;
       }

@@ -336,6 +336,10 @@ export function simpleMats(T) {
   });
   const grass = texSet(T, 'grass', 1); for (const t of [grass.map, grass.normalMap, grass.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
   M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass');
+  // r5.0 mainland / pearl-island ground: sits 6 cm below the road ribbons (polygonOffset pushed it behind the water at grazing angles)
+  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc');
+  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg');
+  M.pool = prep(new THREE.MeshStandardMaterial({ color: 0x2aa9bd, roughness: 0.06, metalness: 0.0, emissive: 0x0a3a44, emissiveIntensity: 0.6 }), 'pool');
   M.roof = prep(new THREE.MeshStandardMaterial({ map: conc.map, color: 0x9a948c, roughness: 0.95 }), 'roof');
   M.white = prep(new THREE.MeshStandardMaterial({ color: 0xeeeae2, roughness: 0.7, map: T.plaster_d }), 'whitep');
   M.metal = prep(new THREE.MeshStandardMaterial({ color: 0x5a5d60, roughness: 0.45, metalness: 0.85 }), 'metal');

@@ -1,75 +1,59 @@
-// Top-down layout map of Port Solana (MAP_DESIGN.md) -> shots/map/port_solana_map.png. Reads the same POI table the game uses
-// (src/mapdata.js) and mirrors the LAYOUT / PIERS constants of src/city.js. Rendered as SVG with sharp. node tools/mapgen.cjs
+// r5.0 top-down layout map of Port Solana (MAP_DESIGN.md) -> shots/map/port_solana_map.png (+ _full.png).
+// Reads the SAME data the game uses: src/mapdata.js (POI, REGION control points) and src/mapgeo.js (paths, junctions, lots,
+// coastlines), plus the Deco-district grid constants of src/city.js. So the design doc, this map and the game cannot disagree.
+// node tools/mapgen.cjs
 const fs = require('fs'), path = require('path'), sharp = require('sharp');
 (async () => {
-  const { POI, MISSION_STARTS } = await import(path.resolve('src/mapdata.js'));
+  const { POI, MISSION_STARTS, REGION } = await import(path.resolve('src/mapdata.js'));
+  const G = await import(path.resolve('src/mapgeo.js'));
+  const D = G.buildRegionData();
   const city = fs.readFileSync('src/city.js', 'utf8');
   const PIERS = eval(/export const PIERS = (\[.*?\]);/.exec(city)[1]);
-  const NS = [50, 170, 290], EW = [-300, -150, 0, 150, 300], RH = 7, IX = [-22, 335], IZ = [-372, 372], BX = [335, 480];
-  const X0 = -470, X1 = 600, Z0 = -560, Z1 = 560, S = 1.25; const W = (X1 - X0) * S, H = (Z1 - Z0) * S + 110;
-  // north (+z) up: screen y = (Z1 - z) * S
-  const px = (x) => ((x - X0) * S).toFixed(1), pz = (z) => ((Z1 - z) * S).toFixed(1);
-  const R = (x0, z0, x1, z1, fill, extra = '') => `<rect x="${px(Math.min(x0, x1))}" y="${pz(Math.max(z0, z1))}" width="${(Math.abs(x1 - x0) * S).toFixed(1)}" height="${(Math.abs(z1 - z0) * S).toFixed(1)}" fill="${fill}" ${extra}/>`;
-  const T = (x, z, t, size = 13, fill = '#1d232b', w = 700, anchor = 'middle') => `<text x="${px(x)}" y="${pz(z)}" font-size="${size}" font-weight="${w}" fill="${fill}" text-anchor="${anchor}" font-family="Noto Sans CJK SC, PingFang SC, sans-serif">${t}</text>`;
-  const out = [];
-  out.push(`<rect width="${W}" height="${H}" fill="#8fc6d6"/>`);
-  out.push(R(-1000, -1500, -400, 1500, '#cfd5dc')); // mainland skyline strip
-  for (let z = -540; z < 540; z += 46) out.push(R(-470, z, -405, z + 30, '#a9b1bb'));
-  out.push(T(-437, 520, '湾对岸市中心', 13, '#39424d')); out.push(T(-437, 500, '（远景 · 第 3 期）', 11, '#39424d', 500));
-  out.push(R(IX[0], IZ[0], BX[0], IZ[1], '#dfe3e8'));
-  out.push(R(BX[0], IZ[0] - 8, BX[1], IZ[1] + 8, '#f1e5c4'));
-  out.push(R(BX[1], IZ[0] - 8, 520, IZ[1] + 8, '#b9e1e6'));
-  for (const zj of [IZ[0] - 1.5, IZ[1] + 1.5]) out.push(R(BX[0], zj - 3, 540, zj + 3, '#8d8a84'));
-  // blocks + buildings rows + alleys
-  const bet = (arr, lo, hi) => { const a = [lo, ...arr, hi], o = []; for (let i = 0; i < a.length - 1; i++) { const s = a[i] + (i === 0 ? 0 : RH), e = a[i + 1] - (i === a.length - 2 ? 0 : RH); if (e - s > 4) o.push([s, e]); } return o; };
-  const XS = bet(NS, IX[0], 290 + RH).filter((p) => p[1] <= 290), ZS = bet(EW, IZ[0], IZ[1]);
-  for (const [x0, x1] of XS) for (const [z0, z1] of ZS) {
-    out.push(R(x0, z0, x1, z1, '#c4cad2'));
-    const ix0 = x0 + 4.5, ix1 = x1 - 4.5, iz0 = z0 + 4.5, iz1 = z1 - 4.5;
-    const corner = x0 < 0 && (z0 < -360 || z1 > 360);
-    if (corner) { out.push(R(ix0, iz0, ix1, iz1, z0 < 0 ? '#b8a990' : '#a4927c')); for (let i = 0; i < 5; i++) out.push(R(ix0 + 4, iz0 + 4 + i * 10, ix1 - 4, iz0 + 6.5 + i * 10, ['#a3402f', '#2c5c8c', '#c98a2a', '#3f7a52', '#7c7c7c'][i])); continue; }
-    if (x0 < 0) { out.push(R(ix0 + 4, (iz0 + iz1) / 2 - 22, ix1 - 6, (iz0 + iz1) / 2 + 22, '#9aa3ae')); continue; }
-    const mid = (iz0 + iz1) / 2; const tide = x1 > 279 && x0 > 170;
-    out.push(R(ix0, iz0, ix0 + 22, mid - 3, '#a9b1bb')); out.push(R(ix0, mid + 3, ix0 + 22, iz1, '#a9b1bb'));
-    if (tide) out.push(R(ix1 - 3.5 - 22, iz0, ix1 - 3.5, iz1, '#e8b7b0')); else { out.push(R(ix1 - 22, iz0, ix1, mid - 3, '#a9b1bb')); out.push(R(ix1 - 22, mid + 3, ix1, iz1, '#a9b1bb')); }
-    out.push(R(ix0, mid - 3, tide ? ix1 - 26 : ix1, mid + 3, '#f6f2ea', 'stroke="#d07a3a" stroke-dasharray="4 3" stroke-width="1"'));
-  }
-  for (const [z0, z1] of ZS) out.push(R(290 + RH, z0, BX[0], z1, '#bfdcae'));
-  // roads (hierarchy: main avenues wider stroke)
-  for (const x of NS) out.push(R(x - RH, IZ[0], x + RH, IZ[1], '#ffffff', x === 290 ? 'stroke="#f2c14e" stroke-width="2"' : ''));
-  for (const z of EW) out.push(R(IX[0], z - RH, 290 + RH, z + RH, '#ffffff'));
-  // piers + boats
-  for (const p of PIERS) { out.push(R(p.x0, p.z - p.hw, p.x1, p.z + p.hw, '#8a6b4a')); for (let x = p.x0 + 8; x < p.x1 - 8; x += 15) for (const s of [-1, 1]) out.push(`<ellipse cx="${px(x)}" cy="${pz(p.z + s * (p.hw + 2.6))}" rx="${(6 * S).toFixed(1)}" ry="${(1.7 * S).toFixed(1)}" fill="#fafafa" stroke="#555" stroke-width="0.6"/>`); }
-  // phase-2 causeway (dashed)
-  out.push(R(-400, -5, IX[0], 5, 'none', 'stroke="#555" stroke-dasharray="8 6" stroke-width="1.5"'));
-  out.push(T(-210, 14, '日光堤道 + 灯塔小岛（第 2 期）', 12, '#30383f', 600));
-  // landmarks
-  out.push(`<circle cx="${px(POI.lighthouse.x)}" cy="${pz(POI.lighthouse.z)}" r="7" fill="#c8261c" stroke="#fff" stroke-width="2"/>`); out.push(T(POI.lighthouse.x, POI.lighthouse.z - 16, '灯塔', 13));
-  out.push(`<circle cx="${px(POI.wheel.x)}" cy="${pz(POI.wheel.z)}" r="${(16 * S).toFixed(1)}" fill="none" stroke="#d6408a" stroke-width="3"/>`); out.push(T(POI.wheel.x, POI.wheel.z + 26, '摩天轮「海风之眼」', 13));
-  // POI icons
-  const icon = (x, z, t, col, label) => { out.push(`<circle cx="${px(x)}" cy="${pz(z)}" r="9" fill="${col}" stroke="#fff" stroke-width="2"/>`); out.push(`<text x="${px(x)}" y="${(+pz(z) + 4.5).toFixed(1)}" font-size="12" font-weight="800" fill="#fff" text-anchor="middle" font-family="Noto Sans CJK SC, sans-serif">${t}</text>`); if (label) out.push(T(x + (x < 120 ? 12 : -12), z - 4, label, 11, '#1d232b', 600, x < 120 ? 'start' : 'end')); };
-  icon(POI.gunshop.x, POI.gunshop.z, '枪', POI.gunshop.col, POI.gunshop.name);
-  for (const s of POI.stores) icon(s.x, s.z, '店', s.col, s.name);
-  icon(POI.clothes.x, POI.clothes.z, '衣', POI.clothes.col, POI.clothes.name);
-  icon(POI.modshop.x, POI.modshop.z, '修', POI.modshop.col, POI.modshop.name);
-  for (const a of POI.atms) icon(a.x, a.z, '$', '#2f9e5b');
-  icon(POI.hospital.x, POI.hospital.z, '医', '#e23d5b', POI.hospital.name); icon(POI.precinct.x, POI.precinct.z, '警', '#2448a8', POI.precinct.name);
-  icon(POI.valet.x, POI.valet.z, 'V', '#e0a91f', '代客泊车');
-  for (const m of MISSION_STARTS) { out.push(`<rect x="${(+px(m.x) - 11).toFixed(1)}" y="${(+pz(m.z) - 11).toFixed(1)}" width="22" height="22" rx="5" fill="#e0a91f" stroke="#3a2a00" stroke-width="2"/>`); out.push(`<text x="${px(m.x)}" y="${(+pz(m.z) + 5).toFixed(1)}" font-size="14" font-weight="900" fill="#2a1d00" text-anchor="middle" font-family="sans-serif">${m.letter}</text>`); out.push(T(m.x + 16, m.z + 10, m.name, 12, '#5a3d00', 800, 'start')); }
-  // district labels + street names
-  out.push(T(312, 230, '海潮大道', 15, '#7a2f22', 900)); out.push(T(410, 200, '棕榈海滩', 18, '#8a6a20', 900)); out.push(T(110, 330, '椰影区', 16, '#3a4a5a', 900)); out.push(T(230, 330, '珊瑚大街', 16, '#3a4a5a', 900));
-  out.push(T(-48, -150, '鹈鹕游艇港', 14, '#2c3e50', 900)); out.push(T(10, -385, '南湾货运站', 13, '#5a4630', 900)); out.push(T(10, 390, '北湾旧船坞', 13, '#5a4630', 900));
-  out.push(T(400, -520, '虚线 = 街区中间步行小巷（捷径 / 躲警察）  黄框字母 = 任务起点', 12, '#1d232b', 600));
-  // legend + north + scale
-  const ly = (Z1 - Z0) * S + 18;
-  out.push(`<rect x="0" y="${ly - 18}" width="${W}" height="110" fill="#1b1f26"/>`);
-  out.push(`<text x="20" y="${ly + 10}" font-size="20" font-weight="900" fill="#fff" font-family="Noto Sans CJK SC, sans-serif">索拉纳港 Port Solana · 地图设计 v4.3（第 1 期）</text>`);
-  out.push(`<text x="20" y="${ly + 38}" font-size="13" fill="#cfd6df" font-family="Noto Sans CJK SC, sans-serif">主干道：海潮大道（黄边）、珊瑚大街、椰影大道 · 次干道：五条横街 · 小巷：橙色虚线 · 栈桥：棕色 · 集装箱堆场：两个西侧角落</text>`);
-  out.push(`<text x="20" y="${ly + 60}" font-size="13" fill="#cfd6df" font-family="Noto Sans CJK SC, sans-serif">图标：枪 武器店 · 店 便利店（可抢） · 衣 服装店 · 修 修车坊 · $ ATM · 医 医院 · 警 警局 · V 代客泊车 · R/C/D/G 任务</text>`);
-  out.push(`<line x1="${W - 170}" y1="${ly + 60}" x2="${W - 170 + 100 * S}" y2="${ly + 60}" stroke="#fff" stroke-width="3"/><text x="${W - 170}" y="${ly + 50}" font-size="12" fill="#fff" font-family="sans-serif">100 m</text>`);
-  out.push(`<text x="${W - 30}" y="30" font-size="22" font-weight="900" fill="#1d232b" text-anchor="middle" font-family="sans-serif">N ↑</text>`);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${out.join('')}</svg>`;
-  fs.mkdirSync('shots/map', { recursive: true });
-  await sharp(Buffer.from(svg)).png().toFile('shots/map/port_solana_map.png');
-  console.log('shots/map/port_solana_map.png', W, 'x', H);
+  const NS = [50, 170, 290], EW = [-300, -150, 0, 150, 300], RH = 7, IX = [-22, 335], IZ = [-372, 372];
+  const render = async (X0, X1, Z0, Z1, S, file, labels = 1) => {
+    const W = Math.round((X1 - X0) * S), H = Math.round((Z1 - Z0) * S) + 90;
+    const px = (x) => ((x - X0) * S).toFixed(1), pz = (z) => ((Z1 - z) * S).toFixed(1); // north (+z) up
+    const poly = (P, fill, extra = '') => `<path d="M${P.map((p) => px(p[0]) + ',' + pz(p[1])).join('L')}Z" fill="${fill}" ${extra}/>`;
+    const line = (P, col, w, extra = '') => `<path d="M${P.map((p) => px(p[0]) + ',' + pz(p[1])).join('L')}" fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`;
+    const R = (x0, z0, x1, z1, fill) => poly([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], fill);
+    const T = (x, z, t, size = 13, fill = '#1d232b', w = 700, anchor = 'middle') => `<text x="${px(x)}" y="${pz(z)}" font-size="${size}" font-weight="${w}" fill="${fill}" text-anchor="${anchor}" font-family="WenQuanYi Zen Hei, sans-serif" stroke="#ffffffcc" stroke-width="3" paint-order="stroke">${t}</text>`;
+    const o = [`<rect width="${W}" height="${H}" fill="#8fc6d6"/>`];
+    // land
+    const ml = [[-2800, -1600]]; for (let z = -1600; z <= 1600; z += 10) ml.push([G.shoreX(z), z]); ml.push([-2800, 1600]); o.push(poly(ml, '#dfe1dc'));
+    { const P = [[-1380, -480], [-1380, 480]]; for (let z = 480; z >= -480; z -= 10) P.push([G.shoreX(z), z]); o.push(poly(P, '#d5d8dc')); }
+    for (const sg of [1, -1]) { o.push(poly(G.islandEndPoly(sg), '#cfe2c2')); const b = []; for (let a = 372; a <= 1480; a += 10) b.push([335 + G.beachOff(sg * a), sg * a]); for (let a = 1480; a >= 372; a -= 10) b.push([470 + G.beachOff(sg * a), sg * a]); o.push(poly(b, '#f1e5c4')); }
+    o.push(poly(G.pearlPoly(), '#cfe2c2'));
+    o.push(R(IX[0], IZ[0], IX[1], IZ[1], '#dfe3e8')); o.push(R(IX[1], IZ[0], 470, IZ[1], '#f1e5c4'));
+    // Deco district blocks
+    const bet = (arr, lo, hi) => { const a = [lo, ...arr, hi], r = []; for (let i = 0; i < a.length - 1; i++) { const s = a[i] + (i === 0 ? 0 : RH), e = a[i + 1] - (i === a.length - 2 ? 0 : RH); if (e - s > 4) r.push([s, e]); } return r; };
+    for (const [x0, x1] of bet(NS, IX[0], 290 + RH).filter((p) => p[1] <= 290)) for (const [z0, z1] of bet(EW, IZ[0], IZ[1])) { o.push(R(x0, z0, x1, z1, '#c4cad2')); o.push(R(x0 + 6, z0 + 6, x1 - 6, z1 - 6, '#b3b9c2')); }
+    for (const p of PIERS) o.push(R(p.x0, p.z - p.hw, p.x1, p.z + p.hw, '#8a6a48'));
+    // lots / footprints
+    const zc = { latin: '#c99a7a', condo: '#aeb6c0', mural: '#9d8fb5', mansion: '#f2f2ee' };
+    for (const L of D.lots) o.push(poly(L.corners, L.empty ? '#bcd6a8' : zc[L.zone], 'stroke="#00000022" stroke-width="0.6"'));
+    // roads: grid + ribbons (white with grey edge), causeway bridge hump marked
+    const road = (P, hw) => o.push(line(P, '#9aa2ab', (hw * 2 + 1.5) * S), line(P, '#ffffff', hw * 2 * S));
+    for (const x of NS) road([[x, IZ[0]], [x, IZ[1]]], RH); for (const z of EW) road([[IX[0], z], [290, z]], RH);
+    for (const r of D.roads) { const P = []; for (let k = 0; k < r.path.n; k++) P.push([r.path.X[k], r.path.Z[k]]); road(P, r.hw); }
+    { const P = []; for (let k = 0; k < D.byId.sun.path.n; k++) if (D.byId.sun.path.X[k] > REGION.bridge.x0 && D.byId.sun.path.X[k] < REGION.bridge.x1) P.push([D.byId.sun.path.X[k], D.byId.sun.path.Z[k]]); o.push(line(P, '#e0a91f', 4 * S + 2, 'stroke-dasharray="6 4"')); }
+    // POIs + mission letters
+    const dot = (x, z, t, col, r = 9) => `<circle cx="${px(x)}" cy="${pz(z)}" r="${r}" fill="${col}" stroke="#000a" stroke-width="1.2"/><text x="${px(x)}" y="${(+pz(z) + 4.5).toFixed(1)}" font-size="${r * 1.15}" font-weight="700" fill="#fff" text-anchor="middle" font-family="WenQuanYi Zen Hei, sans-serif">${t}</text>`;
+    for (const p of [POI.gunshop, POI.clothes, POI.modshop, ...POI.stores]) o.push(dot(p.x, p.z, p.icon, p.col));
+    for (const a of POI.atms) o.push(dot(a.x, a.z, '$', '#2f9e5b', 6));
+    for (const r of POI.restaurants) o.push(dot(r.x, r.z, '餐', '#d4793a', 7));
+    for (const m of MISSION_STARTS) o.push(dot(m.x, m.z, m.letter, '#e0a91f', 10));
+    if (labels) {
+      o.push(T(160, 0, '棕榈岛 · 海潮大道', 16), T(410, 200, '棕榈海滩', 14), T(150, 470, '海燕沙丘', 14, '#2d5a2a'), T(150, 900, '北棕榈', 14), T(150, -470, '南角红树林', 14, '#2d5a2a'), T(150, -900, '南棕榈', 14));
+      o.push(T(-480, 30, '日光堤道', 16, '#1d232b'), T(-680, 18, '通航桥拱', 11, '#7a5a00', 500), T(-430, -182, '星湾岛', 14), T(-1160, -20, '甘蔗区', 18), T(-930, 210, '湾畔', 14, '#2d5a2a'), T(-1120, 300, '壁画仓库区', 14));
+      o.push(T(-1600, 0, '湾岸中心（远景天际线）', 13, '#39424d', 500), T(-500, -420, '海 湾', 20, '#2b6f86', 700), T(650, 0, '大 西 洋', 18, '#2b6f86'));
+      for (const r of D.roads) if (r.id !== 'sun' && r.id !== 'pring') { const q = r.path.at(r.path.len * 0.45); o.push(T(q.x, q.z + 9, r.name, 10, '#3a3f46', 500)); }
+    }
+    o.push(`<text x="12" y="${H - 50}" font-size="15" font-weight="700" fill="#102030" font-family="WenQuanYi Zen Hei, sans-serif">索拉纳港 Port Solana · r5.0 地图（与游戏同源数据：src/mapdata.js + src/mapgeo.js）</text>`);
+    o.push(`<text x="12" y="${H - 28}" font-size="12" fill="#102030" font-family="WenQuanYi Zen Hei, sans-serif">建筑颜色：橙=甘蔗区拉丁低层 · 灰=湾畔公寓 · 紫=壁画仓库 · 白=星湾岛豪宅 · 绿=空地/公园 · 黄虚线=堤道桥拱 · 字母=任务起点</text>`);
+    o.push(`<text x="12" y="${H - 8}" font-size="12" fill="#102030" font-family="WenQuanYi Zen Hei, sans-serif">比例：${(100 * S).toFixed(0)} px = 100 m · 北向上 · 原创地名</text>`);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${o.join('')}</svg>`;
+    fs.mkdirSync('shots/map', { recursive: true }); await sharp(Buffer.from(svg)).png().toFile(file); console.log(file, W, H);
+  };
+  await render(-1720, 760, -1560, 1560, 0.5, 'shots/map/port_solana_map.png');
+  await render(-1340, -380, -460, 420, 1.1, 'shots/map/port_solana_mainland.png');
 })();

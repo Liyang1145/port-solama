@@ -32,6 +32,11 @@ export class ColliderGrid {
       }
     return b;
   }
+  // r5.0 oriented box (mainland buildings / causeway): centre, unit axis u (along), half length / half width
+  addOBB(cx, cz, ux, uz, hl, hw, h = 100, tag = 'b') {
+    const ex = Math.abs(ux) * hl + Math.abs(uz) * hw, ez = Math.abs(uz) * hl + Math.abs(ux) * hw;
+    const b = this.add(cx - ex, cz - ez, cx + ex, cz + ez, h, tag); b.o = { cx, cz, ux, uz, hl, hw }; return b;
+  }
   query(x, z, r, out = []) {
     out.length = 0; const c = this.cell; const seen = new Set();
     for (let ix = Math.floor((x - r) / c); ix <= Math.floor((x + r) / c); ix++)
@@ -47,6 +52,14 @@ export class ColliderGrid {
     const list = this.query(x, z, r + 1, this._tmp || (this._tmp = []));
     for (let it = 0; it < 2; it++) for (const b of list) {
       if (y > b.h) continue;
+      if (b.o) { // oriented: work in the box frame
+        const o = b.o; const rx = x - o.cx, rz = z - o.cz; const la = rx * o.ux + rz * o.uz, lw = -rx * o.uz + rz * o.ux;
+        const ca = clamp(la, -o.hl, o.hl), cw = clamp(lw, -o.hw, o.hw); let da = la - ca, dw = lw - cw; const q2 = da * da + dw * dw;
+        if (q2 >= r * r) continue;
+        if (q2 < 1e-8) { const m = Math.min(o.hl - Math.abs(la), o.hw - Math.abs(lw)); if (m === o.hl - Math.abs(la)) { da = Math.sign(la) || 1; dw = 0; } else { da = 0; dw = Math.sign(lw) || 1; } const pa = da ? (o.hl - Math.abs(la) + r) : (o.hw - Math.abs(lw) + r); const wx = da * o.ux - dw * o.uz, wz = da * o.uz + dw * o.ux; x += wx * pa; z += wz * pa; res.nx = wx; res.nz = wz; }
+        else { const d = Math.sqrt(q2); const p = r - d; da /= d; dw /= d; const wx = da * o.ux - dw * o.uz, wz = da * o.uz + dw * o.ux; x += wx * p; z += wz * p; res.nx = wx; res.nz = wz; }
+        res.hit = true; continue;
+      }
       const cx = clamp(x, b.minX, b.maxX), cz = clamp(z, b.minZ, b.maxZ);
       let dx = x - cx, dz = z - cz; const d2 = dx * dx + dz * dz;
       if (d2 < r * r) {
@@ -79,7 +92,9 @@ export class ColliderGrid {
           let a = (mn - o) / d, c = (mx - o) / d; if (a > c) [a, c] = [c, a];
           t0 = Math.max(t0, a); t1 = Math.min(t1, c); if (t0 > t1) ok = false;
         };
-        sl(ax, dx, b.minX, b.maxX); if (ok) sl(az, dz, b.minZ, b.maxZ); if (ok) sl(ay, dy, -1, b.h);
+        if (b.o) { const o = b.o; const rx = ax - o.cx, rz = az - o.cz; sl(rx * o.ux + rz * o.uz, dx * o.ux + dz * o.uz, -o.hl, o.hl); if (ok) sl(-rx * o.uz + rz * o.ux, -dx * o.uz + dz * o.ux, -o.hw, o.hw); }
+        else { sl(ax, dx, b.minX, b.maxX); if (ok) sl(az, dz, b.minZ, b.maxZ); }
+        if (ok) sl(ay, dy, -1, b.h);
         if (ok && t0 < best) best = t0;
       }
     }

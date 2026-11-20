@@ -1,4 +1,4 @@
-# ROADMAP — Port Solana v3, ordered by size of the gap to GTA 6 (biggest first)
+# ROADMAP — 索拉纳港 Port Solana 写实分支（real/，r5.x），按与 GTA6 的差距排序（大的在前）
 
 Each 6-hourly round takes the top 1–2 open items, does them properly, verifies with screenshots (street / drive / night minimum)
 and a logic sim, publishes, logs in ITERATION_LOG.md. Deadline 2026-12-19.
@@ -18,11 +18,13 @@ shots side by side with `ref/gta6/` stills.
 6. **Character animation set** — aim/fire for player & cops, hit reactions, enter/exit car, sprint, jump; skin/hair shading.
 7. **Night extras** — police light bars washing the street red/blue (real lights), lit billboards, tower window patterns.
 8. **Performance** — LOD/culling/texture streaming; target 60 fps mid GPUs (probe + more props cost draw calls).
-9. **Gameplay depth** — 第 1 期已在 v4.3 落地（见 GAMEPLAY_PLAN.md）。下一步第 2 期：持枪/瞄准动画、车上射击、燃油、特警/钉刺带、目击者报警、车辆起火爆炸。
-10. **Map phase 2** (MAP_DESIGN.md) — 日光堤道 + 灯塔小岛 + 加油站；椰影区彩色低层街区风格；船可驾驶。之后第 3 期湾对岸市中心 3 条街。
+9. **Gameplay depth**（逻辑层由 GPT 协作者负责，见 issue #1）— 第 1 期已在 v4.3 落地；持枪模型 + 瞄准层 r5.0 已做。下一步第 2 期：换弹/近战动作、车上射击、燃油、特警/钉刺带、目击者报警、车辆起火爆炸。
+10. **大地图第 2 期**（MAP_DESIGN.md §7）— 第二条堤道串 2–3 座人工小岛；运河住宅区；大陆港口（集装箱码头 + 邮轮）；市中心 3 条可进入街道；大陆店铺招牌/室内、折线路口信号灯、公交；船可驾驶。
+10a. **r5.0 遗留**：正午沙滩/开阔地逆光发白（见 SELFCHECK r5.0）；大陆路口无信号灯（车辆只靠前车避让）；折线路网上警车只做贪心寻路（无 A*，可用 mapapi.roadNetwork 做）；近景块生成时有一帧卡顿（每帧最多 1 块）；大陆店面室内仍是通用货架贴图；手持武器在第三人称后视角下多被身体挡住，缺换弹/近战挥击动作。
 11. **Cyberpunk night** — 用户 17:44 决定以后单独做一张地图，不放进本城。
 
 ## Done
+- r5.0 (2026-11-20): 大地图第 1 期 — 自然岛端、日光堤道 + 桥拱、星湾岛别墅、大陆甘蔗区/湾畔/壁画仓库区（斜街、弯路、不规则街区）、128 m 分块流式（远景常驻/近景按距离生成卸载）、OBB 碰撞、海岸浅水图、折线路网交通与行人、便利店 C；地图查询接口 src/mapapi.js；手持武器模型 + 上半身瞄准层；6 张原创壁画。
 - v4.3 (2026-11-20): GTA6-style gameplay phase 1 — 6 weapons + wheel + melee + cover + gun shop; mission framework + 4 missions
   (store hold-up, cold-chain delivery, debt chase, shipyard gang fight) + valet; phone, ATM/bank, clothes, body shop, car dealer,
   radio, purse-snatcher event, two protagonists, stamina, autosave; police search zone, escalation, road blocks, helicopter.

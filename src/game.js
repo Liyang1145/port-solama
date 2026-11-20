@@ -240,10 +240,12 @@ export class Game {
   }
   roadWaypoint(v, tx, tz) {
     // pick a point on the nearest road axis that moves toward the target: drive along the current road until aligned, then turn
+    // r5.0: on a region road (causeway / mainland / pearl island) follow that road toward the target
+    const rg = this.city.region; if (rg && (v.x < -22 || Math.abs(v.z) > 372)) { const w = rg.waypoint(v.x, v.z, tx, tz); if (w) return new THREE.Vector3(w.x, 0, w.z); }
     const NSx = [...LAYOUT.islandNS, ...LAYOUT.mainNS], EWz = [...LAYOUT.islandEW, ...LAYOUT.mainEW];
     const nearX = NSx.reduce((a, b) => (Math.abs(b - v.x) < Math.abs(a - v.x) ? b : a)), nearZ = EWz.reduce((a, b) => (Math.abs(b - v.z) < Math.abs(a - v.z) ? b : a));
     const onNS = Math.abs(v.x - nearX) < 8, onEW = Math.abs(v.z - nearZ) < 8;
-    const crossBay = (v.x < -560) !== (tx < -560);
+    const crossBay = (v.x < -25) !== (tx < -25);
     if (crossBay) { // causeway
       if (Math.abs(v.z) < 8) return new THREE.Vector3(tx < v.x ? v.x - 40 : v.x + 40, 0, 0);
       if (onNS) return new THREE.Vector3(nearX, 0, 0);
@@ -300,6 +302,12 @@ export class Game {
     // player
     if (P.onFoot) this.updateOnFoot(dt);
     else { const v = P.car; P.pos.set(v.x, v.y, v.z); this.playerSpeed = Math.abs(v.speed); if (v.inWater && v.y < -2) { this.toggleCar(); this.tp(v.x, v.z); this.damagePlayer(30); } }
+    // r5.0: weapon in hand + upper-body aim layer (player, police, gang)
+    { const ov = this.override; const aimP = P.onFoot && !!(this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire)));
+      const cw = this.arsenal.cur; this.player.setWeapon(P.onFoot && cw && cw.id !== 'fist' ? cw.id : null);
+      this.player.aiming = aimP && cw && !cw.melee; if (this.player.aiming) this.camera.getWorldDirection(this.player.aimDir);
+      for (const c of [...this.cops, ...this.gang]) { if (c.dead) { c.aiming = false; continue; } if (!c.weaponId) c.setWeapon(c.isCop ? 'pistol' : (c.id % 3 === 0 ? 'smg' : c.id % 3 === 1 ? 'rifle' : 'pistol'));
+        const dx = P.pos.x - c.pos.x, dy = P.pos.y + 1.3 - c.pos.y - 1.45, dz = P.pos.z - c.pos.z; const d = Math.hypot(dx, dz); c.aiming = d < 45; if (c.aiming) c.aimDir.set(dx, dy, dz).normalize(); } }
     this.player.update(dt);
     this.mission.update(dt); this.missions.update(dt); this.world.update(dt); this.updateGang(dt);
     this.arsenal.update(dt); P.reloadT = this.arsenal.reloadT;

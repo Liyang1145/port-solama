@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import { U } from './env.js';
 import { LAYOUT } from './city.js';
+import { buildRegionData, shoreX, westCoast, beachOff, ISLE } from './mapgeo.js';
+import { REGION } from './mapdata.js';
 
 const vs = `
 uniform mat4 textureMatrix; varying vec4 vUvR; varying vec3 vWP;
@@ -10,10 +12,15 @@ void main(){ vUvR = textureMatrix * vec4(position, 1.0); vec4 wp = modelMatrix *
 const fs = `
 uniform sampler2D tDiffuse; uniform sampler2D tNormal; uniform float uTime; uniform vec3 uSunDir; uniform vec3 uSunCol;
 uniform vec3 fogColor; uniform float fogDensity; uniform vec3 uFogSunCol; uniform float uFogFalloff; uniform float uNight; uniform vec3 uSkyCol;
-uniform float beachX0, beachX1;
+uniform float beachX0, beachX1; uniform sampler2D tShore; uniform vec4 uShoreBox;
 varying vec4 vUvR; varying vec3 vWP;
+float bOff(float z){ float a = abs(z); float t = clamp((a - 380.0) / 160.0, 0.0, 1.0); t = t * t * (3.0 - 2.0 * t); return t * (18.0 * sin(z * 0.0047) + 10.0 * sin(z * 0.013 + 1.3) - 6.0); }
 float bedH(vec2 p){
-  if (p.x > beachX0 && abs(p.y) < 830.0) { float t = clamp((p.x - beachX0)/(beachX1 - beachX0), 0.0, 1.0); float y = 0.15 - pow(t,1.6)*2.9 - t*0.2; float ez = abs(p.y)-720.0; if (ez>0.0) y -= ez*0.06; return max(y, -1.0 - 6.0*clamp((p.x-beachX1)/260.0,0.0,1.0) - 2.6); }
+  float off = bOff(p.y);
+  if (p.x > beachX0 + off && abs(p.y) < 1540.0) { float t = clamp((p.x - beachX0 - off)/(beachX1 - beachX0), 0.0, 1.0); float y = 0.15 - pow(t,1.6)*2.9 - t*0.2; float ez = abs(p.y)-1460.0; if (ez>0.0) y -= ez*0.06; return max(y, -1.0 - 6.0*clamp((p.x-beachX1-off)/260.0,0.0,1.0) - 2.6); }
+  // r5.0: bay floor from a shore-distance map (natural coasts, causeway embankment, seawalls) -> turquoise shallows
+  vec2 uv = (p - uShoreBox.xy) / (uShoreBox.zw - uShoreBox.xy);
+  if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) { float v = texture2D(tShore, uv).r; return -1.12 - 5.2 * smoothstep(0.0, 1.0, v); }
   return -6.0;
 }
 vec3 nmap(vec2 uv){ return texture2D(tNormal, uv).xzy * 2.0 - 1.0; }
@@ -55,6 +62,24 @@ void main(){
   #include <colorspace_fragment>
 }`;
 
+// r5.0 shore-distance map: land mask (mainland, island ends, Deco district, pearl island, causeway embankment) on an 8 m grid,
+// two-pass chamfer distance -> 0 at the shore .. 1 at >= 90 m out. Sampled by the water shader as the bay floor depth.
+const SB = [-2000, -1640, 520, 1640];
+function shoreTexture() {
+  const C = 8, nx = Math.round((SB[2] - SB[0]) / C), nz = Math.round((SB[3] - SB[1]) / C); const D = new Float32Array(nx * nz);
+  const R = buildRegionData(); const sun = R.byId.sun; const pr = REGION.pearl; const q = {};
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const x = SB[0] + (i + 0.5) * C, z = SB[1] + (j + 0.5) * C; const az = Math.abs(z);
+    let land = x < shoreX(z) || Math.hypot(x - pr.cx, z - pr.cz) < pr.r || (x > -22 && x < 340 && az < 372) || (az >= 372 && az < ISLE.tip && x > westCoast(z) && x < 340 + beachOff(z));
+    if (!land && x < 0 && x > -1000 && az < 120) { sun.path.nearest(x, z, q); const br = x > REGION.bridge.x0 + 4 && x < REGION.bridge.x1 - 4; if (q.dist < sun.hw + (br ? 1 : 10)) land = true; }
+    D[j * nx + i] = land ? 0 : 1e9;
+  }
+  const k1 = C, k2 = C * 1.4142;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { let d = D[j * nx + i]; if (i) d = Math.min(d, D[j * nx + i - 1] + k1); if (j) { d = Math.min(d, D[(j - 1) * nx + i] + k1); if (i) d = Math.min(d, D[(j - 1) * nx + i - 1] + k2); if (i < nx - 1) d = Math.min(d, D[(j - 1) * nx + i + 1] + k2); } D[j * nx + i] = d; }
+  for (let j = nz - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) { let d = D[j * nx + i]; if (i < nx - 1) d = Math.min(d, D[j * nx + i + 1] + k1); if (j < nz - 1) { d = Math.min(d, D[(j + 1) * nx + i] + k1); if (i < nx - 1) d = Math.min(d, D[(j + 1) * nx + i + 1] + k2); if (i) d = Math.min(d, D[(j + 1) * nx + i - 1] + k2); } D[j * nx + i] = d; }
+  const px = new Uint8Array(nx * nz * 4); for (let k = 0; k < nx * nz; k++) { const v = Math.round(255 * Math.min(1, Math.max(0, D[k] - 4) / 90)); px[k * 4] = v; px[k * 4 + 1] = v; px[k * 4 + 2] = v; px[k * 4 + 3] = 255; }
+  const t = new THREE.DataTexture(px, nx, nz, THREE.RGBAFormat); t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t;
+}
 export function buildWater(scene, T, size = 0.5) {
   const tn = T.waternormals; tn.wrapS = tn.wrapT = THREE.RepeatWrapping; tn.colorSpace = THREE.NoColorSpace;
   const geo = new THREE.PlaneGeometry(9000, 9000);
@@ -65,7 +90,7 @@ export function buildWater(scene, T, size = 0.5) {
       name: 'Water', uniforms: {
         color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null }, tNormal: { value: tn }, uTime: U.uTime,
         uSunDir: U.uSunDir, uSunCol: U.uSunCol, fogColor: { value: new THREE.Color() }, fogDensity: { value: 0.001 }, uFogSunCol: U.uFogSunCol, uFogFalloff: U.uFogFalloff,
-        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] },
+        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: shoreTexture() }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
       }, vertexShader: vs, fragmentShader: fs,
     },
   });

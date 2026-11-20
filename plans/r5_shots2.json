@@ -1,0 +1,25 @@
+{
+"query": "hour=16&ao=1&lowshadow&probe=0",
+"shots": [
+{
+"name": "aerial",
+"js": "__G.setHour(15.6); const g=__G.game; g.tp(-430,-150,0); __G.step(2); const c=__G.camera; c.position.set(-150,430,560); c.lookAt(-600,0,-60); c.updateMatrixWorld(); 0"
+},
+{
+"name": "causeway",
+"js": "__G.setHour(17.2); const g=__G.game; g.tp(-540,-50,0); __G.step(30); const c=__G.camera; c.position.set(-528,4.2,-63); c.lookAt(-730,5,-16); c.updateMatrixWorld(); g.traffic.cars.length"
+},
+{
+"name": "beach_day",
+"js": "__G.setHour(14.0); const g=__G.game; g.tp(340,-60,0); __G.step(20); const c=__G.camera; c.position.set(342,3.5,-70); c.lookAt(400,1.5,110); c.updateMatrixWorld(); 0"
+},
+{
+"name": "dunes",
+"js": "__G.setHour(17.0); const g=__G.game; g.tp(60,480,0); __G.step(3); const c=__G.camera; c.position.set(-60,7,470); c.lookAt(100,0,640); c.updateMatrixWorld(); 0"
+},
+{
+"name": "gun_close",
+"js": "__G.setHour(16.0); const g=__G.game; g.tp(-1053,-70,0.3); __G.step(5); g.arsenal.give('rifle',90); g.arsenal.equip('rifle'); g.cam.yaw=Math.PI+0.3; g.cam.pitch=-0.05; g.override={aim:true}; __G.step(30); const p=g.player.pos; const f=[Math.sin(0.3),Math.cos(0.3)]; const c=__G.camera; c.position.set(p.x+f[1]*2.2+f[0]*1.2, p.y+1.55, p.z-f[0]*2.2+f[1]*1.2); c.lookAt(p.x+f[0]*0.5, p.y+1.35, p.z+f[1]*0.5); c.updateMatrixWorld(); [g.player.weaponId, +g.player.aimW.toFixed(2)]"
+}
+]
+}

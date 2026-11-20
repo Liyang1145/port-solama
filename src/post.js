@@ -215,13 +215,15 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       sv.copy(sunDir).transformDirection(camera.matrixWorldInverse); lfx.uniforms.uSunV.value.copy(sv);
       lfx.uniforms.uContact.value = (1 - night) * Math.min(1, Math.max(0, sunDir.y * 6));
       sp.copy(camera.position).addScaledVector(sunDir, 1000).project(camera);
-      const vis = sp.z < 1 && sunDir.y > -0.02 ? THREE.MathUtils.smoothstep(1.7, 0.5, Math.max(Math.abs(sp.x), Math.abs(sp.y))) : 0;
+      const vis = sp.z < 1 && sunDir.y > -0.02 ? THREE.MathUtils.smoothstep(1.2, 0.6, Math.max(Math.abs(sp.x), Math.abs(sp.y))) : 0; // r5.0: 1.2/0.6 (was 1.7/0.5): no ray fans from a sun well off-screen (aerial shots)
       lfx.uniforms.uSunUV.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
       lfx.uniforms.uSunOn.value = vis * (1 - night) * (0.35 + gold * 0.85); // v4.4 stronger golden-hour shafts
       lfx.uniforms.uRayCol.value.copy(sunCol).multiplyScalar(0.02);
       lens.uniforms.uCamWorld.value.copy(camera.matrixWorld); lens.uniforms.uPrevVP.value.copy(P.prevVP);
       lens.uniforms.uBlur.value = P.blur; lens.uniforms.uDof.value = P.dof; lens.uniforms.uFocus.value = P.focus; lens.uniforms.uAperture.value = P.aperture;
-      bloom.strength = 0.22 + night * 0.26; bloom.threshold = 1.3 + night * 0.4; bloom.radius = 0.6;
+      // r5.0: the bloom threshold is in scene-linear HDR, but day exposure is ~0.5 -> sunlit sand/grass (~3-7) crossed 1.3 and the
+      // whole frame glowed (noon beach / open-ground whiteout). Day threshold now tracks exposure; night stays as before.
+      bloom.strength = 0.22 + night * 0.26; bloom.threshold = THREE.MathUtils.lerp(7.5, 1.7, night); bloom.radius = 0.6;
     },
     render() { composer.render(); },
   };

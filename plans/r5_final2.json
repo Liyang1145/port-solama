@@ -1,0 +1,13 @@
+{
+"query": "hour=16&ao=1&lowshadow&probe=0",
+"shots": [
+{
+"name": "beach_day",
+"js": "__G.setHour(14.0); const g=__G.game; g.tp(340,-60,0); __G.step(20); const c=__G.camera; c.position.set(342,3.5,-70); c.lookAt(400,1.5,110); c.updateMatrixWorld(); 0"
+},
+{
+"name": "dunes",
+"js": "__G.setHour(17.0); const g=__G.game; g.tp(60,480,0); __G.step(3); const c=__G.camera; c.position.set(-60,7,470); c.lookAt(100,0,640); c.updateMatrixWorld(); 0"
+}
+]
+}

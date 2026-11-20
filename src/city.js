@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { World, prismWalls, polyCap, rect, box } from './geo.js';
 import { ColliderGrid, rng, rand, randi, pick, clamp } from './util.js';
+import { buildRegion } from './region.js';
+import { beachOff, westCoast, ISLE } from './mapgeo.js';
 
 export const LAYOUT = {
   // v4.0 "one perfect district": only the Deco beachfront (Tideline Dr, x=290), two inner avenues (x=170, x=50) and five cross
@@ -16,7 +18,7 @@ export const LAYOUT = {
   beachX: [335, 480], waterY: -1.0, roadHW: 7, swalk: 4.5,
 };
 const RH = LAYOUT.roadHW;
-const SKY_X = -400;
+const SKY_X = -1400; // r5.0: downtown skyline now stands behind the mainland district (was -400)
 // v4.3 map (MAP_DESIGN.md): 鹈鹕游艇港 timber piers off the west seawall
 export const PIERS = [{ x0: -74, x1: -22, z: -78, hw: 1.8 }, { x0: -64, x1: -22, z: 28, hw: 1.8 }, { x0: -78, x1: -22, z: 98, hw: 1.8 }]; // mainland shore across the bay (skyline only)
 
@@ -104,9 +106,9 @@ export function buildCity(scene, mats, T) {
     prismWalls(b, [[L.beachX[0], L.islandZ[0]], [L.islandX[0], L.islandZ[0]]], -3.2, 0.0, null);
     prismWalls(b, [[L.islandX[0], L.islandZ[0]], [L.islandX[0], L.islandZ[1]]], -3.2, 0.0, null);
     // fence colliders to keep players out of the bay
-    { let za = L.islandZ[0]; for (const p of [...PIERS].sort((a, b) => a.z - b.z)) { col.add(L.islandX[0] - 2, za, L.islandX[0] - 0.6, p.z - p.hw, 1.1, 'rail'); za = p.z + p.hw; } col.add(L.islandX[0] - 2, za, L.islandX[0] - 0.6, L.islandZ[1], 1.1, 'rail'); }
-    col.add(L.islandX[0], L.islandZ[1] + 0.6, L.beachX[0], L.islandZ[1] + 2, 1.1, 'rail');
-    col.add(L.islandX[0], L.islandZ[0] - 2, L.beachX[0], L.islandZ[0] - 0.6, 1.1, 'rail');
+    // r5.0: the island continues north/south (natural ends), so only the west bay edge keeps its rail; gap for the causeway at z=0
+    const GAPS = [...PIERS, { z: 0, hw: 9.6 }].sort((a, b) => a.z - b.z);
+    { let za = L.islandZ[0]; for (const p of GAPS) { col.add(L.islandX[0] - 2, za, L.islandX[0] - 0.6, p.z - p.hw, 1.1, 'rail'); za = p.z + p.hw; } col.add(L.islandX[0] - 2, za, L.islandX[0] - 0.6, L.islandZ[1], 1.1, 'rail'); }
     // railings (metal) along the bay edges
     const m = W.b('metal', 0, 0);
     const rail = (x0, z0, x1, z1) => {
@@ -115,21 +117,21 @@ export function buildCity(scene, mats, T) {
       const dx = (x1 - x0) / len, dz = (z1 - z0) / len; const nx = -dz * 0.03, nz = dx * 0.03;
       for (const y of [1.05, 0.6]) prismWalls(m, [[x0 - nx, z0 - nz], [x1 - nx, z1 - nz], [x1 + nx, z1 + nz], [x0 + nx, z0 + nz]], y, y + 0.05, null);
     };
-    { let za = L.islandZ[0]; for (const p of [...PIERS].sort((a, b) => a.z - b.z)) { rail(L.islandX[0] + 0.3, za, L.islandX[0] + 0.3, p.z - p.hw - 0.3); za = p.z + p.hw + 0.3; } rail(L.islandX[0] + 0.3, za, L.islandX[0] + 0.3, L.islandZ[1]); }
-    rail(L.islandX[0], L.islandZ[1] - 0.3, L.beachX[0], L.islandZ[1] - 0.3); rail(L.beachX[0], L.islandZ[0] + 0.3, L.islandX[0], L.islandZ[0] + 0.3);
+    { let za = L.islandZ[0]; for (const p of GAPS) { rail(L.islandX[0] + 0.3, za, L.islandX[0] + 0.3, p.z - p.hw - 0.3); za = p.z + p.hw + 0.3; } rail(L.islandX[0] + 0.3, za, L.islandX[0] + 0.3, L.islandZ[1]); }
   }
   // ---------------------------------------------------------------- beach ------
+  // r5.0: the beach line follows a natural offset beyond the Deco district (beachOff = 0 inside it) and runs to the island tips
   const beachH = (x, z) => {
-    const t = clamp((x - L.beachX[0]) / (L.beachX[1] - L.beachX[0]), 0, 1);
+    const t = clamp((x - L.beachX[0] - beachOff(z)) / (L.beachX[1] - L.beachX[0]), 0, 1);
     let y = 0.15 - Math.pow(t, 1.6) * 2.9 - t * 0.2;
-    const ez = Math.abs(z) - (L.islandZ[1] + 25); if (ez > 0) y -= ez * 0.06;
+    const ez = Math.abs(z) - (ISLE.tip - 20); if (ez > 0) y -= ez * 0.06;
     return y;
   };
   {
-    const nx = 40, nz = 100; const x0 = L.beachX[0], x1 = L.beachX[1] + 60, z0 = -L.islandZ[1] - 110, z1 = L.islandZ[1] + 110;
+    const nx = 40, nz = 380; const x0 = L.beachX[0], x1 = L.beachX[1] + 60, z0 = -ISLE.tip - 60, z1 = ISLE.tip + 60;
     const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0, nx, nz); g.rotateX(-Math.PI / 2); g.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
     const p = g.attributes.position; const uv = g.attributes.uv;
-    for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); p.setY(i, beachH(x, z) + (Math.sin(x * 0.21 + z * 0.13) * 0.04 + Math.sin(z * 0.05) * 0.06) * clamp((x - x0) / 10, 0, 1)); uv.setXY(i, x, z); }
+    for (let i = 0; i < p.count; i++) { const z = p.getZ(i); const x = p.getX(i) + beachOff(z); p.setX(i, x); p.setY(i, beachH(x, z) + (Math.sin(x * 0.21 + z * 0.13) * 0.04 + Math.sin(z * 0.05) * 0.06) * clamp((x - x0) / 10, 0, 1)); uv.setXY(i, x, z); }
     g.computeVertexNormals();
     W.b('sand', 400, 0).geom(g, new THREE.Matrix4());
     // lifeguard towers + umbrellas (positions; geometry built in props)
@@ -142,6 +144,9 @@ export function buildCity(scene, mats, T) {
       if (Math.abs(z % 150) < 9 || Math.abs((z % 150) + 150) < 9 || Math.abs((z % 150) - 150) < 9) continue;
       palms.push({ x: rand(306, 330), z, h: rand(9, 15), lean: rand(-0.12, 0.12), rot: rand(0, 6.28), s: rand(0.9, 1.15) });
     }
+    // r5.0: sparse umbrellas + dune palms along the extended beach (north/south of the district)
+    for (let i = 0; i < 90; i++) { const sg = rng() < 0.5 ? 1 : -1, a = rand(560, 1350); const z = sg * a; deco.umbrellas.push({ x: 352 + beachOff(z) + Math.pow(rng(), 1.4) * 34, z, color: pick([...ACCENT, [0.95, 0.95, 0.92]]), r: rand(0, 6), towelOnly: rng() < 0.3 }); }
+    for (let i = 0; i < 70; i++) { const sg = rng() < 0.5 ? 1 : -1, a = rand(400, 1400); const z = sg * a; palms.push({ x: 332 + beachOff(z) + rand(-12, 6), z, h: rand(8, 13), lean: rand(0.0, 0.2), rot: rand(0, 6.28), s: rand(0.9, 1.1) }); }
     for (let i = 0; i < 16; i++) palms.push({ x: rand(338, 352), z: rand(-L.islandZ[1] + 15, L.islandZ[1] - 15), h: rand(8, 13), lean: rand(0.05, 0.22), rot: rand(0, 6.28), s: rand(0.9, 1.1) });
   }
   // ------------------------------------------------------------- buildings -----
@@ -157,6 +162,8 @@ export function buildCity(scene, mats, T) {
   districtEdges(bld, deco);
   skyline(bld);
   marina(bld); landmarks(bld);
+  // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
+  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT });
   // ---------------------------------------------------------- street lights ----
   for (const s of segs) {
     if (s.bridge) continue;
@@ -195,18 +202,20 @@ export function buildCity(scene, mats, T) {
   for (const b of blocks) for (let ix = Math.floor(b.x0 / BC); ix <= Math.floor(b.x1 / BC); ix++) for (let iz = Math.floor(b.z0 / BC); iz <= Math.floor(b.z1 / BC); iz++) { const k = ix + ',' + iz; if (!bgrid.has(k)) bgrid.set(k, []); bgrid.get(k).push(b); }
   const blockAt = (x, z) => { const l = bgrid.get(Math.floor(x / BC) + ',' + Math.floor(z / BC)); if (l) for (const b of l) if (x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1) return b; return null; };
   const isLand = (x, z) => {
+    { const h = region.groundH(x, z); if (h !== undefined) return h > L.waterY - 0.6; }
     for (const p of PIERS) if (x >= p.x0 && x <= p.x1 && Math.abs(z - p.z) <= p.hw) return true;
     if (x >= L.islandX[0] && x <= L.beachX[0] && z >= L.islandZ[0] && z <= L.islandZ[1]) return true;
     if (x >= L.beachX[0] && Math.abs(z) < L.islandZ[1] + 110 && beachH(x, z) > L.waterY - 0.6) return true;
     return false;
   };
   const groundH = (x, z) => {
-    if (x >= L.beachX[0] && x < 700 && Math.abs(z) < L.islandZ[1] + 115) return Math.max(beachH(x, z), -1.6);
+    { const h = region.groundH(x, z); if (h !== undefined) return h; }
+    if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z), -1.6);
     if (!isLand(x, z)) return L.waterY - 3;
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
     return blockAt(x, z) ? 0.15 : 0;
   };
-  return { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
+  return { region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
 }
 
 function roadQuad(rd, s) {
@@ -730,7 +739,7 @@ function districtEdges(ctx, deco) {
       col.add(x - RH, z - 0.5, x + RH, z + 0.5, 1.2, 'barrier');
     }
     // EW streets dead-end at the bay seawall (west): same barricade, turned
-    if (sg > 0) for (const zc of L.islandEW) { const x = L.islandX[0] + 2.2;
+    if (sg > 0) for (const zc of L.islandEW) { if (zc === 0) continue; /* r5.0: z=0 continues as 日光堤道 */ const x = L.islandX[0] + 2.2;
       for (let k = -2; k <= 2; k++) { const z0 = zc + k * 2.9 - 1.3, z1 = zc + k * 2.9 + 1.3;
         for (const yy of [0.55, 0.95]) for (let s = 0; s < 6; s++) { const a = z0 + (z1 - z0) * s / 6, b = z0 + (z1 - z0) * (s + 1) / 6;
           box(v, x - 0.03, yy, a, x + 0.03, yy + 0.22, b, {}, s % 2 ? [0.95, 0.95, 0.93] : [0.95, 0.35, 0.08], false); }
@@ -739,15 +748,15 @@ function districtEdges(ctx, deco) {
       col.add(x - 0.5, zc - RH, x + 0.5, zc + RH, 1.2, 'barrier'); }
     // v4.1 bay seawall: coping cap, rip-rap toe at the waterline, cast-iron bollards (west edge, once)
     if (sg > 0) { const xw = L.islandX[0];
-      box(W.b('concrete', xw, 0), xw - 0.35, 0.0, -L.islandZ[1], xw + 0.25, 0.22, L.islandZ[1]);
+      box(W.b('concrete', xw, 0), xw - 0.35, 0.0, -L.islandZ[1], xw + 0.25, 0.22, -RH - 2.5); box(W.b('concrete', xw, 0), xw - 0.35, 0.0, RH + 2.5, xw + 0.25, 0.22, L.islandZ[1]);
       for (let z = -L.islandZ[1]; z < L.islandZ[1]; z += 1.3) { const s2 = rand(0.7, 1.4), c = rand(0.38, 0.55);
         _m4.makeRotationFromEuler(new THREE.Euler(rand(0, 6), rand(0, 6), rand(0, 6))).scale(new THREE.Vector3(s2 * 1.2, s2 * 0.7, s2)).setPosition(xw - rand(0.8, 3.2), L.waterY + rand(-0.6, 0.3), z);
         v.geom(rock, _m4, {}, [c, c * 0.97, c * 0.9]); }
       const bol = new THREE.CylinderGeometry(0.16, 0.2, 0.5, 10); const cap = new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-      for (let z = -L.islandZ[1] + 10; z < L.islandZ[1]; z += 16) { _m4.makeTranslation(xw + 1.0, 0.4, z); v.geom(bol, _m4, {}, [0.12, 0.13, 0.14]); _m4.makeTranslation(xw + 1.0, 0.65, z); v.geom(cap, _m4, {}, [0.12, 0.13, 0.14]); }
+      for (let z = -L.islandZ[1] + 10; z < L.islandZ[1]; z += 16) { if (Math.abs(z) < RH + 4) continue; _m4.makeTranslation(xw + 1.0, 0.4, z); v.geom(bol, _m4, {}, [0.12, 0.13, 0.14]); _m4.makeTranslation(xw + 1.0, 0.65, z); v.geom(cap, _m4, {}, [0.12, 0.13, 0.14]); }
     }
     // jetty: rubble mound of boulders, concrete deck, rails, end lamp
-    const zj = zE + sg * 6, x0 = L.beachX[0] - 2, x1 = L.beachX[1] + 45;
+    const zj = zE + sg * 6, x0 = L.beachX[0] + 38, x1 = L.beachX[1] + 45; // r5.0: jetty root starts past the dry sand so the beach walk continues
     for (let x = x0; x < x1 + 4; x += 1.4) for (let k = 0; k < 3; k++) {
       const s = rand(0.9, 1.9); const zz = zj + rand(-4.2, 4.2); const t = (x - L.beachX[0]) / (L.beachX[1] - L.beachX[0]);
       const y = Math.min(0.2, 0.2 - Math.max(0, t) * 2.2) + rand(-0.4, 0.3);
@@ -765,7 +774,7 @@ function districtEdges(ctx, deco) {
     lamps.push({ x: x1 - 1.2, z: zj + 1.2, y: dy, dir: [0, -sg], kind: 'bridge' });
     col.add(x0, zj - 4.5, x1 + 4, zj + 4.5, 1.6, 'rail');
     // walls the sand off past the jetty so the beach ends at the rocks
-    col.add(L.beachX[0], zE + sg * 1.5 - 1, L.beachX[1] + 60, zE + sg * 1.5 + 1, 1.6, 'rail');
+    // (r5.0: the sand wall past the jetty is gone — the beach continues to the island tips)
   }
 }
 
@@ -776,6 +785,7 @@ function skyline(ctx) {
   const lightCols = [[0.9, 0.95, 1.0], [0.3, 0.8, 1.0], [1.0, 0.35, 0.8], [0.7, 0.5, 1.0], [1.0, 0.85, 0.6]];
   const tower = (cx, cz, w, d, h, kind) => {
     const opt = { collide: false, relief: false };
+    ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); // r5.0: the far skyline is reachable now (causeway / island ends)
     if (kind === 0) { const poly = rng() < 0.5 ? chamfer(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, Math.min(w, d) * 0.15) : rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2);
       volume(ctx, poly, 0, h, { ...opt, style: 0, fh: 3.8, ww: 2, wall: [0.55, 0.58, 0.6], glass: pick(glassT) });
       if (rng() < 0.6) crownLights(ctx, poly, h - 0.6, pick(lightCols)); }
@@ -794,9 +804,10 @@ function skyline(ctx) {
   // coast to the north and south of the district (beyond the jetties): condo/hotel strips on the barrier island
   const L = LAYOUT;
   for (const sg of [-1, 1]) {
-    const g = ctx.W.b('concrete', 150, sg * 900); polyCap(g, sg > 0 ? rect(-60, 520, 340, 1500) : rect(-60, -1500, 340, -520), 0.1);
-    for (let z = 560; z < 1400; z += rand(30, 50)) { tower(rand(250, 300), sg * z, rand(22, 34), rand(18, 28), rand(20, 70) + (z > 800 ? rand(0, 60) : 0), rng() < 0.6 ? 2 : 3);
-      if (rng() < 0.6) tower(rand(60, 160), sg * (z + rand(-10, 10)), rand(24, 36), rand(24, 36), rand(25, 90), randi(0, 4)); }
+    // r5.0: no rectangular pads any more — towers stand on the natural island-end ground (region.js), inside its coastline
+    for (let z = 660; z < 1300; z += rand(32, 52)) { const zz = sg * z; const xe = 335 + beachOff(zz) - 22, xw = westCoast(zz) + 22;
+      if (xe - 26 > xw) tower(Math.min(xe - 14, rand(250, 300)), zz, rand(22, 30), rand(18, 26), rand(20, 70) + (z > 900 ? rand(0, 50) : 0), rng() < 0.6 ? 2 : 3);
+      const xm = rand(Math.max(xw + 16, 40), Math.min(xe - 60, 170)); if (rng() < 0.55 && xm < xe - 60) tower(xm, sg * (z + rand(-10, 10)), rand(24, 32), rand(24, 32), rand(25, 80), randi(0, 4)); }
   }
 }
 

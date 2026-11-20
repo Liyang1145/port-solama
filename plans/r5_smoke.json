@@ -1,0 +1,20 @@
+{
+"query": "hour=15&ao=1&lowshadow&probe=0",
+"shots": [
+{
+"name": "r5_drive",
+"noshot": true,
+"js": "const g=__G.game, R=__G.city.region, sun=R.data.byId.sun; g.tp(30,-6,-Math.PI/2); __G.step(2); g.carNearPlayer('sport',3); g.toggleCar(); const v=g.P.car; v.place(30,-1.75,-Math.PI/2); v.vx=0; v.vz=0; const log=[]; const q={}; let s=0; for(let i=0;i<1500;i++){ const p=[v.x,v.z]; let tx,tz; if(v.x>-22){tx=v.x-20; tz=-1.75;} else { sun.path.nearest(v.x,v.z,q); const a=sun.path.at(q.s+16); tx=a.x-a.tz*1.75; tz=a.z+a.tx*1.75; } const ang=Math.atan2(tx-v.x,tz-v.z)-v.yaw; const aw=Math.atan2(Math.sin(ang),Math.cos(ang)); g.override={throttle: Math.abs(v.speed)<22?1:0.2, steer: Math.max(-1,Math.min(1,aw*2.2))}; __G.step(1); if(i%60==0) log.push([Math.round(v.x),Math.round(v.z),+v.y.toFixed(2),Math.round(v.speed*3.6),Math.round(v.health)]); if(v.x<-1000) break; } g.override={throttle:0,steer:0,handbrake:true}; __G.step(30); [log, g.state(), __G.stats()]"
+},
+{
+"name": "r5_world",
+"noshot": true,
+"js": "const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(-1050,-60,0); __G.step(240); const T=g.traffic; const rib=T.cars.filter(c=>c.ai&&(c.ai.mode==='rib'||(c.ai.path&&c.ai.path.next&&c.ai.path.next.mode==='rib'))).length; const peds=g.peds.list.filter(c=>c.ai&&c.ai.mode==='line').length; const sp=T.cars.map(c=>Math.round(c.speed*3.6)); const air=T.cars.filter(c=>c.y<-1).length; [rib, T.cars.length, air, peds, g.peds.list.length, sp, g.state(), __G.stats()]"
+},
+{
+"name": "r5_aim",
+"noshot": true,
+"js": "const g=__G.game; g.arsenal.give('rifle',90); g.arsenal.equip('rifle'); g.override={aim:true}; __G.step(20); const p=g.player; [p.weaponId, !!p.weaponMesh, p.weaponMesh&&p.weaponMesh.visible, +p.aimW.toFixed(2), p.weaponMesh&&p.weaponMesh.matrixWorld.elements.slice(12,15).map(v=>+v.toFixed(2)), [p.pos.x,p.pos.y,p.pos.z].map(v=>+v.toFixed(2))]"
+}
+]
+}

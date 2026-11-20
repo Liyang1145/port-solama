@@ -1,0 +1,1 @@
+{"query": "hour=14&ao=1&lowshadow&probe=0&nopost", "shots": [{"name": "beach_nopost", "js": "__G.setHour(14.0); const g=__G.game; g.tp(340,-60,0); __G.step(20); const c=__G.camera; c.position.set(342,3.5,-70); c.lookAt(400,1.5,110); c.updateMatrixWorld(); 0"}]}

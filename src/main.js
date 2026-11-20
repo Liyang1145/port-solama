@@ -64,6 +64,7 @@ async function load() {
   const city = buildCity(scene, M, T);
   const meshes = city.world.build(scene, M, { neon: { cast: false }, road: { cast: false }, sidewalk: { cast: false }, pavers: { cast: false }, grass: { cast: false }, sand: { cast: false }, glassRail: { cast: false } });
   addStreetTrees(city);
+  city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
   const veg = buildVegetation(scene, city, T);
   const props = buildProps(scene, city, T);
   buildFurniture(scene, city, G);
@@ -104,7 +105,7 @@ async function load() {
     get hour() { return hour; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
     render() { renderFrame(0); },
-    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length }; },
+    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length, chunks: { ...city.region.stats } }; },
   };
 
   const clock = new THREE.Timer(); clock.connect?.(document);
@@ -122,6 +123,7 @@ async function load() {
     env.update(dt);
     water.update(scene);
     camera.updateMatrixWorld(); water.renderRefl(renderer, scene, camera);
+    city.region.update(camera.position, SNAP ? 99 : 1);
     veg.update?.(camera.position); updateProps(props, camera, env.look.night, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
     updateNeonLights(props, city.signs, camera.position, env.look.night);

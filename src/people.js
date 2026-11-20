@@ -1,4 +1,6 @@
 // Characters: realistic rigged humans (MakeHuman CC0 bodies via ara3d, CMU mocap clips baked per character)
+import { REGION } from './mapdata.js';
+import { gunMesh } from './gunmodels.js';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
@@ -71,7 +73,10 @@ export function prepareCharacters(G) {
       if (o.isSkinnedMesh && key !== 'hero') makeLods(o.geometry);
     });
     const clip = (re) => { const c = find(g, re); if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => !t.name.endsWith('.scale')); return k; };
-    PROTOS[key] = { scene: g.scene, scale: 1, sex: CAST[key].sex, clips: { idle: clip(/^Idle/), walk: clip(/^Walk/), run: clip(/^Run/), aim: clip(/Pistol aim/), death: clip(/^Death/) } };
+    // r5.0 upper-body aim layer: the 'Pistol aim' clip restricted to spine / neck / head / arms, blended over walk/run
+    const upper = (c) => { if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => /(Spine1|Spine2|Neck|Head|Shoulder|Arm|ForeArm|Hand)/.test(t.name.split('.')[0])); k.name = 'aimUpper'; return k; };
+    const aimC = clip(/Pistol aim/);
+    PROTOS[key] = { scene: g.scene, scale: 1, sex: CAST[key].sex, clips: { idle: clip(/^Idle/), walk: clip(/^Walk/), run: clip(/^Run/), aim: aimC, aimU: upper(aimC), death: clip(/^Death/) } };
   }
 }
 const pickKind = (kind, opt) => {
@@ -101,6 +106,9 @@ export class Character {
     this.mixer = new THREE.AnimationMixer(this.model);
     this.actions = {};
     for (const k of ['idle', 'walk', 'run']) { const a = this.mixer.clipAction(P.clips[k]); a.play(); a.weight = k === 'idle' ? 1 : 0; this.actions[k] = a; }
+    if (P.clips.aimU) { const a = this.mixer.clipAction(P.clips.aimU); a.play(); a.weight = 0; this.aimA = a; }
+    this.aiming = false; this.aimW = 0; this.aimDir = new THREE.Vector3(0, 0, 1); this.weaponMesh = null; this.weaponId = null;
+    this.bones = { hand: this.model.getObjectByName('RightHand'), mid: this.model.getObjectByName('RightHandMiddle1') };
     if (P.clips.death) { const a = this.mixer.clipAction(P.clips.death); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; this.deathA = a; }
     this.pos = new THREE.Vector3(); this.yaw = 0; this.vy = 0; this.speed = 0; this.health = 100; this.dead = false;
     this.fallT = 0; this.mixer.update(rand(0, 2));
@@ -119,7 +127,28 @@ export class Character {
     this.actions.walk.timeScale = clamp(speed / 1.4, 0.5, 2.0);
     this.actions.run.timeScale = clamp(speed / 5.0, 0.7, 1.5);
   }
+  // r5.0: weapon model in the right hand (null = none)
+  setWeapon(id) {
+    if (id === this.weaponId) return; this.weaponId = id;
+    if (this.weaponMesh) { this.scene.remove(this.weaponMesh); this.weaponMesh = null; }
+    const m = id ? gunMesh(id) : null; if (m) { this.scene.add(m); this.weaponMesh = m; }
+  }
+  poseWeapon() {
+    const wm = this.weaponMesh; wm.visible = this.root.visible && !this.dead && this.lod < 2 && !!this.bones.hand; if (!wm.visible) return;
+    this.root.updateMatrixWorld(true);
+    const a = this.bones.hand.getWorldPosition(_wa), b = this.bones.mid ? this.bones.mid.getWorldPosition(_wb) : _wb.copy(a);
+    const fwd = _wf.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); const fd = _wd.subVectors(b, a); const fl = fd.length() || 1; fd.divideScalar(fl);
+    const id = this.weaponId; const bar = _wz;
+    if (this.aimW > 0.5 && id !== 'bat') bar.copy(this.aimDir).normalize();
+    else if (id === 'bat') bar.copy(fwd).multiplyScalar(-0.45).add(_up).addScaledVector(fd, 0.3).normalize();
+    else if (wm.userData.long) bar.copy(fwd).addScaledVector(_up, -0.55).normalize();
+    else bar.copy(fwd).multiplyScalar(0.6).addScaledVector(fd, 0.6).addScaledVector(_up, -0.25).normalize();
+    const x = _wx.crossVectors(id === 'bat' ? fwd : _up, bar); if (x.lengthSq() < 1e-4) x.set(1, 0, 0); x.normalize(); const y = _wy.crossVectors(bar, x);
+    const pos = _wp.copy(a).addScaledVector(fd, Math.min(0.06, fl * 0.6)).addScaledVector(y, -0.01);
+    wm.matrix.makeBasis(x, y, bar).setPosition(pos); wm.matrixWorld.copy(wm.matrix);
+  }
   update(dt) {
+    if (this.aimA) { this.aimW = lerp(this.aimW, this.aiming && !this.dead ? 1 : 0, 1 - Math.exp(-14 * dt)); this.aimA.weight = this.aimW * 6; }
     if (this.dead && !this.deathA) {
       this.fallT = Math.min(1, this.fallT + dt * 2.2);
       const e = this.fallT * this.fallT;
@@ -128,6 +157,7 @@ export class Character {
     } else if (this.lod < 2) this.mixer.update(dt);
     else { this.lodAcc += dt; if (this.lodAcc > 0.12) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } }
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
+    if (this.weaponMesh) this.poseWeapon();
   }
   kill(dirSign = 1) {
     this.dead = true; this.health = 0; this.fallDir = dirSign;
@@ -143,13 +173,27 @@ export class Character {
     if (this.deathA) { this.deathA.stop(); this.deathA.weight = 0; }
     this.actions.idle.weight = 1;
   }
-  dispose() { this.scene.remove(this.root); }
+  dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); }
 }
+const _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _wf = new THREE.Vector3(), _wd = new THREE.Vector3(), _wz = new THREE.Vector3(), _wx = new THREE.Vector3(), _wy = new THREE.Vector3(), _wp = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 
 // ------------------------------------------------------------------------ pedestrians ----
 export class Pedestrians {
   constructor(scene, city) { this.scene = scene; this.city = city; this.list = []; this.loops = city.blocks.filter((b) => b.area !== 'promenade' || true); }
   spawn(near, minD = 25, maxD = 110, kinds = ['woman', 'man', 'man']) {
+    // r5.0: on the mainland / causeway / island ends people walk the ribbon sidewalks (mode 'line')
+    const RW = this.city.region && this.city.region.walks;
+    if (RW && RW.length && (near.x < -120 || Math.abs(near.z) > 400 || rng() < 0.08)) {
+      for (let t = 0; t < 24; t++) {
+        const w = pick(RW); const L = w.s1 - w.s0; if (L < 8) continue; const s = w.s0 + 2 + rng() * (L - 4);
+        const p = this.linePoint(w, s); const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
+        if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
+        const c = new Character(this.scene, pick(kinds)); c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
+        c.ai = { mode: 'line', w, s, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.25 ? rand(10, 60) : 0, off: rand(0.35, 0.75) };
+        this.list.push(c); return c;
+      }
+      if (near.x < -120 || Math.abs(near.z) > 400) return null;
+    }
     for (let t = 0; t < 20; t++) {
       const b = pick(this.loops); const sw = b.area === 'promenade' ? 3 : 2.2;
       // sidewalk loop rectangle (inset from the curb)
@@ -165,6 +209,7 @@ export class Pedestrians {
     }
     return null;
   }
+  linePoint(w, s, off = 0.55) { const p = w.road.path.at(s); const o = w.side * (w.road.hw + REGION_SW * off); return { x: p.x - p.tz * o, z: p.z + p.tx * o, tx: p.tx, tz: p.tz }; }
   loopPoint(x0, z0, x1, z1, u) {
     const w = x1 - x0, h = z1 - z0; const per = 2 * (w + h); u = ((u % per) + per) % per;
     if (u < w) return { x: x0 + u, z: z0 }; u -= w; if (u < h) return { x: x1, z: z0 + u }; u -= h; if (u < w) return { x: x1 - u, z: z1 }; u -= w; return { x: x0, z: z1 - u };
@@ -188,13 +233,22 @@ export class Pedestrians {
           c.pos.x = r.x; c.pos.z = r.z; if (r.hit && rng() < 0.02) a.dir *= -1;
           sp = a.speed; if (rng() < 0.0015) a.wait = rand(1, 4);
         }
+      } else if (a.mode === 'line') {
+        if (a.wait > 0) { a.wait -= dt; sp = 0; }
+        else {
+          a.s += a.dir * a.speed * dt; if (a.s > a.w.s1 - 1) { a.s = a.w.s1 - 1; a.dir = -1; } if (a.s < a.w.s0 + 1) { a.s = a.w.s0 + 1; a.dir = 1; }
+          const p = this.linePoint(a.w, a.s, a.off); const yawT = Math.atan2(p.tx * a.dir, p.tz * a.dir);
+          c.yaw += angWrap(yawT - c.yaw) * (1 - Math.exp(-8 * dt));
+          const r = this.city.col.resolve(p.x, p.z, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; if (r.hit && rng() < 0.02) a.dir *= -1;
+          sp = a.speed; if (rng() < 0.0015) a.wait = rand(1, 4);
+        }
       } else if (a.mode === 'flee') {
         const dx = c.pos.x - a.from.x, dz = c.pos.z - a.from.z; const yawT = Math.atan2(dx, dz) + Math.sin(a.t * 1.3 + c.id) * 0.4;
         c.yaw += angWrap(yawT - c.yaw) * (1 - Math.exp(-6 * dt)); sp = 5.2;
         const nx = c.pos.x + Math.sin(c.yaw) * sp * dt, nz = c.pos.z + Math.cos(c.yaw) * sp * dt;
         const r = this.city.col.resolve(nx, nz, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z;
         if (r.hit) c.yaw += 1.2 * dt * 4;
-        a.t += dt; if (a.t > 12) { a.mode = 'walk'; const [x0, z0, x1, z1, per] = a.loop; a.u = this.nearestU(a.loop, c.pos); }
+        a.t += dt; if (a.t > 12) { if (a.w) { a.mode = 'line'; const q = a.w.road.path.nearest(c.pos.x, c.pos.z); a.s = Math.min(a.w.s1 - 1, Math.max(a.w.s0 + 1, q.s)); } else { a.mode = 'walk'; a.u = this.nearestU(a.loop, c.pos); } }
       } else if (a.mode === 'cower') { sp = 0; a.t += dt; if (a.t > 6) a.mode = 'flee'; }
       c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt));
       c.setLocomotion(sp, dt); c.update(dt);
@@ -204,3 +258,5 @@ export class Pedestrians {
   panic(from, radius = 40) { for (const c of this.list) { if (c.dead) continue; if (c.pos.distanceTo(from) < radius) { c.ai.mode = 'flee'; c.ai.from = from.clone(); c.ai.t = 0; } } }
   remove(c) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.dispose(); }
 }
+
+const REGION_SW = REGION.sw;

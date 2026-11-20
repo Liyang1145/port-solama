@@ -21,6 +21,9 @@ Everything shipped in `dist/` and where it comes from. Original game: no Rocksta
 | Police helicopter, road blocks, search zone (v4.3) | src/police.js — procedural low-poly helicopter | original | — |
 | Car radio stations (v4.3) | generative WebAudio patterns (src/sfx.js), invented station names | original | — |
 | Map additions: container yards, gantry cranes, marina piers + yachts, lighthouse, Ferris wheel, alleys (v4.3) | procedural geometry (src/city.js), layout in MAP_DESIGN.md / src/mapdata.js; map image tools/mapgen.cjs | original | — |
+| r5.0 big map: natural island ends, 日光堤道 causeway + bridge hump, 星湾岛 villas, mainland 甘蔗区 / 湾畔 / 壁画仓库区, chunk streaming, shore-depth water map | procedural (src/mapdata.js, src/mapgeo.js, src/region.js, src/water.js); layout studied from public descriptions of the GTA VI Vice City map structure (gta6.how, returntovice.com, gtadb.org CC BY 4.0) — structure only, all names/shapes original | original | — |
+| Murals (6 canvas paintings: sunset/palms, tropical leaves, tile pattern + abstract face) | drawn at runtime on canvas (src/region.js makeMurals) | original | — |
+| Hand-held weapon models (pistol, SMG, shotgun, rifle, bat) + upper-body aim layer | procedural geometry (src/gunmodels.js); aim layer reuses the cast's own CMU 'Pistol aim' clip | original / CMU mocap terms | — |
 | Anton-Regular.ttf | Google Fonts | Vernon Adams | SIL OFL 1.1 |
 | three.js, esbuild | npm | three.js authors / Evan Wallace | MIT |
 | Audio | synthesized at runtime (src/sfx.js) | original | — |
