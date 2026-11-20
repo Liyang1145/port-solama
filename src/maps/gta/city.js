@@ -5,6 +5,8 @@ import { World, prismWalls, polyCap, rect, box } from '../../geo.js';
 import { ColliderGrid, rng, rand, randi, pick, clamp } from '../../util.js';
 import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
+import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
+import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
   // v4.0 "one perfect district": only the Deco beachfront (Tideline Dr, x=290), two inner avenues (x=170, x=50) and five cross
@@ -92,13 +94,7 @@ export function buildCity(scene, mats, T) {
     const deep = b.area === 'island' || b.area === 'promenade' || b.area === 'bayfront' ? -3.2 : -0.5;
     slab(W, b, deep);
   }
-  // mainland base ground under everything (for the outskirts)
-  {
-    const g = W.b('concrete', -900, 0);
-    polyCap(g, rect(-1900, -1500, SKY_X, 1500), -0.02);
-    // seawall faces of the mainland bayfront
-    prismWalls(W.b('concrete', SKY_X, 0), [[SKY_X, -1500], [SKY_X, 1500]], -3, 0, null);
-  }
+  // (V7, r6.2: the legacy mainland concrete layer at y -0.02 and the buried seawall at x=SKY_X were removed — region.js owns the mainland ground at -0.06; they z-fought it / poked out as a 3 km line)
   // island perimeter seawall (north/south ends + west) with railing posts
   {
     const b = W.b('concrete', 0, 0);
@@ -151,9 +147,11 @@ export function buildCity(scene, mats, T) {
   }
   // ------------------------------------------------------------- buildings -----
   const B = W.b.bind(W);
-  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [] };
+  // r6.2: streamed per-building geometric detail (bldgdetail.js / archdetail.js); jobs register here, meshes build near the camera
+  const DS = detailStream(128);
+  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS };
   for (const b of blocks) {
-    if (b.area === 'promenade') { promenade(W, b, shrubs, trees); continue; }
+    if (b.area === 'promenade') { promenade(W, b, shrubs, trees); { const zc = (b.z0 + b.z1) / 2 + 22; DS.add(b.x1, zc, 8, job('beach', (Wd) => beachDetail(Wd, b.x1, zc, mulb(seedOf(b.x1, zc, 9))))); } continue; }
     if (b.area === 'island') islandBlock(bld, b, palms, trees, shrubs);
     else if (b.area === 'bayfront') bayfrontBlock(bld, b, palms, trees);
     else downtownBlock(bld, b, palms, trees);
@@ -164,6 +162,16 @@ export function buildCity(scene, mats, T) {
   marina(bld); landmarks(bld);
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
   const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT });
+  // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
+  {
+    const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); };
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); };
+    region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
+    region.detail = DS;
+    const sun = region.data.byId.sun; let sb0 = 1e9, sb1 = -1e9; for (let s = 0; s < sun.path.len; s += 2) if (region.inBridge(sun.path.at(s).x)) { sb0 = Math.min(sb0, s); sb1 = Math.max(sb1, s); }
+    if (sb1 > sb0) for (let s = 8 + 4 * Math.floor((sb0 - 16) / 4); s < sb1 + 8; s += 48) { /* aligned to region.js's 4 m pier grid (s = 8 + 4k) */ const a = s, b2 = Math.min(sb1 + 8, s + 48); const m = sun.path.at((a + b2) / 2); DS.add(m.x, m.z, 30, job('bridge', (Wd) => bridgeDetail(Wd, sun, region.inBridge, a, b2))); }
+  }
   // ---------------------------------------------------------- street lights ----
   for (const s of segs) {
     if (s.bridge) continue;
@@ -215,7 +223,7 @@ export function buildCity(scene, mats, T) {
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
     return blockAt(x, z) ? 0.15 : 0;
   };
-  return { region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
+  return { detail: DS, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
 }
 
 function roadQuad(rd, s) {
@@ -405,7 +413,7 @@ function rooftop(ctx, x0, z0, x1, z1, y, kind = 'any', excl = []) {
   const P = (a0, b0, a1, b1, c, y0, y1, bottom) => { box(b, a0, y0, b0, a1, y1, b1, {}, c, !bottom); };
   P(x0, z0, x1, z0 + t, conc, y, y + ph); P(x0, z1 - t, x1, z1, conc, y, y + ph); P(x0, z0, x0 + t, z1, conc, y, y + ph); P(x1 - t, z0, x1, z1, conc, y, y + ph);
   for (const [a0, b0, a1, b1] of [[x0 - 0.08, z0 - 0.08, x1 + 0.08, z0 + t + 0.05], [x0 - 0.08, z1 - t - 0.05, x1 + 0.08, z1 + 0.08], [x0 - 0.08, z0, x0 + t + 0.05, z1], [x1 - t - 0.05, z0, x1 + 0.08, z1]]) P(a0, b0, a1, b1, cap, y + ph, y + ph + 0.1, true);
-  const W = x1 - x0, D = z1 - z0; if (W < 7 || D < 7) return;
+  const W = x1 - x0, D = z1 - z0; if (W < 7 || D < 7) return [];
   const used = excl.slice();
   const free = (a0, b0, a1, b1) => !used.some((u) => a0 < u[2] && a1 > u[0] && b0 < u[3] && b1 > u[1]);
   const place = (w, d) => { for (let i = 0; i < 12; i++) { const a = rand(x0 + 1.2, x1 - 1.2 - w), c = rand(z0 + 1.2, z1 - 1.2 - d); if (free(a - 0.6, c - 0.6, a + w + 0.6, c + d + 0.6)) { used.push([a, c, a + w, c + d]); return [a, c]; } } return null; };
@@ -424,9 +432,10 @@ function rooftop(ctx, x0, z0, x1, z1, y, kind = 'any', excl = []) {
     for (let k = 1; k < 3; k++) gput(b, G.cyl, cx, y + legH + k * th / 3, cz, dark, r + 0.02, 0.05, r + 0.02); } }
   else if (W > 10) { const s = place(W * 0.5, 0.9); if (s) P(s[0], s[1], s[0] + W * 0.5, s[1] + 0.9, met, y + 0.5, y + 1.3); }
   // antenna mast + satellite dish
-  if (rng() < 0.7) { const ax = rand(x0 + 1, x1 - 1), az = rand(z0 + 1, z1 - 1); const ah = rand(3, 8); gput(b, G.thin, ax, y, az, met, 0.05, ah, 0.05);
+  if (rng() < 0.7) { const ax = rand(x0 + 1, x1 - 1), az = rand(z0 + 1, z1 - 1); const ah = rand(3, 8); used.push([ax - 0.6, az - 0.6, ax + 0.6, az + 0.6]); gput(b, G.thin, ax, y, az, met, 0.05, ah, 0.05);
     for (let k = 1; k < 3; k++) gput(b, G.thin, ax, y + ah * k / 3, az, met, 0.02, 1.2, 0.02); }
   if (rng() < 0.6) { const s = place(1.2, 1.2); if (s) { gput(b, G.thin, s[0] + 0.6, y, s[1] + 0.6, met, 0.05, 1.0, 0.05); gput(b, G.dish, s[0] + 0.6, y + 1.2, s[1] + 0.6, [0.9, 0.9, 0.9], 0.55, 0.55, 0.55, rand(0, 6.28)); } }
+  return used; // r6.2: occupied roof cells -> the streamed roofKit (bldgdetail.js) avoids them
 }
 
 function condoSlabs(ctx, x0, z0, x1, z1, y0, y1, fh, dep) {
@@ -466,6 +475,7 @@ function islandBlock(ctx, b, palms, trees, shrubs) {
     volume(ctx, rect(sx0, sz0, sx1, sz1), 5.15, top, { style: 1, fh, ww: 3.2, wall: [0.95, 0.95, 0.93], glass: pick(GLASS), collide: false });
     condoSlabs(ctx, sx0, sz0, sx1, sz1, 5.15, top, fh, 1.6);
     rooftop(ctx, sx0, sz0, sx1, sz1, top);
+    if (ctx.ds) { const p = { x0, x1, z, hz, sx0, sx1, sz0, sz1, top, fh }; ctx.ds.add((x0 + x1) / 2, z, Math.max(x1 - x0, 2 * hz) / 2 + 9, job('condo', (Wd) => condoTowerDetail(Wd, p))); }
     for (let zz = iz0 + 3; zz < iz1 - 3; zz += 9) palms.push({ x: ix0 + 1.5, z: zz, h: rand(8, 12), lean: 0.05, rot: rand(0, 6), s: 1 });
     return;
   }
@@ -595,7 +605,8 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   if (floors > 2) { const y = 0.15 + ground + (floors - 2) * fh + fh * 0.86 - 0.08; ledge(tb, fpts, false, 0.74, 0.82, y, y + 0.07, accent); }
   // central pylon / fin rising above the roof
   const zc = (z0 + z1) / 2; const pw = rand(2.2, 3.4); const ph = rand(3.5, 8);
-  if (!small || rng() < 0.4) {
+  let pylon = null;
+  if (!small || rng() < 0.4) { pylon = { z: zc, w: pw / 2 + 0.6 };
     if (s > 0) box(tb, fx - 1.5, 0.15 + ground, zc - pw / 2, fx + 0.9, top + ph, zc + pw / 2, {}, lighter);
     else box(tb, fx - 0.9, 0.15 + ground, zc - pw / 2, fx + 1.5, top + ph, zc + pw / 2, {}, lighter);
     // r6.1: painted accent edges on the pylon (were neon tubes)
@@ -614,6 +625,8 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     // horizontal name sign above awning
     signs.push({ x: fx + s * 0.06, y: yA + 0.75, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: Math.min(14, z1 - z0 - 4), h: 1.1, vertical: false, color: pick(['#ffd49a', '#ffe2b8', '#ffc77e']) });
   }
+  if (ctx.ds) { const p = { x0, z0, x1, z1, facing, poly, top, ground, floors, fh, style: dStyle, ww: dWw, wall, accent, R, pylon, small };
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('deco', (Wd) => decoHotelDetail(Wd, p))); }
 }
 
 function midrise(ctx, x0, z0, x1, z1) {
@@ -623,7 +636,11 @@ function midrise(ctx, x0, z0, x1, z1) {
   volume(ctx, rect(x0, z0, x1, z1), 0.15, top, { style: modern ? 1 : 2, fh, ww, wall, glass: pick(GLASS), store: true });
   if (modern) condoSlabs(ctx, x0, z0, x1, z1, 4.75, top, fh, 1.2);
   else if (floors > 2 && rng() < 0.75) balconies(ctx, rect(x0, z0, x1, z1), 4.75, top, fh, ww, wall);
-  rooftop(ctx, x0, z0, x1, z1, top, 'mid');
+  const rused = rooftop(ctx, x0, z0, x1, z1, top, 'mid');
+  if (ctx.ds) { // street face = the long side nearest a north-south street
+    const dR = (x) => Math.min(...LAYOUT.islandNS.map((r) => Math.abs(Math.abs(x - r) - RH - LAYOUT.swalk)));
+    const p = { x0, z0, x1, z1, floors, fh, top, modern, wall, ww, frontX: dR(x0) < dR(x1) ? x0 : x1, rused };
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('mid', (Wd) => midriseDetail(Wd, p))); }
 }
 
 function bayfrontBlock(ctx, b, palms, trees) {
@@ -786,14 +803,15 @@ function skyline(ctx) {
   const lightCols = [[0.62, 0.6, 0.56], [0.7, 0.6, 0.45]];
   const tower = (cx, cz, w, d, h, kind) => {
     const opt = { collide: false, relief: false };
+    const tdet = (poly, wall) => { if (!ctx.ds) return; const p = { kind, poly, cx, cz, w, d, h, wall }; ctx.ds.add(cx, cz, Math.max(w, d) / 2 + 4, job('tower', (Wd) => towerDetail(Wd, p))); };
     ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); // r5.0: the far skyline is reachable now (causeway / island ends)
     if (kind === 0) { const poly = rng() < 0.5 ? chamfer(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, Math.min(w, d) * 0.15) : rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2);
       volume(ctx, poly, 0, h, { ...opt, style: 0, fh: 3.8, ww: 2, wall: [0.55, 0.58, 0.6], glass: pick(glassT) });
-      if (rng() < 0.6) crownLights(ctx, poly, h - 0.6, pick(lightCols)); }
+      if (rng() < 0.6) crownLights(ctx, poly, h - 0.6, pick(lightCols)); tdet(poly); }
     else if (kind === 1) { const poly = circlePoly(cx, cz, Math.min(w, d) / 2, 14);
-      volume(ctx, poly, 0, h, { ...opt, style: 0, fh: 3.7, ww: 2, wall: [0.6, 0.62, 0.64], glass: pick(glassT) }); crownLights(ctx, poly, h - 0.6, pick(lightCols)); }
-    else if (kind === 2) volume(ctx, rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2), 0, h, { ...opt, style: 1, fh: 3.2, ww: 3.3, wall: [0.95, 0.95, 0.94], glass: pick(glassT) });
-    else volume(ctx, rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2), 0, h, { ...opt, style: 2, fh: 3.6, ww: 2.2, wall: pick([[0.85, 0.82, 0.78], [0.9, 0.88, 0.84], [0.95, 0.9, 0.82]]), glass: pick(glassT) });
+      volume(ctx, poly, 0, h, { ...opt, style: 0, fh: 3.7, ww: 2, wall: [0.6, 0.62, 0.64], glass: pick(glassT) }); crownLights(ctx, poly, h - 0.6, pick(lightCols)); tdet(poly); }
+    else if (kind === 2) { volume(ctx, rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2), 0, h, { ...opt, style: 1, fh: 3.2, ww: 3.3, wall: [0.95, 0.95, 0.94], glass: pick(glassT) }); tdet(rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2)); }
+    else { const wall = pick([[0.85, 0.82, 0.78], [0.9, 0.88, 0.84], [0.95, 0.9, 0.82]]); volume(ctx, rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2), 0, h, { ...opt, style: 2, fh: 3.6, ww: 2.2, wall, glass: pick(glassT) }); tdet(rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2), wall); }
   };
   // downtown: densest + tallest toward the centre (z≈-100), shorter to the sides; first row low bayfront condos
   for (let z = -900; z < 900; z += rand(34, 58)) {
@@ -818,7 +836,7 @@ function skyline(ctx) {
 function yard(ctx, b, kind) {
   const { W, col } = ctx; const [ix0, iz0, ix1, iz1] = b.inner; const v = W.b('vcol', (ix0 + ix1) / 2, (iz0 + iz1) / 2);
   const cx = (ix0 + ix1) / 2, cz = (iz0 + iz1) / 2;
-  polyCap(W.b('concrete', cx, cz), rect(ix0, iz0, ix1, iz1), 0.16);
+  polyCap(W.b('concrete', cx, cz), rect(ix0, iz0, ix1, iz1), 0.2); // V9 r6.2: 5 cm over the lot pavers (0.15), was 1 cm -> z-fight
   const CC = [[0.62, 0.16, 0.12], [0.12, 0.32, 0.55], [0.85, 0.55, 0.12], [0.2, 0.45, 0.3], [0.55, 0.55, 0.55], [0.75, 0.75, 0.72], [0.45, 0.2, 0.35]];
   const cover = [];
   const container = (x, z, y, rot, c) => { // 12.2 x 2.44 x 2.6, corrugation ribs + door end

@@ -169,10 +169,12 @@ export class World {
     G.peds.list.push(c); this.thief = c; this.thiefT = 0; G.hud.msg('「抢劫啊！」—— 追上抢包贼，打倒他拿回钱包', 3.5); return c;
   }
   // ------------------------------------------------------------------ phone ----
+  // r6.2: once a map was picked the URL kept #map= and the start menu never came back; this saves and returns to the menu
+  switchMap() { this.G.save(); this.togglePhone(false); try { const q = new URLSearchParams(location.search); q.delete('map'); q.delete('snap'); const qs = q.toString(); location.replace(location.pathname + (qs ? '?' + qs + '&menu' : '?menu')); } catch (e) { } }
   togglePhone(on = !this.phoneOpen) { this.phoneOpen = on; this.phoneEl.style.display = on ? 'block' : 'none'; this.phonePage = 'home'; this.phoneSel = 0; this.drawPhone(); }
   phoneItems() {
     const G = this.G, P = G.P;
-    if (this.phonePage === 'home') return [['任务', () => this.go('jobs')], ['地图', () => { G.hud.toggleBig(); this.togglePhone(false); }], ['联系人', () => this.go('contacts')], ['银行', () => this.go('bank')], ['资产', () => this.go('assets')], ['车行', () => this.go('cars')], ['电台', () => this.go('radio')]];
+    if (this.phonePage === 'home') return [['任务', () => this.go('jobs')], ['地图', () => { G.hud.toggleBig(); this.togglePhone(false); }], ['联系人', () => this.go('contacts')], ['银行', () => this.go('bank')], ['资产', () => this.go('assets')], ['车行', () => this.go('cars')], ['电台', () => this.go('radio')], ['切换地图', () => this.switchMap()]];
     if (this.phonePage === 'jobs') return [...MISSION_STARTS.map((s) => [`${s.letter} ${s.name} · ${Math.round(Math.hypot(s.x - P.pos.x, s.z - P.pos.z))} 米${G.missions.done[s.id] ? ' ✓' : ''}`, () => { G.waypoint = { x: s.x, z: s.z, name: s.name }; G.hud.msg('已设置导航：' + s.name, 2); this.togglePhone(false); }]),
       [`代客泊车 · ${Math.round(Math.hypot(POI.valet.x - P.pos.x, POI.valet.z - P.pos.z))} 米`, () => { G.waypoint = { x: POI.valet.x, z: POI.valet.z, name: '代客泊车' }; this.togglePhone(false); }], ['返回', () => this.go('home')]];
     if (this.phonePage === 'contacts') return [['技工老秦 · 把你的车送过来', () => this.callMechanic()], ['律师许小姐 · 通缉 −1（$800）', () => this.callLawyer()], [(this.profiles[1 - this.cur] || {}).name + ' · 切换角色', () => { this.togglePhone(false); this.switchChar(); }], ['返回', () => this.go('home')]];

@@ -36,7 +36,11 @@ THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
    float cs = max(dot(rd, uSunDir), 0.0);
    float s = pow(cs, 14.0) * 0.45 + pow(cs, 60.0) * 0.35;   // v4.0: tighter Mie lobe, lower peak (backlit beach no longer whites out)
    vec3 fc = fogColor + uFogSunCol * s;
-   return mix(col, fc, clamp(amt, 0.0, 1.0) * mix(1.0, 0.82, cs * cs));
+   vec3 r = mix(col, fc, clamp(amt, 0.0, 1.0) * mix(1.0, 0.82, cs * cs));
+   ${CYBER ? '' : `// vis-sweep (map A): everything past 2.3 km fades into the sky's below-horizon sea colour, same as the water (water.js)
+   // and the sky (skyFS) -> aerials no longer show the mainland ground slab / skyline ending in a hard line at the far plane
+   { vec3 sea = mix(fogColor * vec3(0.55, 0.66, 0.78), fogColor, 0.5) + uFogSunCol * pow(cs, 7.0) * 0.4; r = mix(r, sea, smoothstep(2300.0, 4000.0, dist)); }`}
+   return r;
  }
 #endif`;
 THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
@@ -176,7 +180,7 @@ export class Env {
       Object.assign(l.shadow.camera, { left: -S, right: S, top: S, bottom: -S, near: 1, far: 900 }); l.shadow.camera.updateProjectionMatrix(); scene.add(l); scene.add(l.target); return l; };
     // near cascade: 4096 over 64 m (1.6 cm texels) -> crisp contact; far cascade: 4096 over 360 m for the whole district
     const sun = mk2(this.shadowSizeN = 32, 4096, 0xffffff);
-    sun.shadow.bias = -0.00012; sun.shadow.normalBias = 0.02; sun.shadow.radius = 1.6;
+    sun.shadow.bias = -0.00018; sun.shadow.normalBias = 0.01; // vis-sweep: 0.02 normal bias peter-panned a lit 1–3 px dashed sliver along every wall base on the shadow side sun.shadow.radius = 1.6;
     const far = mk2(this.shadowSize = 180, Q.has('lowshadow') ? 2048 : 4096, 0x000000);
     far.shadow.bias = -0.0003; far.shadow.normalBias = 0.06; far.shadow.radius = 2.5; far.intensity = 0;
     this.sun = sun; this.sunFar = far;

@@ -238,14 +238,21 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
       float rail = step(abs(f.y - 0.58), 0.006); float gx = fract(vUvM.x * 4.0); vec2 gid2 = vec2(floor(vUvM.x * 4.0), seed);
       float cloth = step(0.30, f.y) * step(f.y, 0.57) * step(0.15, gx) * step(gx, 0.85) * step(0.25, h12(gid2));
       vec3 cc = 0.25 + 0.6 * vec3(h12(gid2 + 1.3), h12(gid2 + 2.1), h12(gid2 + 3.7));
-      float spot = smoothstep(0.08, 0.0, abs(fract(vUvM.x * 0.7) - 0.5) * 0.3 + abs(f.y - 0.73) * 0.6);
+      // vis-sweep: was an L1 distance -> hard white diamonds on every boutique window; now a round track-light head + a soft
+      // downward wash on the wall below it
+      vec2 sd = vec2((fract(vUvM.x * 0.7) - 0.5) * 0.3, (f.y - 0.73) * 0.6);
+      float spot = smoothstep(0.03, 0.012, length(sd)) + smoothstep(0.16, 0.0, length(vec2(sd.x * 1.5, max(-sd.y, 0.0) * 0.45))) * step(f.y, 0.73) * 0.3;
       room = wc * mix(0.30, 0.22, uNight) * depthF; room = mix(room, cc * 0.45, cloth); room = mix(room, vec3(0.1), rail);
       room += vec3(1.0, 0.95, 0.85) * spot * 0.8;
     } else if (stype == 3.0) { // office / bank: cool white, reception desk, a plant, ceiling panels
       vec3 wc = vec3(0.78, 0.82, 0.86);
       float desk = step(0.12, f.y) * step(f.y, 0.30) * step(0.25, fract(vUvM.x * 0.3)) * step(fract(vUvM.x * 0.3), 0.75);
-      float plant = smoothstep(0.09, 0.0, length(vec2((fract(vUvM.x * 0.3 + 0.37) - 0.5) * 2.5, (f.y - 0.36) * 1.6)));
-      room = wc * mix(0.32, 0.22, uNight) * depthF; room = mix(room, vec3(0.32, 0.28, 0.25), desk); room = mix(room, vec3(0.08, 0.2, 0.07), plant * step(f.y, 0.5));
+      // vis-sweep: the potted plant was a soft green blur dot; now a pot + a lobed leaf crown with a crisp (AA) edge
+      vec2 pq = vec2((fract(vUvM.x * 0.3 + 0.37) - 0.5) * 2.5, (f.y - 0.38) * 1.6); float pa = atan(pq.y, pq.x);
+      float pr = 0.085 * (0.78 + 0.22 * sin(pa * 7.0 + seed * 3.0)) - length(pq); float paw = max(fwidth(pr), 1e-4);
+      float plant = smoothstep(-paw, paw, pr);
+      float pot = step(abs(pq.x), 0.04) * step(-0.2, pq.y) * step(pq.y, -0.07);
+      room = wc * mix(0.32, 0.22, uNight) * depthF; room = mix(room, vec3(0.32, 0.28, 0.25), desk); room = mix(room, vec3(0.06, 0.15, 0.05) * (0.8 + 0.4 * h12(floor(pq * 40.0))), plant * step(f.y, 0.5)); room = mix(room, vec3(0.30, 0.18, 0.12), pot);
       room += vec3(0.9, 0.95, 1.0) * troffer * 1.2;
     }
   }
@@ -407,7 +414,7 @@ asph *= 1.0 + 0.12 * smoothstep(0.7, 0.9, vnoise(vRW.xz * 1.7));
 col = mix(col, vec3(0.16, 0.42, 0.20) * (0.8 + 0.3 * wear), bikeG * (0.7 + 0.3 * smoothstep(0.2, 0.7, wear)));
 paintMask = max(paintMask, bikeG * 0.8);
 // wet: darker, puddles
-float pud = smoothstep(0.48, 0.62, vnoise(vRW.xz * 0.11) * 0.7 + vnoise(vRW.xz * 0.6) * 0.3 + tracks * 0.6);
+float pud = smoothstep(${CYBER ? '0.48, 0.62' : '0.56, 0.68'}, vnoise(vRW.xz * 0.11) * 0.7 + vnoise(vRW.xz * 0.6) * 0.3 + tracks * 0.6); // vis-sweep A: fewer puddles (the whole night road read as a flooded mirror)
 float wet = uWet;
 col *= mix(1.0, 0.45, wet);
 diffuseColor.rgb = col;
@@ -418,7 +425,7 @@ float roughnessFactor = roughness;
 vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );
 roughnessFactor = clamp(texelRoughness.g * 1.05, 0.55, 1.0) - tracks * 0.25;
 roughnessFactor = mix(roughnessFactor, 0.55, paintF);
-roughnessFactor = mix(roughnessFactor, mix(0.32, ${CYBER ? '0.11' : '0.03'}, pud), wet); // r6.1 B: puddles 0.03 -> 0.11 (lamp specular was a tiny over-bright hot spot)
+roughnessFactor = mix(roughnessFactor, mix(${CYBER ? '0.32' : '0.42'}, ${CYBER ? '0.11' : '0.07'}, pud), wet); // vis-sweep A: 0.32/0.03 -> 0.42/0.07 (damp asphalt, not glass) // r6.1 B: puddles 0.03 -> 0.11 (lamp specular was a tiny over-bright hot spot)
 `)
       .replace('#include <normal_fragment_maps>', `
 #include <normal_fragment_maps>
@@ -431,13 +438,13 @@ if (uReflOn > 0.5 && wet > 0.01) {
   vec2 ruv = rc.xy / rc.w + normal.xz * 0.02 * (1.0 - pud);
   // wet asphalt is not a mirror: smear the reflection along the view's vertical (classic streaky night reflections of
   // lamps, signals and neon), sharper in puddles
-  float sm = mix(0.022, 0.006, pud);
+  float sm = mix(${CYBER ? '0.022' : '0.032'}, 0.006, pud);
   vec3 rcol = texture2D(tRefl, ruv).rgb * 0.28
     + (texture2D(tRefl, ruv + vec2(0.0, sm)).rgb + texture2D(tRefl, ruv - vec2(0.0, sm)).rgb) * 0.22
     + (texture2D(tRefl, ruv + vec2(0.0, sm * 2.6)).rgb + texture2D(tRefl, ruv - vec2(0.0, sm * 2.6)).rgb) * 0.14;
   rcol = min(rcol, vec3(12.0));
   float fres = 0.04 + 0.96 * pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 5.0);
-  totalEmissiveRadiance += rcol * wet * mix(0.16, 0.6, pud) * clamp(fres * 1.0 + 0.06, 0.0, 1.0);
+  totalEmissiveRadiance += rcol * wet * mix(${CYBER ? '0.16' : '0.08'}, ${CYBER ? '0.6' : '0.5'}, pud) * clamp(fres * 1.0 + 0.06, 0.0, 1.0);
 }
 `);
   });
@@ -490,16 +497,30 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
 { vec3 t2 = texture2D(map, vMapUv * 0.27 + 0.43).rgb; diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.5 + t2 * 0.5, 0.5);
   float m = vnoise(vLW.xz * 0.013) * 0.6 + vnoise(vLW.xz * 0.06) * 0.3 + vnoise(vLW.xz * 0.31) * 0.1;
   diffuseColor.rgb *= mix(vec3(0.82, 0.95, 0.74), vec3(1.18, 1.08, 0.78), smoothstep(0.3, 0.75, m));
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.30, 0.22), smoothstep(0.80, 0.9, vnoise(vLW.xz * 0.09 + 7.0)) * 0.3); }`);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.30, 0.22), smoothstep(0.80, 0.9, vnoise(vLW.xz * 0.09 + 7.0)) * 0.3);${CYBER ? '' : `
+  // vis-sweep (map A, GTA6 Florida look): St. Augustine lawns read olive / sun-bleached, not lime -> 25% desaturate, warmer
+  { float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.75) * vec3(1.03, 0.97, 0.88); }`} }`);
   };
-  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', CYBER ? lawn : undefined); // r6.0: lawn macro-variation only on map 霓港
+  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', lawn); // vis-sweep: lawn macro-variation on both maps (map A lawns were one flat tiled green, aerials showed the 4 m tile)
   // v4.4 land caps under the open world: pushed back in depth so district pavers / roads drawn just above never z-fight from the air
   const po = { polygonOffset: false }; // v4.5: was 3 / 12 -> at grazing distances the caps fell behind the water plane 1 m below (white 'shallows' instead of land)
   M.land = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: new THREE.Color().setRGB(0.92, 0.95, 0.86), roughness: 1, ...po }), 'grass', lawn);
   M.landc = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1, ...po }), 'concrete');
   // r5.0 mainland / pearl-island ground: sits 6 cm below the road ribbons (polygonOffset pushed it behind the water at grazing angles)
-  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc');
-  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg');
+  // vis-sweep: the district ground showed as hectares of bare grey concrete between the lots (aerials looked unfinished) ->
+  // world-space mix of worn concrete, gravel/dirt and patchy lawn (vacant lots / yards), macro tone so the 4 m tile never repeats
+  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc', (s) => {
+    s.uniforms.tG = { value: grass.map };
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvLW = (modelMatrix*vec4(position,1.0)).xyz;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tG; varying vec3 vLW;' + HASH).replace('#include <map_fragment>', `#include <map_fragment>
+{ float m = vnoise(vLW.xz * 0.017) * 0.65 + vnoise(vLW.xz * 0.08) * 0.25 + vnoise(vLW.xz * 0.5) * 0.1;
+  vec3 g = texture2D(tG, vLW.xz * 0.25).rgb * mix(vec3(0.80, 0.92, 0.70), vec3(1.10, 1.02, 0.74), vnoise(vLW.xz * 0.05 + 3.0));
+  vec3 dirt = vec3(0.33, 0.30, 0.25) * (0.85 + 0.3 * vnoise(vLW.xz * 0.7));
+  diffuseColor.rgb *= 0.84 + 0.2 * vnoise(vLW.xz * 0.03 + 9.0);
+  diffuseColor.rgb = mix(diffuseColor.rgb, dirt, smoothstep(0.36, 0.46, m) * 0.35);
+  diffuseColor.rgb = mix(diffuseColor.rgb, g, smoothstep(0.44, 0.56, m)); }`);
+  });
+  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg', lawn);
   M.pool = prep(new THREE.MeshStandardMaterial({ color: 0x2aa9bd, roughness: 0.06, metalness: 0.0, emissive: 0x0a3a44, emissiveIntensity: 0.6 }), 'pool');
   M.roof = prep(new THREE.MeshStandardMaterial({ map: conc.map, color: 0x9a948c, roughness: 0.95 }), 'roof');
   M.white = prep(new THREE.MeshStandardMaterial({ color: 0xeeeae2, roughness: 0.7, map: T.plaster_d }), 'whitep');

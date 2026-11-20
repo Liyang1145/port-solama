@@ -7,6 +7,16 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 export const charLodReady = MeshoptSimplifier.ready;
 // v4.2 character LOD: per proto geometry, two simplified index buffers sharing the skinned vertex data (meshoptimizer)
+// r6.2 memory: glTF morph targets are per mesh, so every sub-mesh of a cast model (clothes, shoes, hair, ...) carried all 34 ARKit /
+// viseme targets as zero deltas, and three.js builds a float morph texture (verts x targets x vec4) for each one. Drop targets that
+// move nothing; the face / eyes / teeth keep theirs (blink, talk, expressions still animate).
+const DROPPED = { geos: 0, kept: 0 };
+function dropDeadMorphs(geo) {
+  const M = geo.morphAttributes; if (!M || !M.position || !M.position.length) return;
+  for (const a of M.position) { for (let i = 0, n = a.count; i < n; i++) if (Math.abs(a.getX(i)) > 1e-5 || Math.abs(a.getY(i)) > 1e-5 || Math.abs(a.getZ(i)) > 1e-5) { DROPPED.kept++; return; } }
+  geo.morphAttributes = {}; DROPPED.geos++;
+}
+export const morphStats = () => ({ ...DROPPED });
 const LODG = new Map();
 function makeLods(geo) {
   if (LODG.has(geo) || !geo.index) return;
@@ -15,7 +25,7 @@ function makeLods(geo) {
   const out = [geo];
   for (const r of [0.3, 0.1]) {
     let res; try { res = MeshoptSimplifier.simplify(I, P, 3, Math.max(3, Math.floor(I.length * r / 3) * 3), 0.02, ['LockBorder']); } catch (e) { res = null; }
-    const g = new THREE.BufferGeometry(); for (const k in geo.attributes) g.setAttribute(k, geo.attributes[k]);
+    const g = new THREE.BufferGeometry(); for (const k in geo.attributes) g.setAttribute(k, geo.attributes[k]); g.morphTargetsRelative = geo.morphTargetsRelative; // r6.2: no face morphs on LOD1/2 (blinks / visemes are invisible past 20 m; each morphed geometry costs a float morph texture of verts x 34 targets)
     g.setIndex(new THREE.BufferAttribute(res ? res[0] : I, 1)); g.boundingSphere = geo.boundingSphere; g.boundingBox = geo.boundingBox;
     for (const gr of geo.groups) g.addGroup(0, Infinity, gr.materialIndex);
     out.push(g);
@@ -25,19 +35,10 @@ function makeLods(geo) {
 import { prep } from './mats.js';
 import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
-const CLIPS = {};
 const PROTOS = {};
 
-function stripPos(clip, rename, dropHips) {
-  const c = clip.clone();
-  c.tracks = c.tracks.filter((t) => !t.name.endsWith('.position') && !t.name.endsWith('.scale') && !(dropHips && /Hips\.quaternion/.test(t.name)));
-  for (const t of c.tracks) {
-    if (rename) t.name = t.name.replace('mixamorig', '');
-  }
-  return c;
-}
 function hueMat(src, key) {
-  // clothing tint: rotates hue/value of non-skin texels (per-character uniforms)
+  // clothing / hair / skin-tone tint: rotates hue / scales saturation + value (per-character uniforms)
   const m = src.clone();
   m.userData.tint = { uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: /Outfit/.test(src.name) ? 0 : 1 } };
   return prep(m, key, (s) => {
@@ -54,80 +55,170 @@ vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fr
   });
 }
 
-// Cast: MakeHuman-based realistic people (CC0 bodies, CMU mocap clips) exported with ara3d; each GLB carries its own clips
-// (Idle / Walk / Run / Pistol aim / Death), so no cross-rig retargeting is needed.
+// Cast: MakeHuman-based realistic people (CC0 bodies, CMU mocap clips) exported with ara3d at medium detail; each GLB carries
+// its own retargeted clip set (r6.2: 20 clips — locomotion in 4 directions, idle variations, swim, jump, hit, two deaths, aim).
+// h = exported height (m); hT = height the cast is normalised to (consistent street scale: no 2 m giants next to 1.5 m teens).
 export const CAST = {
-  hero: { file: 'ch_hero.glb', sex: 'm' },
-  m1: { file: 'ch_m1.glb', sex: 'm' }, m2: { file: 'ch_m2.glb', sex: 'm' }, m3: { file: 'ch_m3.glb', sex: 'm' }, m4: { file: 'ch_m4.glb', sex: 'm' },
-  f1: { file: 'ch_f1.glb', sex: 'f' }, f2: { file: 'ch_f2.glb', sex: 'f' }, f3: { file: 'ch_f3.glb', sex: 'f' }, f4: { file: 'ch_f4.glb', sex: 'f' },
-  cop: { file: 'ch_cop.glb', sex: 'm' },
+  hero: { file: 'ch_hero.glb', sex: 'm', h: 1.74, hT: 1.78 },
+  m1: { file: 'ch_m1.glb', sex: 'm', h: 1.94, hT: 1.83 }, m2: { file: 'ch_m2.glb', sex: 'm', h: 1.90, hT: 1.82 }, m3: { file: 'ch_m3.glb', sex: 'm', h: 2.01, hT: 1.85 }, m4: { file: 'ch_m4.glb', sex: 'm', h: 1.66, hT: 1.70 },
+  m5: { file: 'ch_m5.glb', sex: 'm', h: 1.93, hT: 1.81 }, m6: { file: 'ch_m6.glb', sex: 'm', h: 1.87, hT: 1.79 }, m7: { file: 'ch_m7.glb', sex: 'm', h: 1.90, hT: 1.82 }, m8: { file: 'ch_m8.glb', sex: 'm', h: 2.11, hT: 1.90 },
+  f1: { file: 'ch_f1.glb', sex: 'f', h: 1.69, hT: 1.68 }, f2: { file: 'ch_f2.glb', sex: 'f', h: 1.80, hT: 1.71 }, f3: { file: 'ch_f3.glb', sex: 'f', h: 1.76, hT: 1.69 }, f4: { file: 'ch_f4.glb', sex: 'f', h: 1.48, hT: 1.58 },
+  f5: { file: 'ch_f5.glb', sex: 'f', h: 1.71, hT: 1.69 }, f6: { file: 'ch_f6.glb', sex: 'f', h: 1.63, hT: 1.64 },
+  cop: { file: 'ch_cop.glb', sex: 'm', h: 1.89, hT: 1.82, cop: true }, cop2: { file: 'ch_cop2.glb', sex: 'm', h: 1.97, hT: 1.84, cop: true },
 };
-const SKIN_RE = /^(Skin|Eyes|Eyebrows|Eyelashes|Teeth|Tongue|Hair|Beard|Skin details)/;
+const SKIN_RE = /^(Skin|Mouth|Eyes|Eyebrows|Eyelashes|Teeth|Tongue|Hair|Beard|Buzz|Skin details)/;
+const HAIR_RE = /^(Hair|Beard|Buzz|Eyebrows)/;
+const TONE_RE = /^(Skin|Skin details)$/;
+const CLIP_NAMES = {
+  idle: 'Idle', walk: 'Walk', run: 'Run', back: 'Walk backwards', sl: 'Strafe left', sr: 'Strafe right',
+  look: 'Look around', phone: 'Phone call', text: 'Texting', talk: 'Talk with gestures',
+  tread: 'Tread water', swim: 'Swim breaststroke', jair: 'Jump (in air)', jland: 'Jump land',
+  hitF: 'Hit from front', hitB: 'Hit from back', deathF: 'Death (fall forward)', deathB: 'Death (fall backward)', aim: 'Pistol aim', raim: 'Rifle aim idle',
+};
+const GAIT = ['walk', 'run', 'back', 'sl', 'sr'];
+const LOOPED = ['idle', 'walk', 'run', 'back', 'sl', 'sr', 'look', 'phone', 'text', 'talk', 'tread', 'swim', 'jair'];
+const UPPER_RE = /(Spine1|Spine2|Neck|Head|Shoulder|Arm|ForeArm|Hand)/;
+
+// per proto + clip: stride (m per cycle), left-foot-forward phase and the vertical lift that puts the soles on the ground
+function calibrate(P) {
+  const m = SkeletonUtils.clone(P.scene); m.updateMatrixWorld(true);
+  const feet = ['LeftFoot', 'LeftToeBase', 'RightFoot', 'RightToeBase'].map((n) => m.getObjectByName(n)).filter(Boolean);
+  const lf = m.getObjectByName('LeftFoot'), hips = m.getObjectByName('Hips'); const v = new THREE.Vector3(), h = new THREE.Vector3();
+  const lowY = () => { let y = 1e9; for (const b of feet) y = Math.min(y, b.getWorldPosition(v).y); return y; };
+  const rest = lowY(); const mixer = new THREE.AnimationMixer(m); const cal = {};
+  for (const k of ['idle', ...GAIT, 'look', 'phone', 'text', 'talk']) {
+    const c = P.clips[k]; if (!c || !lf || !hips) continue;
+    const a = mixer.clipAction(c); a.play(); a.weight = 1; const N = 40, d = c.duration || 1; let lo = 1e9, mx = -1e9, mn = 1e9, tm = 0;
+    const side = k === 'sl' || k === 'sr';
+    for (let i = 0; i < N; i++) {
+      mixer.setTime(i / N * d); m.updateMatrixWorld(true); lo = Math.min(lo, lowY());
+      lf.getWorldPosition(v); hips.getWorldPosition(h); const r = side ? v.x - h.x : v.z - h.z; if (r > mx) { mx = r; tm = i / N; } mn = Math.min(mn, r);
+    }
+    cal[k] = { lift: clamp(rest - lo, -0.12, 0.12), stride: Math.max(0.3, 2 * (mx - mn)), ph: tm, dur: d };
+    a.stop(); mixer.uncacheAction(c);
+  }
+  return cal;
+}
+
 export function prepareCharacters(G) {
-  const find = (g, re) => g.animations.find((a) => re.test(a.name));
   for (const key in CAST) {
     const g = G['ch_' + key]; if (!g) continue;
+    const names = new Set(); g.scene.traverse((o) => names.add(o.name));
     g.scene.traverse((o) => {
-      if (!o.isMesh) return; o.castShadow = !/Eye|Teeth|Tongue|lash|brow|details/i.test(o.material.name); o.receiveShadow = true; o.frustumCulled = false;
+      if (!o.isMesh) return; o.castShadow = !/Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name); o.receiveShadow = true; o.frustumCulled = false;
       const mm = Array.isArray(o.material) ? o.material : [o.material];
       mm.forEach((m) => { if (m.transparent && m.map === null) m.depthWrite = false; prep(m, 'ch'); });
+      if (o.isSkinnedMesh) dropDeadMorphs(o.geometry);
       if (o.isSkinnedMesh && key !== 'hero') makeLods(o.geometry);
     });
-    const clip = (re) => { const c = find(g, re); if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => !t.name.endsWith('.scale')); return k; };
-    // r5.0 upper-body aim layer: the 'Pistol aim' clip restricted to spine / neck / head / arms, blended over walk/run
-    const upper = (c) => { if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => /(Spine1|Spine2|Neck|Head|Shoulder|Arm|ForeArm|Hand)/.test(t.name.split('.')[0])); k.name = 'aimUpper'; return k; };
-    const aimC = clip(/Pistol aim/);
-    PROTOS[key] = { scene: g.scene, scale: 1, sex: CAST[key].sex, clips: { idle: clip(/^Idle/), walk: clip(/^Walk/), run: clip(/^Run/), aim: aimC, aimU: upper(aimC), death: clip(/^Death/) } };
+    // tracks for nodes the rig lacks (props in some clips) would only spam binding warnings: keep bones / mesh weights that exist
+    const clip = (nm) => { const c = g.animations.find((a) => a.name === nm); if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => !t.name.endsWith('.scale') && names.has(t.name.split('.')[0])); return k; };
+    const upper = (c, nm) => { if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => UPPER_RE.test(t.name.split('.')[0])); k.name = nm; return k; };
+    const clips = {}; for (const k in CLIP_NAMES) clips[k] = clip(CLIP_NAMES[k]);
+    clips.idle = clips.idle || g.animations[0];
+    for (const k of ['walk', 'run']) clips[k] = clips[k] || clips.idle;
+    clips.aimU = upper(clips.aim, 'aimUpper'); clips.raimU = upper(clips.raim || clips.aim, 'rifleUpper');
+    const C = CAST[key]; const P = PROTOS[key] = { scene: g.scene, scale: C.hT && C.h ? C.hT / C.h : 1, sex: C.sex, cop: !!C.cop, clips };
+    P.cal = calibrate(P);
   }
 }
 const pickKind = (kind, opt) => {
   if (opt.proto && PROTOS[opt.proto]) return opt.proto;
   if (opt.player) return 'hero';
-  if (kind === 'cop') return 'cop';
-  const pool = Object.keys(PROTOS).filter((k) => k !== 'hero' && k !== 'cop' && (kind === 'man' ? PROTOS[k].sex === 'm' : kind === 'woman' ? PROTOS[k].sex === 'f' : true));
-  return pick(pool.length ? pool : Object.keys(PROTOS));
+  const keys = Object.keys(PROTOS);
+  if (kind === 'cop') { const cs = keys.filter((k) => PROTOS[k].cop); if (cs.length) return pick(cs); }
+  const pool = keys.filter((k) => k !== 'hero' && !PROTOS[k].cop && (kind === 'man' ? PROTOS[k].sex === 'm' : kind === 'woman' ? PROTOS[k].sex === 'f' : true));
+  return pick(pool.length ? pool : keys);
 };
+const smooth = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const LONG_GUNS = /smg|rifle|shotgun|carbine|lmg|sniper/i;
 
+// r6.2 perf/memory: SkeletonUtils.clone gives every skinned sub-mesh (30-40 per cast model) its own Skeleton, so each character
+// computed and uploaded 30-40 identical bone textures per frame (~1100 per frame for a street crowd; it OOM'd the software GPU).
+// All sub-meshes of a cast model come from one glTF skin: point them at the first mesh's Skeleton when bones + inverses match.
+export function shareSkeleton(root) {
+  let sk = null;
+  root.traverse((o) => {
+    if (!o.isSkinnedMesh) return; if (!sk) { sk = o.skeleton; return; } const s2 = o.skeleton; if (s2 === sk) return;
+    if (s2.bones.length !== sk.bones.length || !s2.bones.every((b, i) => b === sk.bones[i]) || !s2.boneInverses.every((m, i) => m.equals(sk.boneInverses[i]))) return;
+    s2.dispose(); o.skeleton = sk;
+  });
+  return sk;
+}
+export const CROWD_DRAW = 80; // m
 let CID = 0;
 export class Character {
   constructor(scene, kind, opt = {}) {
-    const pk = pickKind(kind, opt); const P = PROTOS[pk]; this.kind = kind; this.proto = pk; this.id = CID++; this.isCop = kind === 'cop';
-    this.model = SkeletonUtils.clone(P.scene);
+    const pk = pickKind(kind, opt); const P = PROTOS[pk]; this.kind = kind; this.proto = pk; this.P = P; this.id = CID++; this.isCop = kind === 'cop';
+    this.isPlayer = !!opt.player;
+    this.model = SkeletonUtils.clone(P.scene); this.model.scale.setScalar(P.scale);
+    shareSkeleton(this.model); // r6.2: one Skeleton (one bone texture upload / matrix pass) per character instead of one per sub-mesh
     this.root = new THREE.Group(); this.root.add(this.model); scene.add(this.root); this.scene = scene;
-    if (!opt.player && !opt.player2 && kind !== 'cop' && rng() < 0.75) {
-      // wardrobe variety: shift the hue / value of clothing (never skin, eyes or hair)
-      const t = pick([[rand(-0.5, 0.5), rand(0.7, 1.3), rand(0.75, 1.2)], [0, rand(0.2, 0.6), rand(1.1, 1.4)], [rand(-0.5, 0.5), 1, rand(0.5, 0.8)]]);
-      this.model.traverse((o) => {
-        if (!o.isMesh || SKIN_RE.test(o.material.name) || o.material.transparent) return;
-        if (rng() < 0.35) return;
-        o.material = hueMat(o.material, 'tint');
-        const u = o.material.userData.tint; u.uSkin.value = 0; u.uHue.value = t[0]; u.uSat.value = t[1]; u.uVal.value = t[2];
-      });
-    }
+    if (!opt.player && !opt.player2) this.dress(kind);
     this.mixer = new THREE.AnimationMixer(this.model);
-    this.actions = {};
-    for (const k of ['idle', 'walk', 'run']) { const a = this.mixer.clipAction(P.clips[k]); a.play(); a.weight = k === 'idle' ? 1 : 0; this.actions[k] = a; }
+    this.A = {};
+    for (const k of [...LOOPED, 'jland', 'hitF', 'hitB']) {
+      const c = P.clips[k]; if (!c) continue; const a = this.mixer.clipAction(c);
+      if (!LOOPED.includes(k)) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
+      a.play(); a.weight = 0; this.A[k] = a; a.w = 0;
+    }
+    this.A.idle.weight = 1; this.A.idle.w = 1;
+    for (const k of GAIT) if (this.A[k]) this.A[k].timeScale = 0; // gait clips are driven by one shared stride phase (no foot sliding, no foot crossing while blending)
+    this.actions = { idle: this.A.idle, walk: this.A.walk, run: this.A.run }; // legacy handle
     if (P.clips.aimU) { const a = this.mixer.clipAction(P.clips.aimU); a.play(); a.weight = 0; this.aimA = a; }
+    if (P.clips.raimU) { const a = this.mixer.clipAction(P.clips.raimU); a.play(); a.weight = 0; this.raimA = a; }
     this.aiming = false; this.aimW = 0; this.aimDir = new THREE.Vector3(0, 0, 1); this.weaponMesh = null; this.weaponId = null;
-    this.bones = { hand: this.model.getObjectByName('RightHand'), mid: this.model.getObjectByName('RightHandMiddle1') };
-    if (P.clips.death) { const a = this.mixer.clipAction(P.clips.death); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; this.deathA = a; }
+    this.bones = { hand: this.model.getObjectByName('RightHand'), mid: this.model.getObjectByName('RightHandMiddle1'), lhand: this.model.getObjectByName('LeftHand'), lmid: this.model.getObjectByName('LeftHandMiddle1'), lidx: this.model.getObjectByName('LeftHandIndex1'), lpinky: this.model.getObjectByName('LeftHandPinky1'), neck: this.model.getObjectByName('Neck'), head: this.model.getObjectByName('Head') };
+    this.deathA = null;
+    for (const k of ['deathF', 'deathB']) if (P.clips[k]) { const a = this.mixer.clipAction(P.clips[k]); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.weight = 0; this[k] = a; this.deathA = this.deathA || a; }
     this.pos = new THREE.Vector3(); this.yaw = 0; this.vy = 0; this.speed = 0; this.health = 100; this.dead = false;
-    this.fallT = 0; this.mixer.update(rand(0, 2));
-    this.root.scale.setScalar(opt.player ? 1 : rand(0.95, 1.04));
+    this.fallT = 0;
+    // locomotion state: measured velocity (what the feet must match), shared gait phase, idle variation, overlays
+    this._lp = null; this._ly = 0; this.mv = new THREE.Vector2(); this.mvy = 0; this.yawRate = 0; this.cmdSpeed = 0;
+    this.phase = rng(); this.moveT = 0; this.runT = 0; this.idleT = -rand(1, 6); this.var = null; this.varW = 0; this.varT = 0;
+    this.airW = 0; this.landW = 0; this.hitW = 0; this.swimW = 0; this.lookY = 0; this._hp = 100; this.lift = 0;
+    this.mixer.update(0);
+    this.root.scale.setScalar(opt.player ? 1 : rand(0.96, 1.04));
     this.lod = 0; this.lodAcc = 0; this.lodMeshes = [];
-    this.model.traverse((o) => { if (o.isMesh) this.lodMeshes.push({ m: o, g: LODG.get(o.geometry), small: /Eye|Teeth|Tongue|lash|brow|details/i.test(o.material.name), cast: o.castShadow }); });
+    this.model.traverse((o) => { if (o.isMesh) this.lodMeshes.push({ m: o, g: LODG.get(o.geometry), small: /Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name), cast: o.castShadow }); });
   }
-  // LOD by camera distance: 0 full (<16 m), 1 = 30 % tris, no tiny meshes / shadows past 28 m, 2 = 10 % tris + quarter-rate animation
+  // wardrobe variety: clothing hue / value shifts (never skin), natural hair shades, and a range of skin tones
+  dress(kind) {
+    // realistic fabric shifts only (r6.2): moderate hue turns at reduced saturation, washed / faded, or darker dyes — no acid colours
+    const cloth = kind !== 'cop' && rng() < 0.75 ? pick([[rand(-0.5, 0.5), rand(0.55, 0.95), rand(0.75, 1.08)], [0, rand(0.15, 0.5), rand(0.95, 1.25)], [rand(-0.08, 0.08), rand(0.8, 1.05), rand(0.45, 0.75)]]) : null;
+    const hair = rng() < 0.7 ? pick([[0, 0.9, 0.35], [0, 1, 0.55], [0.01, 1.05, 0.8], [0.02, 0.8, 1.25], [0, 0.3, 0.9]]) : null; // black / dark brown / brown / dark blond / greying
+    const tone = rng() < 0.6 ? [rand(-0.012, 0.008), rand(1.0, 1.15), pick([rand(0.5, 0.65), rand(0.68, 0.85), rand(0.86, 1.04)])] : null;
+    this.model.traverse((o) => {
+      if (!o.isMesh || Array.isArray(o.material)) return; const n = o.material.name; let t = null;
+      if (HAIR_RE.test(n)) t = hair; else if (TONE_RE.test(n)) t = tone;
+      else if (!SKIN_RE.test(n) && !o.material.transparent && rng() >= 0.35) t = cloth;
+      if (!t) return;
+      o.material = hueMat(o.material, 'tint'); const u = o.material.userData.tint; u.uSkin.value = 0; u.uHue.value = t[0]; u.uSat.value = t[1]; u.uVal.value = t[2];
+    });
+  }
+  // hand-held phone for the phone-call / texting idles (world-space like the weapon, posed from the left-hand bones)
+  posePhone() {
+    const w = Math.max(this.A.phone ? this.A.phone.weight : 0, this.A.text ? this.A.text.weight : 0);
+    const show = w > 0.45 && !this.dead && this.lod < 2 && this.root.visible && this.bones.lhand && this.bones.lmid && this.bones.lidx && this.bones.lpinky;
+    if (!show) { if (this.phone) this.phone.visible = false; return; }
+    if (!this.phone) { this.phone = new THREE.Mesh(phoneGeo(), PHONE_MAT); this.phone.matrixAutoUpdate = false; this.phone.castShadow = false; this.phone.frustumCulled = false; this.scene.add(this.phone); }
+    this.phone.visible = true; this.root.updateMatrixWorld(true);
+    const B = this.bones; const a = B.lhand.getWorldPosition(_wa), b = B.lmid.getWorldPosition(_wb), t = B.lidx.getWorldPosition(_wx).sub(B.lpinky.getWorldPosition(_wy));
+    const fd = _wd.subVectors(b, a); const fl = fd.length() || 1; fd.divideScalar(fl); t.addScaledVector(fd, -t.dot(fd)).normalize();
+    const n = _wz.crossVectors(fd, t).normalize(); // palm normal (left hand: the phone-call and texting clips hold it in the left)
+    const pos = _wp.copy(a).addScaledVector(fd, fl * 0.75).addScaledVector(n, 0.024);
+    this.phone.matrix.makeBasis(t, fd, n).setPosition(pos); this.phone.matrixWorld.copy(this.phone.matrix);
+  }
+  // LOD by camera distance: 0 full (<20 m), 1 = 30 % tris, no tiny meshes, 2 (>50 m) = 10 % tris + quarter-rate animation; shadows < 28 m
   setLod(d) {
-    const L = d < 16 ? 0 : d < 45 ? 1 : 2; if (L === this.lod) return; this.lod = L;
+    // r6.2 crowd draw distance: beyond CROWD_DRAW a character (< ~10 px tall at 960 px) is not drawn at all (model hidden, root
+    // logic untouched); with 84 peds + seated drivers + 17 distinct cast models this keeps draw calls and GPU memory bounded
+    const far = d > (this.lod === 3 ? CROWD_DRAW - 5 : CROWD_DRAW);
+    const L = far ? 3 : d < 20 ? 0 : d < 50 ? 1 : 2; if (L === this.lod) return; this.lod = L; this.model.visible = L < 3; if (L === 3) return;
     for (const e of this.lodMeshes) { if (e.g) e.m.geometry = e.g[L]; e.m.visible = !(e.small && L > 0); e.m.castShadow = e.cast && d < 28; }
   }
-  setLocomotion(speed, dt) {
-    const w = { idle: speed < 0.3 ? 1 : 0, walk: speed >= 0.3 && speed < 3.2 ? 1 : 0, run: speed >= 3.2 ? 1 : 0 };
-    for (const k in this.actions) { const a = this.actions[k]; a.weight = lerp(a.weight, w[k], 1 - Math.exp(-10 * dt)); }
-    this.actions.walk.timeScale = clamp(speed / 1.4, 0.5, 2.0);
-    this.actions.run.timeScale = clamp(speed / 5.0, 0.7, 1.5);
-  }
+  // callers pass the speed they intend; the animation follows the speed the body actually moved at (blocked = no treadmill)
+  setLocomotion(speed, dt) { this.cmdSpeed = speed; }
   // r5.0: weapon model in the right hand (null = none)
   setWeapon(id) {
     if (id === this.weaponId) return; this.weaponId = id;
@@ -135,7 +226,7 @@ export class Character {
     const m = id ? gunMesh(id) : null; if (m) { this.scene.add(m); this.weaponMesh = m; }
   }
   poseWeapon() {
-    const wm = this.weaponMesh; wm.visible = this.root.visible && !this.dead && this.lod < 2 && !!this.bones.hand; if (!wm.visible) return;
+    const wm = this.weaponMesh; wm.visible = this.root.visible && !this.dead && this.lod < 2 && !!this.bones.hand && this.swimW < 0.5; if (!wm.visible) return;
     this.root.updateMatrixWorld(true);
     const a = this.bones.hand.getWorldPosition(_wa), b = this.bones.mid ? this.bones.mid.getWorldPosition(_wb) : _wb.copy(a);
     const fwd = _wf.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); const fd = _wd.subVectors(b, a); const fl = fd.length() || 1; fd.divideScalar(fl);
@@ -148,34 +239,146 @@ export class Character {
     const pos = _wp.copy(a).addScaledVector(fd, Math.min(0.06, fl * 0.6)).addScaledVector(y, -0.01);
     wm.matrix.makeBasis(x, y, bar).setPosition(pos); wm.matrixWorld.copy(wm.matrix);
   }
+  // measured motion of the body this frame (teleports / car exits are ignored)
+  sense(dt) {
+    const p = this.pos;
+    if (!this._lp || dt <= 0) { this._lp = p.clone(); this._ly = this.yaw; return; }
+    const dx = p.x - this._lp.x, dz = p.z - this._lp.z, dy = p.y - this._lp.y; const sp = Math.hypot(dx, dz) / dt;
+    const tele = sp > 14 || Math.abs(dy) / dt > 14;
+    const k = 1 - Math.exp(-12 * dt);
+    if (tele) { this.mv.set(0, 0); this.mvy = 0; this.airW = 0; this.landW = 0; this.yawRate = 0; }
+    else {
+      this.mv.x += (dx / dt - this.mv.x) * k; this.mv.y += (dz / dt - this.mv.y) * k; this.mvy += (dy / dt - this.mvy) * (1 - Math.exp(-20 * dt));
+      this.yawRate += (angWrap(this.yaw - this._ly) / dt - this.yawRate) * (1 - Math.exp(-10 * dt));
+    }
+    this._lp.copy(p); this._ly = this.yaw;
+  }
+  locomote(dt) {
+    const A = this.A, cal = this.P.cal; const sp = Math.hypot(this.mv.x, this.mv.y); this.speed = sp;
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const f = this.mv.x * sy + this.mv.y * cy, s = this.mv.x * cy - this.mv.y * sy; // forward / left components
+    const cs = sp > 0.05 ? f / sp : 1, sn = sp > 0.05 ? s / sp : 0;
+    const moveT = smooth(sp, 0.08, 0.7); const runT = smooth(sp, 2.3, 3.8);
+    const swim = this.pos.y < -1.2; this.swimW = lerp(this.swimW, swim ? 1 : 0, 1 - Math.exp(-6 * dt));
+    // turn-in-place: small side steps while the body turns on the spot
+    const turn = (1 - moveT) * smooth(Math.abs(this.yawRate), 0.9, 2.5) * (1 - this.swimW);
+    // idle variations (look around, phone call, texting, talking) after standing still for a while
+    if (moveT < 0.05 && !this.aiming && !this.weaponId && !this.dead && this.swimW < 0.1) this.idleT += dt; else { this.idleT = Math.min(this.idleT, -2); this.var = null; }
+    if (!this.var && this.idleT > (this.isPlayer ? 9 : 2)) {
+      const opts = this.isPlayer || this.isCop ? ['look'] : ['look', 'phone', 'text', 'talk', 'talk', 'text'];
+      const o2 = opts.filter((k) => A[k]); const nv = o2.length ? pick(o2) : null;
+      if (nv && (nv === this.lastVar || this.varW < 0.05)) { if (nv !== this.lastVar) A[nv].time = rng() * A[nv].getClip().duration; this.var = nv; this.varT = rand(6, 18); }
+    }
+    if (this.var) { this.varT -= dt; if (this.varT <= 0) { this.var = null; this.idleT = -rand(3, 10); } }
+    // airborne / landing (player jump, falls) and swim
+    const air = !swim && (this.mvy > 2.0 || this.mvy < -3.0);
+    const airT = air ? 1 : 0; const wasAir = this.airW > 0.6;
+    this.airW = lerp(this.airW, airT, 1 - Math.exp(-(air ? 14 : 18) * dt));
+    if (wasAir && !air && A.jland) { A.jland.reset().play(); A.jland.time = 0.15; this.landW = 1; }
+    this.landW = Math.max(0, this.landW - dt * 2.4);
+    // hit flinch when health drops without dying
+    if (this.health < this._hp - 0.5 && !this.dead && A.hitF) { const k = rng() < 0.7 ? 'hitF' : 'hitB'; if (A[k]) { A[k].reset().play(); this.hitK = k; this.hitW = 1; } }
+    this._hp = this.health; this.hitW = Math.max(0, this.hitW - dt * 1.6);
+    // target weights
+    const T = {}; for (const k in A) T[k] = 0;
+    const ground = (1 - this.swimW) * (1 - this.airW);
+    const idleShare = (1 - moveT) * ground;
+    const fw = cs > 0 ? cs * cs : 0, bw = cs < 0 ? cs * cs : 0, lw = sn > 0 ? sn * sn : 0, rw = sn < 0 ? sn * sn : 0;
+    T.walk = moveT * ground * (fw * (1 - runT)); T.run = moveT * ground * fw * runT;
+    if (A.back) T.back = moveT * ground * bw; else T.walk += moveT * ground * bw;
+    if (A.sl) T.sl = moveT * ground * lw; else T.walk += moveT * ground * lw;
+    if (A.sr) T.sr = moveT * ground * rw; else T.walk += moveT * ground * rw;
+    const tw = turn * 0.55; const idleW = idleShare * (1 - tw);
+    if (tw > 0) { const tk = this.yawRate > 0 ? 'sl' : 'sr'; if (A[tk]) T[tk] += idleShare * tw; }
+    this.varW = lerp(this.varW, this.var ? 1 : 0, 1 - Math.exp(-2.5 * dt));
+    if (this.var) this.lastVar = this.var;
+    if (this.lastVar && A[this.lastVar]) T[this.lastVar] = idleW * this.varW;
+    let vs = 0; for (const k of ['look', 'phone', 'text', 'talk']) vs += T[k] || 0; T.idle = Math.max(0, idleW - vs);
+    if (A.tread) { const sw = smooth(sp, 0.3, 0.9); T.tread = this.swimW * (1 - sw); if (A.swim) T.swim = this.swimW * sw; else T.tread += this.swimW * sw; }
+    if (A.jair) T.jair = (1 - this.swimW) * this.airW; else T.idle += (1 - this.swimW) * this.airW;
+    // smooth every weight, then normalise so the base layer always sums to 1 (a sum < 1 would bleed the bind / T-pose in)
+    let sum = 0; const r = 1 - Math.exp(-9 * dt);
+    for (const k of LOOPED) { const a = A[k]; if (!a) continue; a.w = lerp(a.w, T[k] || 0, r); if (a.w < 1e-4) a.w = 0; sum += a.w; }
+    if (sum < 1e-3) { A.idle.w = 1; sum = 1; }
+    for (const k of LOOPED) if (A[k]) A[k].weight = A[k].w / sum;
+    // one-shot overlays (weighted over the base)
+    if (A.jland) A.jland.weight = this.landW * 0.8 * (1 - this.swimW);
+    for (const k of ['hitF', 'hitB']) if (A[k]) A[k].weight = this.hitK === k ? Math.sin(Math.min(1, this.hitW) * Math.PI / 2) * 1.2 : 0;
+    // shared stride phase: cycle frequency = speed / blended stride length, so planted feet do not slide
+    let ws = 0, st = 0; for (const k of GAIT) if (A[k] && cal[k]) { ws += A[k].weight; st += A[k].weight * cal[k].stride; }
+    const stride = ws > 1e-3 ? st / ws : 1.4; let fq = sp > 0.05 ? sp / stride : 0;
+    if (tw > 0 && moveT < 0.5) fq = Math.max(fq, 0.9 * turn);
+    if (this.swimW > 0.5) fq = 0;
+    this.phase = (this.phase + clamp(fq, 0, 2.2) * dt) % 1;
+    for (const k of GAIT) { const a = A[k]; if (!a) continue; const c = cal[k]; const d = c ? c.dur : a.getClip().duration; a.time = ((this.phase + (c ? c.ph : 0)) % 1) * d; }
+    // feet on the ground: weighted per-clip lift (calibrated against the bind pose)
+    let lift = 0; for (const k of ['idle', ...GAIT, 'look', 'phone', 'text', 'talk']) if (A[k] && cal[k]) lift += A[k].weight * cal[k].lift;
+    this.lift = lift;
+  }
+  // head turns towards the player when close (peds only; skipped while aiming / dead / far LODs)
+  lookAt(dt) {
+    const t = Character.lookTarget; let want = 0;
+    if (t && !this.isPlayer && !this.dead && !this.aiming && this.lod === 0 && this.swimW < 0.1 && this.bones.head && this.bones.neck) {
+      const dx = t.x - this.pos.x, dz = t.z - this.pos.z; const d = Math.hypot(dx, dz);
+      if (d < 7 && d > 0.6) { const a = angWrap(Math.atan2(dx, dz) - this.yaw); if (Math.abs(a) < 1.9) want = clamp(a, -1.15, 1.15) * smooth(7 - d, 0, 1.5); }
+    }
+    this.lookY = lerp(this.lookY, want, 1 - Math.exp(-4 * dt));
+    if (Math.abs(this.lookY) < 0.01 || this.lod > 0) return;
+    this.root.updateMatrixWorld(true);
+    for (const [b, f] of [[this.bones.neck, 0.4], [this.bones.head, 0.6]]) {
+      b.parent.getWorldQuaternion(_q1); _q2.setFromAxisAngle(_up, this.lookY * f);
+      _q3.copy(_q1).invert().multiply(_q2).multiply(_q1); b.quaternion.premultiply(_q3); b.updateMatrixWorld(true);
+    }
+  }
   update(dt) {
-    if (this.aimA) { this.aimW = lerp(this.aimW, this.aiming && !this.dead ? 1 : 0, 1 - Math.exp(-14 * dt)); this.aimA.weight = this.aimW * 6; }
+    this.sense(dt);
+    const long = this.weaponId && LONG_GUNS.test(this.weaponId);
+    this.aimW = lerp(this.aimW, this.aiming && !this.dead ? 1 : 0, 1 - Math.exp(-14 * dt));
+    if (this.aimA) this.aimA.weight = this.aimW * (long ? 0 : 6) * (1 - this.swimW);
+    if (this.raimA) this.raimA.weight = this.aimW * (long ? 6 : 0) * (1 - this.swimW);
     if (this.dead && !this.deathA) {
       this.fallT = Math.min(1, this.fallT + dt * 2.2);
       const e = this.fallT * this.fallT;
       this.model.rotation.x = -e * Math.PI / 2 * this.fallDir; this.model.position.y = 0.12 * e;
       if (this.fallT < 1) this.mixer.update(dt * 0.3);
-    } else if (this.lod < 2) this.mixer.update(dt);
-    else { this.lodAcc += dt; if (this.lodAcc > 0.12) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } }
+    } else {
+      if (!this.dead) this.locomote(dt);
+      else this.lift = lerp(this.lift, 0, 1 - Math.exp(-6 * dt));
+      // swimming: torso at the surface (the clips keep the hips at standing height)
+      this.model.position.y = (this.lift + this.swimW * (this.A.swim ? 0.25 * (this.A.swim.weight) : 0)) * this.P.scale;
+      if (this.lod < 2) this.mixer.update(dt);
+      else if (this.lod === 2) { this.lodAcc += dt; if (this.lodAcc > 0.12) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } } else this.lodAcc += dt; // lod 3 (not drawn): no pose work
+    }
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
+    if (!this.dead && this.lod === 0) this.lookAt(dt); else this.lookY = 0;
     if (this.weaponMesh) this.poseWeapon();
+    if (this.phone || this.var === 'phone' || this.var === 'text' || this.lastVar === 'phone' || this.lastVar === 'text') this.posePhone();
   }
   kill(dirSign = 1) {
-    this.dead = true; this.health = 0; this.fallDir = dirSign;
-    if (this.deathA) {
-      for (const k in this.actions) this.actions[k].weight = 0;
-      this.deathA.reset(); this.deathA.weight = 1; this.deathA.play();
-      // the clip falls backwards: face the body so it falls away from the hit
-      if (dirSign < 0) this.yaw += Math.PI;
-    } else for (const k in this.actions) this.actions[k].weight = k === 'idle' ? 1 : 0;
+    if (this.dead) return;
+    this.dead = true; this.health = 0; this.fallDir = dirSign; this.var = null; this.lookY = 0;
+    // dirSign < 0: hit from behind / struck from the front of a car -> falls forward; otherwise falls backward (no instant 180° flip)
+    const da = (dirSign < 0 ? this.deathF : this.deathB) || this.deathA;
+    if (da) {
+      this.deathA = da;
+      for (const k in this.A) { this.A[k].weight = 0; this.A[k].w = 0; }
+      if (this.aimA) this.aimA.weight = 0; if (this.raimA) this.raimA.weight = 0;
+      da.reset(); da.weight = 1; da.play();
+    } else for (const k in this.A) this.A[k].weight = k === 'idle' ? 1 : 0;
   }
   revive() {
-    this.dead = false; this.health = 100; this.fallT = 0; this.model.rotation.x = 0; this.model.position.y = 0;
-    if (this.deathA) { this.deathA.stop(); this.deathA.weight = 0; }
-    this.actions.idle.weight = 1;
+    this.dead = false; this.health = 100; this._hp = 100; this.fallT = 0; this.model.rotation.x = 0; this.model.position.y = 0;
+    for (const k of ['deathF', 'deathB']) if (this[k]) { this[k].stop(); this[k].weight = 0; }
+    this.deathA = this.deathF || this.deathB || null;
+    for (const k in this.A) { this.A[k].w = k === 'idle' ? 1 : 0; this.A[k].weight = this.A[k].w; if (!LOOPED.includes(k)) this.A[k].stop(); else this.A[k].play(); }
+    this._lp = null; this.idleT = -3; this.var = null;
   }
-  dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); }
+  dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); if (this.phone) this.scene.remove(this.phone); }
 }
+Character.lookTarget = null;
+let PHONE_G = null; const PHONE_MAT = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.25 });
+function phoneGeo() { if (!PHONE_G) { PHONE_G = new THREE.BoxGeometry(0.068, 0.142, 0.009); } return PHONE_G; }
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
 const _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _wf = new THREE.Vector3(), _wd = new THREE.Vector3(), _wz = new THREE.Vector3(), _wx = new THREE.Vector3(), _wy = new THREE.Vector3(), _wp = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 
 // ------------------------------------------------------------------------ pedestrians ----
@@ -245,6 +448,7 @@ export class Pedestrians {
   }
   update(dt, ctx) {
     const cp = ctx && ctx.camera ? ctx.camera.position : null;
+    Character.lookTarget = ctx && ctx.P && ctx.P.onFoot && !ctx.P.car ? ctx.P.pos : null;
     for (const c of this.list) {
       const a = c.ai;
       if (cp) c.setLod(Math.hypot(c.pos.x - cp.x, c.pos.z - cp.z));
@@ -290,3 +494,53 @@ export class Pedestrians {
 }
 
 const REGION_SW = REGION.sw;
+
+// ------------------------------------------------------------------- r6.2 seated pose ----
+// Isolated hook used by src/seating.js: after the mixer has posed the character (idle), bend it into a driving / sitting pose
+// with world-space aim + two-bone IK (works on any of the cast rigs, whatever their bone axes). S (world space):
+// hip (Hips target), fwd / up / left (seat frame unit axes), footL / footR (ankle targets), handL / handR (wrist targets or null
+// for hands on the lap), lean (recline rad). w in 0..1 blends from the standing pose (entering / exiting).
+const SB = ['Hips', 'Spine', 'Spine1', 'Neck', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'RightUpLeg', 'RightLeg', 'RightFoot', 'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand'];
+const _s1 = new THREE.Vector3(), _s2 = new THREE.Vector3(), _s3 = new THREE.Vector3(), _s4 = new THREE.Vector3(), _s5 = new THREE.Vector3(), _s6 = new THREE.Vector3();
+function aimBoneAt(bone, child, target) {
+  const bp = bone.getWorldPosition(_s1); const cur = child.getWorldPosition(_s2).sub(bp); const want = _s3.copy(target).sub(bp);
+  if (cur.lengthSq() < 1e-8 || want.lengthSq() < 1e-8) return;
+  _q1.setFromUnitVectors(cur.normalize(), want.normalize());
+  bone.getWorldQuaternion(_q2); _q1.multiply(_q2); bone.parent.getWorldQuaternion(_q3).invert(); bone.quaternion.copy(_q3.multiply(_q1)); bone.updateMatrixWorld(true);
+}
+function rotateBoneWorld(bone, axis, ang) {
+  _q1.setFromAxisAngle(axis, ang); bone.getWorldQuaternion(_q2); _q1.multiply(_q2); bone.parent.getWorldQuaternion(_q3).invert(); bone.quaternion.copy(_q3.multiply(_q1)); bone.updateMatrixWorld(true);
+}
+function ik2(upper, mid, end, target, pole) {
+  const J = upper.getWorldPosition(new THREE.Vector3()); const Mp = mid.getWorldPosition(_s4); const E = end.getWorldPosition(_s5);
+  const a = J.distanceTo(Mp), b = Mp.distanceTo(E); const d = _s6.copy(target).sub(J); const c = clamp(d.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); d.normalize();
+  const cosA = clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1), sinA = Math.sqrt(1 - cosA * cosA);
+  const pn = pole.clone().sub(J); pn.addScaledVector(d, -pn.dot(d)); if (pn.lengthSq() < 1e-8) pn.set(0, 1, 0); pn.normalize();
+  const elbow = J.clone().addScaledVector(d, a * cosA).addScaledVector(pn, a * sinA); const T = J.clone().addScaledVector(d, c);
+  aimBoneAt(upper, mid, elbow); aimBoneAt(mid, end, T);
+}
+export function poseSeated(c, S, w = 1) {
+  const B = c._seatBones || (c._seatBones = Object.fromEntries(SB.map((n) => [n, c.model.getObjectByName(n)])));
+  if (!B.Hips || !B.LeftUpLeg || !B.LeftArm || !B.Spine) return false;
+  c.root.updateMatrixWorld(true);
+  // root so that the hips land on the H-point (blended from where the character stands now)
+  const hp = B.Hips.getWorldPosition(new THREE.Vector3()); const rootT = c.root.position.clone().add(_s1.copy(S.hip).sub(hp));
+  c.root.position.lerp(rootT, w); c.root.updateMatrixWorld(true);
+  const q0 = SB.map((n) => B[n] ? B[n].quaternion.clone() : null);
+  rotateBoneWorld(B.Spine, S.left, -(S.lean ?? 0.22));
+  if (B.Neck) rotateBoneWorld(B.Neck, S.left, (S.lean ?? 0.22) * 0.7);
+  const hipL = B.LeftUpLeg.getWorldPosition(new THREE.Vector3()), hipR = B.RightUpLeg.getWorldPosition(new THREE.Vector3());
+  ik2(B.LeftUpLeg, B.LeftLeg, B.LeftFoot, S.footL, hipL.addScaledVector(S.fwd, 0.6).addScaledVector(S.up, 0.6));
+  ik2(B.RightUpLeg, B.RightLeg, B.RightFoot, S.footR, hipR.addScaledVector(S.fwd, 0.6).addScaledVector(S.up, 0.6));
+  for (const [ft, toe] of [[B.LeftFoot, 'LeftToeBase'], [B.RightFoot, 'RightToeBase']]) { const t = c.model.getObjectByName(toe); if (ft && t) aimBoneAt(ft, t, ft.getWorldPosition(new THREE.Vector3()).addScaledVector(S.fwd, 0.14).addScaledVector(S.up, 0.05)); }
+  for (const [sh, arm, fore, hand, tgt, side] of [[B.LeftShoulder, B.LeftArm, B.LeftForeArm, B.LeftHand, S.handL, 1], [B.RightShoulder, B.RightArm, B.RightForeArm, B.RightHand, S.handR, -1]]) {
+    if (!arm || !fore || !hand) continue;
+    const sp = arm.getWorldPosition(new THREE.Vector3());
+    const t = tgt ? tgt.clone() : sp.clone().addScaledVector(S.up, -0.52).addScaledVector(S.fwd, 0.3).addScaledVector(S.left, -side * 0.08); // hands on the thighs
+    ik2(arm, fore, hand, t, sp.clone().addScaledVector(S.up, -0.7).addScaledVector(S.left, side * 0.35).addScaledVector(S.fwd, -0.1));
+    const mid = hand.children.find((o) => /Middle1/.test(o.name)); if (mid) { const hpw = hand.getWorldPosition(new THREE.Vector3()); const fd = hpw.clone().sub(fore.getWorldPosition(new THREE.Vector3())).normalize();
+      aimBoneAt(hand, mid, hpw.addScaledVector(fd, 0.1).addScaledVector(tgt ? S.up : S.fwd, 0.06)); }
+  }
+  if (w < 1) SB.forEach((n, i) => { if (B[n]) B[n].quaternion.slerpQuaternions(q0[i], B[n].quaternion.clone(), w); });
+  return true;
+}

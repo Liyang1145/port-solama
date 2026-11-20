@@ -23,8 +23,12 @@ export class GraphTraffic {
   }
   laneFix(e, dir, lane) { if (e.legacy && e.axis === 'z' && Math.abs(e.pts[0][0] - 290) < 0.5 && dir > 0) return 0; return Math.min(lane, e.lanes - 1); }
   spawnCar(type, nearPos, minD = 110, maxD = 240, avoidDir = null) {
+    // r6.2: draw from the edges that can be in range (the map has thousands of edges; 40 blind picks over the whole graph
+    // usually all missed, so 3-star dispatch on 霓港 only ever put ~2 cruisers on the road vs 4 on 索拉纳港)
+    const cand = this.edges.filter((e) => { const bb = e.pts[Math.floor(e.pts.length / 2)]; return Math.hypot(bb[0] - nearPos.x, bb[1] - nearPos.z) <= maxD + e.L / 2; });
+    if (!cand.length) return null;
     for (let tries = 0; tries < 40; tries++) {
-      const e = pick(this.edges); const bb = e.pts[Math.floor(e.pts.length / 2)]; if (Math.hypot(bb[0] - nearPos.x, bb[1] - nearPos.z) > maxD + e.L / 2) continue;
+      const e = pick(cand);
       const dir = rng() < 0.5 ? 1 : -1; const lane = this.laneFix(e, dir, rng() < 0.5 ? 0 : 1);
       const s = lerp(e.n0.trim + 6, e.L - e.n1.trim - 6, rng()); if (e.L - e.n1.trim - e.n0.trim < 14) continue;
       const p = this.lanePoint(e, dir, lane, s);
@@ -131,12 +135,15 @@ export class GraphTraffic {
     if (a.e === b.e) return new THREE.Vector3(tx, 0, tz);
     const key = a.e.id + ':' + b.e.id; v._route = v._route || {};
     if (v._route.key !== key || v._route.t < performance.now() - 1500) {
-      const dist = new Map(), prev = new Map(), q = [];
-      const pa = pointAt(a.e, a.s); void pa;
-      for (const [n, d0] of [[a.e.n0, a.s], [a.e.n1, a.e.L - a.s]]) { dist.set(n, d0); q.push(n); }
+      const dist = new Map(), prev = new Map(), q = []; // r6.2: binary heap (was sort + includes per pop: O(n^2 log n) stalls on the big graph)
+      const up = (i) => { while (i > 0) { const p = (i - 1) >> 1; if (q[p][0] <= q[i][0]) break; [q[p], q[i]] = [q[i], q[p]]; i = p; } };
+      const down = (i) => { for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < q.length && q[l][0] < q[m][0]) m = l; if (r < q.length && q[r][0] < q[m][0]) m = r; if (m === i) return; [q[m], q[i]] = [q[i], q[m]]; i = m; } };
+      const push = (n, d) => { q.push([d, n]); up(q.length - 1); };
+      const pop = () => { const t = q[0]; const l = q.pop(); if (q.length) { q[0] = l; down(0); } return t; };
+      for (const [n, d0] of [[a.e.n0, a.s], [a.e.n1, a.e.L - a.s]]) { if (d0 < (dist.has(n) ? dist.get(n) : 1e18)) { dist.set(n, d0); push(n, d0); } }
       const goal = new Set([b.e.n0, b.e.n1]); let found = null; let guard = 0;
-      while (q.length && guard++ < 4000) { q.sort((x, y) => dist.get(x) - dist.get(y)); const n = q.shift(); if (goal.has(n)) { found = n; break; }
-        for (const e of n.edges) { const m = e.n0 === n ? e.n1 : e.n0; const d = dist.get(n) + e.L; if (d < (dist.has(m) ? dist.get(m) : 1e18)) { dist.set(m, d); prev.set(m, n); if (!q.includes(m)) q.push(m); } } }
+      while (q.length && guard++ < 20000) { const [dn, n] = pop(); if (dn > dist.get(n)) continue; if (goal.has(n)) { found = n; break; }
+        for (const e of n.edges) { const m = e.n0 === n ? e.n1 : e.n0; const d = dn + e.L; if (d < (dist.has(m) ? dist.get(m) : 1e18)) { dist.set(m, d); prev.set(m, n); push(m, d); } } }
       const path = []; for (let n = found; n; n = prev.get(n)) path.unshift(n);
       v._route = { key, t: performance.now(), path };
     }

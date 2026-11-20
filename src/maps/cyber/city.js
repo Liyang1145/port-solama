@@ -8,6 +8,10 @@ import { buildGraph } from './roadgraph.js';
 import { genParcels } from './parcels.js';
 import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
+import { megatower, tenement, shopStreet } from './arch.js';
+import { neonSign, randGlyphs } from './kit.js';
+// r6.2: streamed parcels are built with a stub collider (stream.js nullCol); the hand-built Deco core uses the real grid
+const streamed = (ctx) => !(ctx.col instanceof ColliderGrid);
 
 // v4.4: an oriented box as a few axis-aligned slices (the collider grid is AABB-only)
 export function obbCollider(col, cx, cz, hx, hz, ang, h, tag = 'bld') {
@@ -611,8 +615,10 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     // stepped crown
     box(tb, (s > 0 ? fx - 1.2 : fx - 0.6), top + ph, zc - pw / 2 + 0.3, (s > 0 ? fx + 0.6 : fx + 1.2), top + ph + 1.2, zc + pw / 2 - 0.3, {}, accent);
     // vertical sign on the pylon
+    if (streamed(ctx)) { const hh = Math.min(10, (top + ph - ground - 1) * 0.8); neonSign(W, [fx + s * 1.15, 0.15 + ground + (top + ph - ground) * 0.5, zc], [0, 0, -s], pw * 0.8, hh, { glyphs: randGlyphs(Math.max(2, Math.min(5, Math.floor(hh / (pw * 0.75))))), gap: 0.12, t: 0.2, r: 0.045, alt: true }); }
     signs.push({ x: fx + s * 0.95, y: 0.15 + ground + (top + ph - ground) * 0.5, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: pw * 0.8, h: Math.min(10, (top + ph - ground - 1) * 0.8), vertical: true, color: pick(['#ff5fa2', '#59f3ff', '#ffb347', '#b78cff', '#ff6f61', '#7dffb2']) });
   }
+  if (streamed(ctx)) { shopStreet(ctx, frontX, z0 + 1, z1 - 1, 0.15, ground, 4.5, { blade: false }); return; } // r6.2: streamed hotels drop ctx.awnings/signs -> real geometry
   // awnings over storefront + cafe umbrellas on the sidewalk (front only)
   if (!small) {
     const aw = pick([[0.85, 0.25, 0.35], [0.95, 0.55, 0.62], [0.15, 0.55, 0.58], [0.95, 0.85, 0.75], [0.25, 0.3, 0.55]]);
@@ -624,6 +630,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
 }
 
 export function midrise(ctx, x0, z0, x1, z1) {
+  if (streamed(ctx) && rng() < 0.65) { tenement(ctx, x0, z0, x1, z1, { volume, rooftop }); return; } // r6.2 archetype: tenement
   const floors = randi(3, 9); const fh = 3.2; const top = 0.15 + 4.6 + (floors - 1) * fh;
   const modern = rng() < 0.45;
   const wall = modern ? [0.93, 0.93, 0.91] : pick(PASTEL); const ww = rand(2.8, 4);
@@ -631,6 +638,7 @@ export function midrise(ctx, x0, z0, x1, z1) {
   if (modern) condoSlabs(ctx, x0, z0, x1, z1, 4.75, top, fh, 1.2);
   else if (floors > 2 && rng() < 0.75) balconies(ctx, rect(x0, z0, x1, z1), 4.75, top, fh, ww, wall);
   rooftop(ctx, x0, z0, x1, z1, top, 'mid');
+  if (streamed(ctx)) shopStreet(ctx, x1, z0, z1, 0.15, 4.6, 4.5); // r6.2: modern mid-rises get the shop street too
 }
 
 function bayfrontBlock(ctx, b, palms, trees) {
@@ -672,6 +680,7 @@ export function downtownBlock(ctx, b, palms, trees, forceTall) {
     const podH = 0.15 + rand(8, 18);
     const kind = rng();
     const tall = forceTall ?? Math.max(45, rand(80, 270) * (1 - distBay / 1000));
+    if (streamed(ctx) && tall >= 90 && pw > 24 && pd > 24) { megatower(ctx, x0, z0, x1, z1, tall, { volume, rooftop }); continue; } // r6.2 archetype: megatower
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     volume(ctx, rect(x0 + 1, z0 + 1, x1 - 1, z1 - 1), 0.15, podH, { style: rng() < 0.5 ? 0 : 2, fh: 4.0, ww: 3.5, wall: [0.78, 0.77, 0.74], glass: pick(GLASS), store: true });
     const tw = Math.min(pw - 8, rand(26, 44)), td = Math.min(pd - 8, rand(26, 44));

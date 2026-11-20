@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prep } from './mats.js';
 import { bodyProto } from './carbody.js';
+import { buildInterior, interiorMats, setInteriorNight } from './carinterior.js';
 import { U } from './env.js';
 import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
@@ -34,7 +35,11 @@ let SH = null;
 function shared() {
   if (SH) return SH;
   SH = {
-    glass: prep(new THREE.MeshPhysicalMaterial({ color: 0x0b0e10, metalness: 0.2, roughness: 0.04, clearcoat: 1, transparent: true, opacity: 0.88 }), 'cglass'),
+    // r6.2 see-through tinted glass: low alpha head-on, Fresnel-driven reflection + opacity at grazing angles (was 0.88 opaque black)
+    glass: prep(new THREE.MeshPhysicalMaterial({ color: 0x1a2226, metalness: 0.0, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0.02, transparent: true, opacity: 0.4, envMapIntensity: 1.8 }), 'cglass2', (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
+{ float fr = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 4.0); gl_FragColor.a = clamp(mix(opacity, 0.92, fr) + 0.25 * dot(gl_FragColor.rgb, vec3(0.3, 0.6, 0.1)), 0.0, 0.95); }`);
+    }),
     tire: prep(new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.92 }), 'tire'),
     rim: prep(new THREE.MeshStandardMaterial({ color: 0xb8bcc0, roughness: 0.28, metalness: 0.95 }), 'rim'),
     black: prep(new THREE.MeshStandardMaterial({ color: 0x0c0c0d, roughness: 0.55, metalness: 0.2 }), 'cblack'),
@@ -56,6 +61,9 @@ function blobTex() {
 
 // ---------------------------------------------------------------------------- models ----
 let sportProto = null;
+// cabin layout of the glTF sports car in car space (z forward, +x = left / driver side); see carinterior.js
+const SPORT_CABIN = { floorY: 0.2, beltY: 0.8, headY: 1.13, hwHead: 0.58, hwFront: 0.72, hwDash: 0.7, hwRear: 0.72, zCowl: 0.86, yCowl: 0.86, zWsTop: 0.12, yWsTop: 1.2, zDash: 0.5,
+  front: { x: 0.36, y: 0.33, z: -0.28 }, rear: null, backWall: true, zBack: -0.78, zHead0: -0.62, zHead1: 0.1, sport: true, open: true, wheelY: 0.7 };
 export function prepareSport(gltf) {
   const root = gltf.scene; const geoDone = new Map();
   root.traverse((o) => {
@@ -71,21 +79,39 @@ export function prepareSport(gltf) {
     else if (/metal_gray/.test(n)) o.material = S.rim;
     else if (/Taillight/.test(n)) o.material = S.tail;
     else if (/Projector|Turn_Signal/.test(n)) o.material = S.head;
-    else if (/Yellow/.test(n)) o.material = prep(new THREE.MeshStandardMaterial({ color: 0xf5c400, roughness: 0.4 }), 'yel');
+    else if (/Yellow/.test(n)) o.material = S.black; // r6.2 de-badged: the source model's yellow emblem shields / hub caps / plate badge now plain black (no brand marks)
     else o.material = S.black;
+  });
+  // r6.2 carve the source model's own low-detail cockpit (dash / steering wheel / seats) out of the non-paint parts so it never
+  // doubles up with the modeled cabin: drop triangles whose centroid lies inside the cabin box (car space = proto rotated 180°)
+  root.updateMatrixWorld(true); const inv = new THREE.Matrix4().copy(root.matrixWorld).invert(); const carved = new Map(); const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), M4 = new THREE.Matrix4();
+  root.traverse((o) => {
+    if (!o.isMesh || o.userData.paint || o.material === shared().glass || /wheel|tire|rim|centre|light|led/.test(o.name + '|' + (o.parent ? o.parent.name : ''))) return;
+    const g = o.geometry; const pos = g.attributes.position; M4.multiplyMatrices(inv, o.matrixWorld);
+    const idx = g.index ? g.index.array : null; const n = idx ? idx.length : pos.count; const keep = []; let cut = 0;
+    for (let i = 0; i < n; i += 3) { const i0 = idx ? idx[i] : i, i1 = idx ? idx[i + 1] : i + 1, i2 = idx ? idx[i + 2] : i + 2;
+      a.fromBufferAttribute(pos, i0).applyMatrix4(M4); b.fromBufferAttribute(pos, i1).applyMatrix4(M4); c.fromBufferAttribute(pos, i2).applyMatrix4(M4); a.add(b).add(c).multiplyScalar(1 / 3);
+      if (Math.abs(a.x) < 0.6 && a.y > 0.15 && a.y < 1.12 && -a.z > -0.85 && -a.z < 0.75) { cut++; continue; } keep.push(i0, i1, i2); }
+    if (!cut) return; const ng = carved.get(g) || g.clone(); ng.setIndex(keep); carved.set(g, ng); o.geometry = ng; SPORT_CARVED += cut;
   });
   sportProto = root;
 }
+export let SPORT_CARVED = 0;
 
 function cloneSport(color) {
   const g = new THREE.Group(); const m = sportProto.clone(true); m.rotation.y = Math.PI; g.add(m);
   const wheels = [];
   m.traverse((o) => { if (o.isMesh && o.userData.paint) o.material = paintMat(color); if (/^wheel_(f|r)(l|r)$/.test(o.name)) { o.rotation.order = 'YXZ'; wheels.push({ node: o, front: o.name[6] === 'f', r: 0.36 }); } });
-  return { group: g, wheels, dims: { L: 4.5, W: 2.0, H: 1.24, wb: 2.65 }, seatY: 0.45 };
+  // r6.2 mid-engine cabin (low seats, wraparound dash, bulkhead behind the seats) + back-face lining of the shell
+  const cabin = buildInterior(SPORT_CABIN, Math.abs(Math.round(color * 0.000371)) % 5); g.add(cabin.group); cabin.liner = [];
+  const IMt = interiorMats(); const lin = [];
+  m.traverse((o) => { if (o.isMesh && !o.userData.liner && (o.userData.paint || o.material === shared().black || o.material === shared().rim) && !/wheel|tire|rim|centre/.test(o.name + (o.parent ? o.parent.name : ''))) lin.push(o); });
+  for (const o of lin) { const l = new THREE.Mesh(o.geometry, IMt.liner); l.userData.liner = true; l.castShadow = false; l.receiveShadow = true; o.add(l); cabin.liner.push(l); }
+  return { group: g, wheels, dims: { L: 4.5, W: 2.0, H: 1.24, wb: 2.65 }, seatY: 0.45, cabin };
 }
 
 // ara3d vehicle models (MakeHuman project generator, MIT): static body + 4 wheel nodes (tools/splitcar.mjs)
-const VP = {};
+const VP = {}; const CABIN = {};
 const MODEL_SCALE = { car: 1.28, sports: 1.1, suv: 1.0, pickup: 1.0 };
 const MODEL_DIMS = { car: { L: 3.75, W: 2.24, H: 1.45, wb: 2.75, wr: 0.33 }, sports: { L: 4.4, W: 2.1, H: 1.55, wb: 2.9, wr: 0.35 }, suv: { L: 4.9, W: 2.0, H: 1.9, wb: 2.6, wr: 0.34 }, pickup: { L: 5.3, W: 2.0, H: 1.9, wb: 2.9, wr: 0.34 } };
 export function prepareModels(G) {
@@ -112,9 +138,10 @@ export function prepareModels(G) {
     VP[k] = root;
   }
   // v3.5 procedural lofted bodies (src/carbody.js) for everyday traffic
-  const BM = { paint: paintMat(0xffffff), glass: S.glass, black: S.black, chrome: S.chrome, head: S.head, tail: S.tail, plate: S.plate, interior: leather,
+  const IMt = interiorMats();
+  const BM = { liner: IMt.liner, hidden: IMt.hidden, paint: paintMat(0xffffff), glass: S.glass, black: S.black, chrome: S.chrome, head: S.head, tail: S.tail, plate: S.plate, interior: leather,
     amber: prep(new THREE.MeshStandardMaterial({ color: 0xffa020, emissive: 0x803000, emissiveIntensity: 0.4, roughness: 0.2 }), 'amber') };
-  for (const k of ['sedan', 'suv', 'van', 'pickup']) { const P = bodyProto(k, BM); VP['b_' + k] = P.root; MODEL_SCALE['b_' + k] = 1; MODEL_DIMS['b_' + k] = { L: P.dims.L, W: P.dims.W, H: P.dims.H, wb: P.dims.wb, wr: P.dims.wr }; }
+  for (const k of ['sedan', 'suv', 'van', 'pickup']) { const P = bodyProto(k, BM); VP['b_' + k] = P.root; CABIN['b_' + k] = P.cabin; MODEL_SCALE['b_' + k] = 1; MODEL_DIMS['b_' + k] = { L: P.dims.L, W: P.dims.W, H: P.dims.H, wb: P.dims.wb, wr: P.dims.wr }; }
 }
 // ---- v3.5 procedural wheels: lathe tyre with rounded sidewall + tread grooves, extruded multi-spoke alloy face with bevels,
 // rim barrel, lug nuts, centre cap, brake disc + caliper. Replaces the low-poly ara3d wheels (sized from their bounding box).
@@ -189,7 +216,10 @@ function cloneModel(k, color, type) {
     lightbar.add(a, b); g.add(lightbar);
   }
   if (type === 'taxi') { const sg = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.28), prep(new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe9a8, emissiveIntensity: 0.6 }), 'taxisign')); sg.position.set(0, d.H + 0.08, -0.1); g.add(sg); }
-  return { group: g, wheels, dims: { L: d.L, W: d.W, H: d.H, wb: d.wb }, lightbar, seatY: 0.5 };
+  let cabin = null;
+  if (CABIN[k]) { const seatIdx = type === 'police' || type === 'taxi' ? 0 : Math.abs(Math.round((typeof color === 'number' ? color : 7) * 0.000371)) % 5; cabin = buildInterior(CABIN[k], seatIdx); m.add(cabin.group);
+    m.traverse((o) => { if (o.name === 'liner') cabin.liner = o; }); }
+  return { group: g, wheels, dims: { L: d.L, W: d.W, H: d.H, wb: d.wb }, lightbar, seatY: 0.5, cabin };
 }
 const MODEL_OF = { sedan: 'b_sedan', taxi: 'b_sedan', police: 'b_sedan', suv: 'b_suv', pickup: 'b_pickup', van: 'b_van', sport2: 'sports' };
 
@@ -285,7 +315,7 @@ export class Vehicle {
     this.id = VID++; this.type = type; this.scene = scene;
     const m = type === 'sport' || type === 'sport2' ? cloneSport(color ?? pick(SPORT_PAINTS)) : MODEL_OF[type] ? cloneModel(MODEL_OF[type], color ?? (type === 'taxi' ? 0xf2c230 : type === 'police' ? 0x15181d : type === 'sport2' ? pick(SPORT_PAINTS) : pick(PAINTS)), type) : buildProcCar(type, color ?? (type === 'taxi' ? 0xf2c230 : type === 'police' ? 0x111318 : pick(PAINTS)));
     this.root = new THREE.Group(); this.body = m.group; this.root.add(this.body);
-    this.wheels = m.wheels; this.dims = m.dims; this.lightbar = m.lightbar;
+    this.wheels = m.wheels; this.dims = m.dims; this.lightbar = m.lightbar; this.cabin = m.cabin || null; this.cabinOn = true; this.cabinLv = 2;
     // contact shadow
     const sk = 'sh' + this.dims.W + this.dims.L; if (!GCACHE.has(sk)) GCACHE.set(sk, new THREE.PlaneGeometry(this.dims.W * 1.25, this.dims.L * 1.15)); const sh = new THREE.Mesh(GCACHE.get(sk), shared().shadow); sh.rotation.x = -Math.PI / 2; sh.position.y = 0.03; sh.renderOrder = 1; this.root.add(sh);
     // v3.4 headlight pools on the road ahead + red tail glow behind (additive decals, visible at night only)
@@ -372,12 +402,25 @@ export class Vehicle {
     this.root.position.set(this.x, this.y, this.z); this.root.rotation.y = this.yaw;
     this.body.rotation.set(this.pitch, 0, this.roll);
     for (const w of this.wheels) { w.node.rotation.x = this.spin / w.r; w.node.rotation.y = w.front ? this.steer : 0; }
+    if (this.cabin && this.cabinOn) this.cabin.steer.rotation.z = -this.steer * 4.2; // steering wheel follows the road wheels (~14:1 feel)
     if (this.lightbar) {
       const on = this.siren; const t = performance.now() / 1000; const ph = Math.floor(t * 6) % 2;
       this.lightbar.children[0].material.color.setScalar(on && ph ? 4 : 0.3).multiply(new THREE.Color(1, 0.1, 0.1));
       this.lightbar.children[1].material.color.setScalar(on && !ph ? 4 : 0.3).multiply(new THREE.Color(0.15, 0.25, 1));
     }
   }
+  // r6.2 cabin detail LOD (interior meshes + shell lining only near the camera)
+  // lv 2 = full (lit cluster, screen, mirror, steering wheel), 1 = merged cabin only, 0 = none. The shell lining always stays on,
+  // so a far car is dark inside instead of see-through.
+  setCabin(lv) { if (!this.cabin) return; lv = lv === true ? 2 : lv === false ? 0 : lv; if (lv === this.cabinLv) return; this.cabinLv = lv; this.cabinOn = lv === 2; this.cabin.group.visible = lv > 0; this.cabin.near.visible = lv === 2; }
+  // seat anchor in world space: which = 'driver' | 'passenger'; returns {pos, quat} of the H-point frame (body space -> world)
+  seatWorld(which = 'driver', outP = new THREE.Vector3(), outQ = new THREE.Quaternion()) {
+    this.root.updateMatrixWorld(true); const c = this.cabin;
+    const loc = c ? c.seats[which] : new THREE.Vector3(which === 'driver' ? 0.38 : -0.38, 0.5, 0);
+    outP.copy(loc); (c ? c.group.parent : this.body).localToWorld(outP); this.body.getWorldQuaternion(outQ); return { pos: outP, quat: outQ };
+  }
+  // r6.2 in-cabin camera: between the front seats at eye height (the old fixed y=1.25 clipped through low roofs)
+  cockpitCam(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); const c = this.cabin; if (!c) return out.set(this.x, this.y + 1.1, this.z).addScaledVector(this.forward(), 0.3); const s = c.seats.driver; out.set(s.x * 0.35, s.y + 0.68, s.z + 0.12); return (c.group.parent).localToWorld(out); }
   dispose() { this.scene.remove(this.root); }
 }
 
@@ -558,7 +601,7 @@ export class Traffic {
   }
 }
 
-export function setCarNight(n) { const S = shared(); S.head.emissiveIntensity = 0.3 + n * 10; S.tail.emissiveIntensity = 0.4 + n * 5; }
+export function setCarNight(n) { setInteriorNight(n); const S = shared(); S.head.emissiveIntensity = 0.3 + n * 10; S.tail.emissiveIntensity = 0.4 + n * 5; }
 // v4.0: local street-level reflection probe for paint / glass / chrome (main.js refreshes it around the camera)
 export function setCarEnv(tex, k = 1) {
   const S = shared(); const ms = [...matCache.values(), S.glass, S.chrome, S.rim];

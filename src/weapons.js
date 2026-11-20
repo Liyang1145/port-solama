@@ -110,7 +110,7 @@ export class Arsenal {
     if (h.what.v) { const v = h.what.v; v.health -= w.dmg * 0.3; this.hitT = 0.1; this.hitHead = false; if (v.ai && v.ai.mode === 'lane') { v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - G.P.pos.x, 0, v.z * 2 - G.P.pos.z); } }
   }
   swing(w) {
-    const G = this.G, P = G.P; this.fireT = w.rate; G.sfx.burst?.(0.08, 900, 0.25);
+    const G = this.G, P = G.P; this.fireT = w.rate; G.sfx.burst?.(0.08, 900, 0.25); this.swingReq = w.id === 'bat' ? 'bat' : 'fist'; // r6.2: visible swing (game.js -> actionpose)
     const fx = Math.sin(P.yaw), fz = Math.cos(P.yaw); let hit = null, best = 9;
     for (const c of [...G.peds.list, ...G.cops, ...G.hostiles()]) {
       if (c.dead || c === G.player) continue; const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z; const d = Math.hypot(dx, dz);

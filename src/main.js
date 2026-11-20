@@ -14,6 +14,7 @@ import { addStreetTrees, buildStreet, buildShopSigns } from './street.js';
 import { CAST, charLodReady } from './people.js';
 import { setCarEnv } from './vehicles.js';
 import { CYBER, MAP } from './mapsel.js';
+import { POI, MISSION_STARTS } from './mapdata.js';
 // r6.0 map 霓港 (cyberpunk): streamed districts, wild nature, neon night (src/maps/cyber/)
 import { Stream } from './maps/cyber/stream.js';
 import { bedTexture } from './maps/cyber/region.js';
@@ -110,13 +111,18 @@ async function load() {
   probe.update(); probe.hour = hour;
 
   const W = window.__G = {
-    game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, stream, nature, neon,
+    game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, poi: POI, missionStarts: MISSION_STARTS, stream, nature, neon,
     streamSync(x, z) { if (!stream) return 0; const p = x === undefined ? camera.position : { x, z }; return stream.sync(p); },
     setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(); sprobe.t = 99; },
     photo(on = true, focus = 0, ap = 1.2) { post.dof = on ? 1 : 0; post.focus = focus || 6; post.aperture = ap; document.body.classList.toggle('photo', !!on); },
     get hour() { return hour; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
     render() { renderFrame(0); },
+    reset() { game.testReset(); if (Q.has('hour')) { this.setHour(+Q.get('hour')); } return game.state(); }, // r6.2 per-test isolation (shot.cjs)
+    // vis-sweep debug: what is under screen pixel (px,py) of a w×h frame -> [{name, path, mat, dist, point, instanceId}]
+    pick(px, py, w = 1280, h = 720, n = 3) { const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(px / w * 2 - 1, 1 - py / h * 2), camera);
+      return rc.intersectObjects(scene.children, true).filter((i) => i.object.visible && i.object.material && !i.object.material.isShaderMaterial || i.object.name).slice(0, n).map((i) => { const pth = []; for (let o = i.object; o && pth.length < 5; o = o.parent) pth.push(o.name || o.type);
+        const m = Array.isArray(i.object.material) ? i.object.material[0] : i.object.material; return { path: pth.join('<'), mat: m && (m.name || m.type), color: m && m.color && m.color.getHexString(), dist: +i.distance.toFixed(1), point: i.point.toArray().map((v) => +v.toFixed(2)), inst: i.instanceId, tris: i.object.geometry && i.object.geometry.index ? i.object.geometry.index.count / 3 : 0 }; }); },
     stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length, ...(CYBER ? { stream: stream.tris() } : { chunks: { ...city.region.stats } }) }; },
   };
 

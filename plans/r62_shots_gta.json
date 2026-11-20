@@ -1,0 +1,27 @@
+{
+ "query": "map=gta&hour=14&ao=0&mb=0&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "a_street_day",
+   "js": "__G.setHour(11.0); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"
+  },
+  {
+   "name": "a_aerial",
+   "js": "__G.setHour(15.6); const g=__G.game; g.tp(-430,-150,0); __G.step(2); const c=__G.camera; c.position.set(-150,430,560); c.lookAt(-600,0,-60); c.updateMatrixWorld(); 0"
+  },
+  {
+   "name": "a_night",
+   "js": "__G.setHour(21.6); const g=__G.game; g.override=null; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"
+  },
+  {
+   "name": "car_driver_side",
+   "js": "__G.setHour(14.0); const g=__G.game; g.tp(275,40,Math.PI); const V=g.traffic.cars[0].constructor; for(const v of g.traffic.cars) v.root.visible=false; const v=new V(__G.scene,'sedan',0x8a1c1c); v.place(283.5,30,0); v.ai=null; g.traffic.cars.push(v); g.tp(281.8,30,0); g.toggleCar(); g.override={throttle:0,steer:0.5,handbrake:true}; __G.step(25); window.__v=v; const c=__G.camera; g.__noCam=1; c.position.set(286.4,1.45,30.6); c.lookAt(283.5,0.95,30.0); c.updateMatrixWorld(); [v.x.toFixed(2),v.z.toFixed(2),g.P.car===v, !!g.player.root.visible, +v.steer.toFixed(2), g.occ&&g.occ.stats()]"
+  },
+  {
+   "name": "car_glass",
+   "js": "const v=window.__v; const g=__G.game; const c=__G.camera; const T=c.position.constructor; const f=v.forward(); const up=new T(0,1,0); const lf=new T().crossVectors(up,f).normalize(); const o=new T(v.x,v.y,v.z); c.position.copy(o).addScaledVector(lf,-2.1).addScaledVector(f,-0.7).add(new T(0,1.65,0)); c.lookAt(o.clone().addScaledVector(lf,0.35).addScaledVector(f,0.15).add(new T(0,0.95,0))); c.updateMatrixWorld(); [v.x,v.z,v.yaw].map(x=>+x.toFixed(2))",
+   "keep": true
+  }
+ ]
+}

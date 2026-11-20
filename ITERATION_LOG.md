@@ -242,3 +242,15 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - **发布**：dist_single 23.8 MB → Page 3fffda2d（action=edit 原样替换；检查器的 WebGL/对比度报错是无 GPU 误报）；release/port-solana-r6.1.html。GitHub：fetch 后 main 无他人提交、无 open PR → sync_github.sh 推送 **3383c49**；issue #1 留言 https://github.com/Liyang1145/port-solama/issues/1#issuecomment-7047502517。
 - **环境**：本轮同时有多个其他 agent 在 /workspace/work/wt/ 跑无头浏览器，CHROMIUM.lock 竞争严重（回归等锁约 40 分钟）；有进程在 17:32 用同一份 src 重建过 real/dist（内容一致）。
 - **遗留**：A 夜景远处个别店招灯箱底色偏粉（彩绘灯箱，非灯管）；A 航拍大陆地面北/西直线截断、远海右上一条斜向接缝；B 雨林近景贴树根时树干死黑、偶见灰白无贴图细条；B 湿路倒影仍偏亮；B 3 星在场警车少；r5.0 遗留（堤道车损、沙丘逆光）。
+
+---
+# r6.2 — 2026-11-21 07:10 CST：车内饰与坐姿司机、17 人角色与步态、两图建筑建模、画面与玩法修复
+- **整合**：六个并行补丁合进一份（整合副本 /workspace/work/int/r，git tag base）：visual（画面/世界伪影 V1–V14 等）、bugs（23 条 bug 清单 /workspace/work/patches/bugs.md）、vehicles（车内饰 + 坐姿司机，用的是最终验证版：修司机滞后一帧/旧变换、出租车乘客头穿顶、跑车双方向盘、玻璃不透明度 0.40、隐藏车不生成乘员）、people（17 人角色、20 个动作、四向步态、转身/闲置变化、跳跃/游泳/受击/两种死亡）、bldg_a（A 图九类建筑细节流式层 src/maps/gta/bldgdetail.js + archdetail.js）、bldg_b（B 图巨塔/筒子楼/店街/港口/天桥 src/maps/cyber/arch.js、bldglayer.js、kit.js）。无项目被丢弃。
+- **阻塞（A 图出图 OOM）的根因与修复**（工具 tools/probe/：按进程测 chromium RSS + 场景组成）：
+  - 测量：A 街景整合版在首帧渲染时 GPU 进程 + 渲染进程超过 3.5 GB（沙盒可用约 3.3 GB）；把角色全部隐藏只有 2.25 GB；换成无贴图材质仍 3.3 GB → 不是贴图，是几何。
+  - 根因：cast GLB 的 glTF 形变目标（34 个 ARKit 表情 + 口型）是按 mesh 定义的，每个角色约 30 个子网格（衣服、鞋、头发……）都带全零的 34 个目标；three.js 为每个带形变的几何体建一张浮点形变纹理（顶点数 × 34 × vec4），而且 LOD1/LOD2 几何体又各复制一份。17 个角色 → 约 1 GB 显存 + 渲染进程拷贝。这对真实玩家同样是大量显存浪费。
+  - 修复（真实玩家同样受益）：people.js `dropDeadMorphs`（零形变子网格不再建形变纹理，脸/眼/牙保留眨眼和口型）；LOD1/2 不带形变；`shareSkeleton`（SkeletonUtils.clone 给每个子网格一套骨架 → 每个角色每帧 37 次骨骼纹理上传，现为 1 次）；人群绘制距离 `CROWD_DRAW` 80 m（LOD3 不画、不跑动画）；资源层 tools/stripmorph.cjs 把全零形变数据从 GLB 里去掉（glTF 校验 0 错误），tools/texcap.py 角色贴图按用途限尺寸（底色 512、法线/金属粗糙度与眼睛牙齿等小件 256，主角 1024 不变）。
+  - 结果：A 街景首帧峰值 3.5 GB+（被杀）→ 2.57 GB；960×540 回读成功（首张 251 s，峰值 2.95 GB）。单文件 47.9 MB → 38.8 MB。
+- **回归**（tools/regress_fresh.cjs，每项新页面；最终资源再跑一遍）：A `plans/r5_regress.json` 11/11、B `plans/r6_cyber_smoke.json` 7/7，0 PAGEERROR（shots/r62/regress_gta、smoke_cyber）。A：代客泊车付款 + 通缉失败分支、6 武器、四任务、手机含「切换地图」、3 星 4 警车 + 路障 + 直升机、驾驶 79 km/h、r5_drive 到 x≈−1050 车况 56、r5_world 15 车 15 人、rifle aimW=1。B：堤道最高 143 km/h 到 (−1535,−265)，−675 处追尾车况 40（bugs #8 同类，测试司机不避车）；6 武器；四任务；15/16 车在路网、0 落水；3 星在场警车 1（r6.1 为 0）。
+- **截图**（960×540，lowshadow&probe=0 + CAP=canvas，均 read_file 检查）：shots/r62/gta/a_street_day.png、a_aerial.png、a_night.png、car_driver_side.png（司机坐姿双手握方向盘）、car_glass.png（透过车窗看到座椅/仪表/司机）；shots/r62/cyber/b_night_street.png、b_megast_day.png（X 斜撑巨塔、天桥）、b_tenement_day.png（空调外机、笼式阳台、街上电缆束、竖向招牌）。A 图夜景无霓虹（饱和品红/青像素扫描：街景/航拍 0，夜景只有一块彩绘店招的红字，不是灯管）。
+- **未做/遗留**：见 ROADMAP「r6.2 之后」。

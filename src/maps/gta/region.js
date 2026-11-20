@@ -84,10 +84,13 @@ export function buildRegion(ctx, H) {
   {
     const district = [[-1380, -480], [-1380, 480]]; for (let z = 480; z >= -480; z -= 10) district.push([shoreX(z), z]);
     polyCap(W.b('mgroundC', -1100, 0), wind(district), -0.06);
-    const north = [[XW, 480], [XW, ZE]]; for (let z = ZE; z >= 480; z -= 10) north.push([shoreX(z), z]);
-    const south = [[XW, -ZE], [XW, -480]]; for (let z = -480; z >= -ZE; z -= 10) south.push([shoreX(z), z]);
+    // vis-sweep: the ground slab used to stop at x=-2700 / z=±1500 -> a hard rectangular map edge in every aerial. It now runs
+    // out to the far fade (env.js / water.js fade everything into the horizon haze at 2.3–4 km), the coast following shoreX.
+    const XG = -4600, ZG = 4600;
+    const north = [[XG, 480], [XG, ZG]]; for (let z = ZG; z >= 480; z -= 10) north.push([shoreX(z), z]);
+    const south = [[XG, -ZG], [XG, -480]]; for (let z = -480; z >= -ZG; z -= 10) south.push([shoreX(z), z]);
     polyCap(W.b('mgroundG', -1500, 900), wind(north), -0.06); polyCap(W.b('mgroundG', -1500, -900), wind(south), -0.06);
-    polyCap(W.b('mgroundG', -2000, 0), wind([[XW, -480], [XW, 480], [-1380, 480], [-1380, -480]]), -0.06);
+    polyCap(W.b('mgroundG', -2000, 0), wind([[XG, -480], [XG, 480], [-1380, 480], [-1380, -480]]), -0.06);
     // bay park strip: from the outer sidewalk edge of 湾岸大道 to the seawall, raised 0.15, grass + palms
     const sh = D.byId.shore; const park = [];
     for (let s = 0; s <= sh.path.len; s += 6) { const q = sh.path.at(s); const sideBay = Math.sign(-q.tz) || 1; park.push([q.x - q.tz * sideBay * (sh.hw + SW + 0.01), q.z + q.tx * sideBay * (sh.hw + SW + 0.01)]); }
@@ -311,21 +314,36 @@ export function buildRegion(ctx, H) {
       for (const m of WF.build(scene, M, {})) { const [, cx, cz] = m.name.split('|'); const k = cx + ',' + cz; let c = chunks.get(k); if (!c) continue; c.far.push(m); m.castShadow = true; }
       // orphan far meshes (a lot whose centroid chunk has no entry) stay visible permanently
     },
+    // r6.2 hitch fix: a detailed chunk used to be generated AND built in one frame (the "near chunk pops in" stall). Now the
+    // nearest wanted chunk is generated a few lots per frame under a ~3 ms budget and only built when complete; snapshot mode
+    // (budget >= 99) still loads everything in range synchronously so tests and screenshots are deterministic.
     update(cam, budget = 1) {
       if (!this.M) return;
+      let best = null, bd = 1e9;
       for (const c of chunks.values()) {
         const d = Math.hypot(cam.x - c.x, cam.z - c.z) - c.r;
-        if (!c.det && d < 300 && budget > 0) { this.load(c); budget--; }
+        if (!c.det && d < 300) { if (budget >= 99) { if (this.job && this.job.c === c) this.job = null; this.load(c); } else if (d < bd) { bd = d; best = c; } }
         else if (c.det && d > 440) this.unload(c);
       }
+      if (budget >= 99) return;
+      if (this.job && this.job.c !== best && (!best || bd < this.job.d - 60)) this.job = null; // a much nearer chunk wins
+      if (!this.job && best) this.job = this.begin(best, bd);
+      if (this.job && this.step(this.job, 3)) this.job = null;
     },
-    load(c) {
+    begin(c, d) {
       const Wd = new World(128); Wd.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 };
-      const dctx = { W: Wd, col, signs: [], awnings: [], lamps: [], alleys: [], yards: [] };
-      for (const L of c.lots) if (!L.empty) detailedLot(dctx, L, H);
+      return { c, d, i: 0, Wd, dctx: { W: Wd, col, signs: [], awnings: [], lamps: [], alleys: [], yards: [] } };
+    },
+    step(j, ms) {
+      const t0 = performance.now(); const L = j.c.lots;
+      while (j.i < L.length) { if (!L[j.i].empty) detailedLot(j.dctx, L[j.i], H); j.i++; if (performance.now() - t0 > ms) return false; }
+      this.finish(j.c, j.Wd); return true;
+    },
+    finish(c, Wd) {
       c.det = Wd.build(this.scene, this.M, { glassRail: { cast: false }, mural0: { cast: false }, mural1: { cast: false }, mural2: { cast: false }, mural3: { cast: false }, mural4: { cast: false }, mural5: { cast: false }, pool: { cast: false } });
       for (const m of c.far) m.visible = false; this.stats.loads++; this.stats.loaded++;
     },
+    load(c) { const j = this.begin(c, 0); this.step(j, 1e9); },
     unload(c) { for (const m of c.det) { this.scene.remove(m); m.geometry.dispose(); } c.det = null; for (const m of c.far) m.visible = true; this.stats.unloads++; this.stats.loaded--; },
     // a road-following point ~35 m along the nearest region road that gets closer to (tx, tz); null if not on a region road
     waypoint(x, z, tx, tz) {

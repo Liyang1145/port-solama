@@ -2,6 +2,7 @@
 // pistol combat, 1-5 star wanted level with police pursuit, HUD + minimap.
 import * as THREE from 'three';
 import { Vehicle, Traffic, prepareSport, prepareModels, setCarNight } from './vehicles.js';
+import { Occupants } from './seating.js';
 import { Character, Pedestrians, prepareCharacters } from './people.js';
 import { HUD } from './hud.js';
 import { Sfx } from './sfx.js';
@@ -15,6 +16,8 @@ import { World } from './world.js';
 import { PoliceOps } from './police.js';
 import { POI } from './mapdata.js';
 import { CYBER } from './mapsel.js';
+import { routeWaypoint } from './roadroute.js';
+import { ActionPose } from './actionpose.js';
 const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one save per map (positions differ)
 
 const HOSPITAL = POI.hospital;
@@ -95,7 +98,8 @@ export class Game {
     this.hud.msg('欢迎来到索拉纳港 · 走近车辆按 F 上车', 5);
     const help = document.getElementById('help'); if (snap) help.style.display = 'none'; else setTimeout(() => { help.style.transition = 'opacity 1s'; help.style.opacity = 0; }, 20000);
     this.started = true;
-    if (!snap) { this.sfx.resume(); this.loadSave(); }
+    this._init = { armor: this.P.armor, money: this.P.money, bank: this.P.bank, load: JSON.stringify(this.P.load) };
+    if (!snap) { this.sfx.resume(); this.loadSave(); addEventListener('pagehide', () => this.save()); } // r6.2: also save when the tab closes / map switch (autosave was every 30 s only)
   }
   tp(x, z, yaw = 0) { this.P.pos.set(x, this.city.groundH(x, z), z); this.P.yaw = yaw; this.cam.yaw = yaw + Math.PI; this.player.pos.copy(this.P.pos); this.player.yaw = yaw; this.updateCamera(1, true); }
   skipTime(h) { window.__G.setHour((window.__G.hour + h) % 24); this.hud.msg('时间快进 1 小时', 1.5); }
@@ -168,7 +172,7 @@ export class Game {
   }
   // ------------------------------------------------------------------ police ----
   updatePolice(dt) {
-    const P = this.P; const want = [0, 2, 3, 4, 5, 6][this.wanted];
+    const P = this.P; const want = [0, 2, 3, 4, 5, 6, 6][this.wanted] || 0; // r6.2: 6 stars (HUD has six) indexed past the old table -> undefined -> no police at all
     // dispatch
     if (this.policeCars.length < want && rng() < dt * 0.8) {
       const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
@@ -242,6 +246,7 @@ export class Game {
   }
   roadWaypoint(v, tx, tz) {
     if (this.city.graph && this.traffic.waypoint) return this.traffic.waypoint(v, tx, tz); // r6.0 map 霓港: shortest path on the road graph
+    if (!CYBER) { const w = routeWaypoint(v.x, v.z, tx, tz); if (w) return new THREE.Vector3(w.x, 0, w.z); } // r6.2: shortest road route (was greedy)
     // pick a point on the nearest road axis that moves toward the target: drive along the current road until aligned, then turn
     // r5.0: on a region road (causeway / mainland / pearl island) follow that road toward the target
     const rg = this.city.region; if (rg && (v.x < -22 || Math.abs(v.z) > 372)) { const w = rg.waypoint(v.x, v.z, tx, tz); if (w) return new THREE.Vector3(w.x, 0, w.z); }
@@ -301,6 +306,11 @@ export class Game {
     }
     this.carCollisions(dt);
     this.peds.update(dt, this);
+    // r6.2: fleeing pedestrians steer only away from the threat (people.js), so on the beach / quay edges they ran into the
+    // sea and kept "running" under water. Keep everyone not in a car on land: step back to the last dry spot and turn around.
+    for (const c of this.peds.list) { if (c.dead) continue; const gh = this.city.groundH(c.pos.x, c.pos.z);
+      if (gh < -0.6) { if (c._dry) { c.pos.x = c._dry.x; c.pos.z = c._dry.z; c.pos.y = c._dry.y; } c.yaw += Math.PI; if (c.ai && c.ai.mode === 'flee' && c.ai.from) { c.ai.from.set(c.pos.x * 2 - c.ai.from.x, 0, c.pos.z * 2 - c.ai.from.z); } }
+      else (c._dry || (c._dry = new THREE.Vector3())).copy(c.pos); }
     this.updatePolice(dt);
     // player
     if (P.onFoot) this.updateOnFoot(dt);
@@ -311,8 +321,16 @@ export class Game {
       this.player.aiming = aimP && cw && !cw.melee; if (this.player.aiming) this.camera.getWorldDirection(this.player.aimDir);
       for (const c of [...this.cops, ...this.gang]) { if (c.dead) { c.aiming = false; continue; } if (!c.weaponId) c.setWeapon(c.isCop ? 'pistol' : (c.id % 3 === 0 ? 'smg' : c.id % 3 === 1 ? 'rifle' : 'pistol'));
         const dx = P.pos.x - c.pos.x, dy = P.pos.y + 1.3 - c.pos.y - 1.45, dz = P.pos.z - c.pos.z; const d = Math.hypot(dx, dz); c.aiming = d < 45; if (c.aiming) c.aimDir.set(dx, dy, dz).normalize(); } }
+    if (this.pose && this.pose.c !== this.player) { this.pose.restore(); this.pose = null; } // protagonist switched
+    if (this.pose) this.pose.restore();
     this.player.update(dt);
+    { // r6.2 reload / melee swing / low-ready carry (src/actionpose.js)
+      if (!this.pose) this.pose = new ActionPose(this.player);
+      const A = this.arsenal, cw = A.cur; if (A.swingReq) { this.pose.startSwing(A.swingReq, Math.max(0.3, cw.rate * 0.95)); A.swingReq = null; }
+      this.pose.apply({ weapon: P.onFoot ? cw : null, aiming: this.player.aiming, reloadP: A.reloadT > 0 && cw.reload ? 1 - A.reloadT / cw.reload : -1, dt });
+    }
     this.mission.update(dt); this.missions.update(dt); this.world.update(dt); this.updateGang(dt);
+    (this.occ ||= new Occupants(this)).update(dt); // r6.2 visible seated driver / NPC drivers / cabin LOD
     this.arsenal.update(dt); P.reloadT = this.arsenal.reloadT;
     if (this.saveT === undefined) this.saveT = 30; this.saveT -= dt; if (this.saveT <= 0) { this.saveT = 30; this.save(); }
     this.flash.intensity *= Math.exp(-dt * 40);
@@ -435,7 +453,7 @@ export class Game {
       if (idle && Math.abs(v.speed) > 2) C.yaw += angWrap(v.yaw + Math.PI - C.yaw) * (1 - Math.exp(-2.5 * dt));
       if (idle) C.pitch = damp(C.pitch, -0.16, 2, dt);
       if (C.mode === 1) { // bonnet cam
-        const f = v.forward(); const p = new THREE.Vector3(v.x, v.y + 1.25, v.z).addScaledVector(f, 0.3);
+        const f = v.forward(); const p = v.cockpitCam ? v.cockpitCam(new THREE.Vector3()) : new THREE.Vector3(v.x, v.y + 1.25, v.z).addScaledVector(f, 0.3); // r6.2 eye point inside the modeled cabin
         this.camera.position.copy(p); this.camera.lookAt(p.clone().addScaledVector(f, 10).add(new THREE.Vector3(0, -0.3, 0))); return;
       }
     } else {
@@ -444,13 +462,20 @@ export class Game {
     const cp = Math.cos(C.pitch), sp = Math.sin(C.pitch);
     const off = new THREE.Vector3(Math.sin(C.yaw) * cp, -sp, Math.cos(C.yaw) * cp).multiplyScalar(dist);
     const right = new THREE.Vector3(-Math.cos(C.yaw), 0, Math.sin(C.yaw));
-    target.addScaledVector(right, -side);
+    { // r6.2: the shoulder offset could push the look-at point into a wall / pole when standing against it, and a ray
+      // cast from inside a box returns 0, leaving the camera inside the building; clamp the offset against geometry first
+      const hx = target.x, hz = target.z; target.addScaledVector(right, -side);
+      if (side > 0) { const ts = this.city.col.raycast(hx, target.y, hz, target.x, target.y, target.z); if (ts < 1) { const k = Math.max(0, ts - 0.25 / side); target.x = hx + (target.x - hx) * k; target.z = hz + (target.z - hz) * k; } }
+    }
     let want = target.clone().add(off); want.y += height;
     // collide with buildings
     const t = this.city.col.raycast(target.x, target.y, target.z, want.x, want.y, want.z);
-    if (t < 1) want = target.clone().lerp(want, Math.max(0.1, t - 0.06));
+    if (t < 1) want = target.clone().lerp(want, Math.max(0.05, t - 0.25 / Math.max(1, dist)));
     want.y = Math.max(want.y, this.city.groundH(want.x, want.z) + 0.3);
     if (snap) C.pos.copy(want); else C.pos.lerp(want, 1 - Math.exp(-(P.car ? 14 : 20) * dt));
+    // r6.2: the smoothed camera lags behind `want`, so for a few frames it could sit inside / behind a wall the ray had
+    // already pulled `want` in front of (see-through walls when turning next to a building): re-test the smoothed position
+    if (!snap) { const t2 = this.city.col.raycast(target.x, target.y, target.z, C.pos.x, C.pos.y, C.pos.z); if (t2 < 1) C.pos.copy(target).lerp(C.pos, Math.max(0.05, t2 - 0.25 / Math.max(1, dist))); }
     this.camera.position.copy(C.pos);
     C.look.copy(target);
     this.camera.lookAt(C.look);
@@ -499,9 +524,34 @@ export class Game {
   loadSave() {
     try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (!s) return false;
       s.pr.forEach((d, i) => { const p = this.world.profiles[i]; if (!p) return; Object.assign(p.P, { money: d.money, bank: d.bank, load: d.load, assets: d.assets || [], outfit: d.outfit }); });
-      this.missions.done = s.done || {}; this.hud.msg('已读取存档', 2); return true; } catch (e) { return false; }
+      this.missions.done = s.done || {}; if (s.valet) this.mission.jobs = s.valet; if (!this.P.load.owned[this.P.load.cur]) this.P.load.cur = 'fist'; this.hud.msg('已读取存档', 2); return true; } catch (e) { return false; }
   }
   // ---- test helpers
+  // r6.2 per-test reset (shot.cjs calls __G.reset() before every plan step unless the step sets keep:true): back to the start
+  // state so one regression step can no longer leak a mission / wanted level / car / loadout into the next one.
+  testReset() {
+    if (!this._init) return;
+    const W = this.world; if (W.menu) W.closeMenu(); if (W.phoneOpen) W.togglePhone(false);
+    if (this.arsenal.wheelOpen) this.arsenal.openWheel(false); this.slowmo = 1;
+    if (W.cur) { W.switchChar(); } // back to the first protagonist
+    if (this.P.car) this.toggleCar();
+    this.override = null; this.keys = {}; this.mouse = { down: false, aim: false }; this.deadT = 0; this.busting = false; this.bustT = 0;
+    if (this.missions.active) { this.missions.active = null; this.missions.stage = ''; this.missions.clearGoal(); this.missions.obj(''); }
+    this.missions.cool = 0; this.missions.data = {}; this.missions.startMk.forEach((b) => (b.visible = true));
+    const V = this.mission; if (V.state !== 'idle') { V.state = 'idle'; V.cool = 0; V.target = null; V.dropMk.visible = false; V.carMk.visible = false; V.standMk.visible = true; V.obj(''); }
+    if (V.car && V.car !== this.parked && this.traffic.cars.includes(V.car)) this.traffic.removeCar(V.car); V.car = null;
+    this.wanted = 0; this.lostT = 0; this.lastSeen = null; this.wantedFlash = false; this.crimeCooldown = 0;
+    for (const v of [...this.policeCars]) if (this.traffic.cars.includes(v)) this.traffic.removeCar(v); this.policeCars.length = 0;
+    for (const b of this.police.blocks) for (const c of b.cars) if (this.traffic.cars.includes(c)) this.traffic.removeCar(c); this.police.blocks.length = 0; this.police.removeHeli(); this.police.escT = 0; this.police.blockT = 10;
+    for (const c of [...this.cops, ...this.gang]) c.dispose(); this.cops.length = 0; this.gang.length = 0;
+    for (const v of [...this.traffic.cars]) if (v.health <= 0 || (v.ai && v.ai.mode === 'dead' && v !== this.parked)) this.traffic.removeCar(v);
+    for (const c of [...this.peds.list]) if (c.dead || (c.ai && c.ai.mode === 'flee')) this.peds.remove(c);
+    const P = this.P, I = this._init; this.player.revive(); this.player.root.visible = true;
+    Object.assign(P, { health: 100, armor: I.armor, money: I.money, bank: I.bank, stamina: 100, tired: false, cover: null, vy: 0, grounded: true, sprint: false, assets: [], outfit: null, load: JSON.parse(I.load) });
+    this.arsenal.reloadT = 0; this.arsenal.fireT = 0; this.arsenal.recoil = 0; P.reloadT = 0; this.waypoint = null; this.cam.mode = 0; this.cam.pitch = -0.12;
+    if (this.parked && this.traffic.cars.includes(this.parked)) { this.parked.health = 100; this.parked.driver = null; this.parked.place(284.5, 22, Math.PI); this.parked.ai = null; }
+    this.tp(280.5, 36, Math.PI); this.curSpeed = 0; this.playerSpeed = 0;
+  }
   carNearPlayer(type = 'sedan', dist = 5) {
     const P = this.P; const v = new Vehicle(this.scene, type); const yaw = P.yaw; v.place(P.pos.x + Math.sin(yaw) * dist, P.pos.z + Math.cos(yaw) * dist, yaw + Math.PI / 2); v.ai = { mode: 'lane', seg: this.city.segs[0], dir: 1, lane: 0, cruise: 0, stuck: 0 }; v.ai.mode = 'dead'; this.traffic.cars.push(v); return v;
   }

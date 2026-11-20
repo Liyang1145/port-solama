@@ -159,22 +159,26 @@ export function buildBody(kind) {
   put(parts.plate, new THREE.BoxGeometry(0.52, 0.11, 0.02), 0, S.clear + 0.24, zf - 0.03);
   put(parts.plate, new THREE.BoxGeometry(0.31, 0.155, 0.02), 0, kind === 'sedan' ? top(0.02) - 0.26 : 0.82, zr + 0.03);
   put(parts.tail, new THREE.BoxGeometry(HW * 1.1, 0.03, 0.04), 0, kind === 'sedan' ? top(0.02) - 0.05 : 1.12, zr + 0.06); // light bar
-  // cabin interior (dark), seats with headrests, dash, steering wheel
-  {
-    const yb = belt0(0.5); const ins = HW * 0.82;
-    const ru = S.roof, z0 = (Math.max(S.rw[0], 0.04) - 0.5) * L + 0.25, z1 = (S.ws[1] - 0.5) * L - 0.2;
-    put(parts.interior, new THREE.BoxGeometry(ins * 2, 0.05, z1 - z0), 0, yb - 0.25, (z0 + z1) / 2);
-    const rows = kind === 'van' || kind === 'suv' ? [0.55, 0.3] : kind === 'pickup' ? [0.55] : [0.56, 0.36];
-    for (const r of rows) for (const s of [-1, 1]) { const zz = (r - 0.5) * L; const seatX = s * ins * 0.5;
-      put(parts.interior, new THREE.BoxGeometry(0.48, 0.55, 0.12), seatX, yb - 0.08, zz, -0.18, 0, 0);
-      put(parts.interior, new THREE.BoxGeometry(0.24, 0.16, 0.09), seatX, yb + 0.26, zz - 0.06, -0.1, 0, 0); }
-    const dz = (S.ws[0] + 0.02 - 0.5) * L + 0.25; put(parts.interior, new THREE.BoxGeometry(ins * 2, 0.22, 0.4), 0, yb - 0.02, Math.min(dz, z1 - 0.05));
-    // v4.1 steering wheel sits behind the dash face (was poking through the windscreen): column + rim, raked toward the driver
-    const dzc = Math.min(dz, z1 - 0.05), wz = dzc - 0.36, wy = yb + 0.06;
-    const sw = new THREE.TorusGeometry(0.17, 0.02, 8, 24); put(parts.black, sw, ins * 0.5, wy, wz, -0.45, 0, 0);
-    put(parts.black, new THREE.CylinderGeometry(0.025, 0.03, 0.34, 8), ins * 0.5, wy - 0.06, wz + 0.17, Math.PI / 2 - 0.45, 0, 0);
-    void ru;
-  }
+  // r6.2: the cabin is modeled in src/carinterior.js from this layout (seats / dash / wheel / console / door cards / headliner)
+  const cabin = (() => {
+    const K = { sedan: { fz: 0.0, dz: 0.70, rz: -0.80 }, suv: { fz: 0.15, dz: 0.86, rz: -0.75 }, van: { fz: 0.72, dz: 1.36, rz: -0.18 }, pickup: { fz: 0.0, dz: 0.70, rz: null } }[kind];
+    const uz = (z) => z / L + 0.5; const floorY = S.clear + (kind === 'pickup' ? 0.1 : 0.08);
+    const uF = uz(K.fz); const beltY = belt0(uF); const fy = floorY + (kind === 'sedan' ? 0.24 : 0.3);
+    let headY = 9; for (let u = S.roof[0]; u <= S.roof[1]; u += 0.01) headY = Math.min(headY, top(u)); headY -= 0.06;
+    let hwHead = 9; for (let u = S.roof[0]; u <= S.roof[1]; u += 0.02) hwHead = Math.min(hwHead, surfX(u, headY - 0.02)); hwHead -= 0.05;
+    const hwFront = Math.min(surfX(uF, beltY - 0.12), surfX(uz(K.dz), beltY - 0.12)) - 0.07;
+    const C = { floorY, beltY, headY, hwHead, hwFront, hwDash: surfX(uz(K.dz), beltY - 0.1) - 0.08, hwRear: hwFront,
+      zCowl: (S.ws[1] - 0.5) * L, yCowl: top(S.ws[1]), zWsTop: (S.ws[0] - 0.5) * L, yWsTop: top(S.ws[0]), zDash: K.dz,
+      front: { x: hwFront * 0.47, y: fy, z: K.fz }, rear: null, zHead0: (S.roof[0] - 0.5) * L + 0.03, zHead1: (S.ws[0] - 0.5) * L - 0.03 };
+    if (K.rz !== null) {
+      const ry = fy + 0.03; const tz = K.rz - 0.1 - 0.6 * Math.sin(0.3); const avail = top(uz(tz)) - 0.1 - (ry - 0.02);
+      C.rear = { y: ry, z: K.rz, backH: Math.max(0.42, Math.min(0.6, avail / Math.cos(0.3))) };
+      C.hwRear = surfX(uz(K.rz), beltY - 0.12) - 0.07;
+    } else { C.backWall = true; C.zBack = (S.roof[0] - 0.5) * L + 0.06; }
+    if (kind === 'sedan') { C.shelf = true; C.zBack = (S.rw[0] - 0.5) * L + 0.05; C.yBack = belt0(S.rw[0] + 0.03) - 0.02; }
+    if (kind === 'suv' || kind === 'van') C.cargo = [-L / 2 + 0.25, K.rz - 0.35, floorY + 0.12];
+    return C;
+  })();
   // open pickup bed: floor, liner walls, front wall, tailgate inner face; SUV roof rails
   if (S.bed) { const z0 = (S.bed[0] - 0.5) * L, z1 = (S.bed[1] - 0.5) * L; const yb = belt0((S.bed[0] + S.bed[1]) / 2); const yf = S.clear + S.wr * 1.25; const xi = HW * 0.86;
     put(parts.black, new THREE.BoxGeometry(xi * 2, 0.04, z1 - z0), 0, yf, (z0 + z1) / 2);
@@ -199,7 +203,7 @@ export function buildBody(kind) {
   const det = {}; for (const k in parts) det[k] = merge(parts[k]);
   const wheels = []; const track = HW - S.wr * 0.34 - 0.05;
   for (const [ax, f] of [[axF, 'f'], [axR, 'r']]) for (const [s, side] of [[1, 'l'], [-1, 'r']]) wheels.push({ name: 'wheel_' + f + side, x: s * track, y: cy, z: (ax - 0.5) * L });
-  return { shell, det, wheels, dims: { L, W: S.W, H: Math.max(...S.top.map((k) => k[1])), wb: S.wb, wr: S.wr } };
+  return { shell, det, wheels, cabin, dims: { L, W: S.W, H: Math.max(...S.top.map((k) => k[1])), wb: S.wb, wr: S.wr } };
 }
 
 // assemble a prototype scene graph compatible with vehicles.js cloneModel(): meshes flagged userData.paint get the car's
@@ -213,5 +217,7 @@ export function bodyProto(kind, M) {
   const S = BODY_SPECS[kind];
   for (const w of B.wheels) { const n = new THREE.Group(); n.name = w.name; n.position.set(w.x, w.y, w.z); const ph = new THREE.Mesh(new THREE.CylinderGeometry(S.wr, S.wr, S.wr * 0.68, 8).rotateZ(Math.PI / 2), M.black); ph.visible = false; n.add(ph); root.add(n); }
   root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return { root, dims: B.dims };
+  // r6.2 inner lining of the shell (BackSide pass on the same geometry; glass group skipped) + modeled cabin
+  if (M.liner) { const ln = new THREE.Mesh(B.shell, [M.liner, M.hidden, M.liner]); ln.name = 'liner'; ln.castShadow = false; ln.receiveShadow = true; root.add(ln); }
+  return { root, dims: B.dims, cabin: B.cabin };
 }

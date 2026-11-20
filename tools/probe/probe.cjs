@@ -1,0 +1,23 @@
+// memory probe: node probe.cjs <distdir> <query> <js> <readback 0/1> [W H]
+const { chromium } = require('/workspace/work/int/r/node_modules/playwright'); const http=require('http'),fs=require('fs'),path=require('path');const {execSync}=require('child_process');
+const [dist,query,js,rb]=process.argv.slice(2);const W=+(process.argv[6]||960),H=+(process.argv[7]||540);
+const types={'.html':'text/html','.js':'text/javascript','.jpg':'image/jpeg','.png':'image/png','.glb':'model/gltf-binary','.ttf':'font/ttf'};
+const srv=http.createServer((q,s)=>{const p=path.join(dist,decodeURIComponent(q.url.split('?')[0]));fs.readFile(p,(e,d)=>{if(e){s.writeHead(404);s.end();return;}s.writeHead(200,{'Content-Type':types[path.extname(p)]||'application/octet-stream'});s.end(d);});});
+function tree(pid){let out=[pid];try{for(const c of fs.readFileSync(`/proc/${pid}/task/${pid}/children`,'utf8').trim().split(/\s+/).filter(Boolean))out=out.concat(tree(+c));}catch(e){}return out;}
+function rss(pid){let t=0,mx=0,lbl='';for(const p of tree(pid)){try{const s=fs.readFileSync(`/proc/${p}/status`,'utf8');const m=+(s.match(/VmRSS:\s+(\d+)/)||[0,0])[1];t+=m;if(m>mx){mx=m;lbl=(fs.readFileSync(`/proc/${p}/cmdline`,'utf8').match(/--type=([a-z-]+)/)||[0,'browser'])[1];}}catch(e){}}return {tot:Math.round(t/1024),max:Math.round(mx/1024),lbl};}
+function bytype(pid){const o={};for(const p of tree(pid)){try{const s=fs.readFileSync(`/proc/${p}/status`,'utf8');const m=+(s.match(/VmRSS:\s+(\d+)/)||[0,0])[1];const l=(fs.readFileSync(`/proc/${p}/cmdline`,'utf8').match(/--type=([a-z-]+)/)||[0,'browser'])[1];o[l]=(o[l]||0)+Math.round(m/1024);}catch(e){}}return o;}
+function avail(){return +execSync("free -m | awk '/Mem:/{print $7}'").toString();}
+srv.listen(0,async()=>{const port=srv.address().port;const t0=Date.now();
+ const b=await chromium.launch({args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist','--no-sandbox','--disable-gpu-watchdog','--disable-hang-monitor',`--window-size=${W},${H}`]});
+ const kids=tree(process.pid).filter(x=>x!==process.pid);const bpid=kids.find(k=>{try{return /chrom|headless/.test(fs.readFileSync(`/proc/${k}/cmdline`,'utf8'))&&!/--type=/.test(fs.readFileSync(`/proc/${k}/cmdline`,'utf8'))}catch(e){return false}})||kids[0];console.log('bpid',bpid);fs.writeFileSync('/tmp/probe.bpid',''+bpid);let peak={tot:0};
+ const iv=setInterval(()=>{const r=rss(bpid);if(r.tot>peak.tot)peak={...r,t:((Date.now()-t0)/1000)|0};const a=avail();if(a<350){console.log('ABORT low mem avail',a,'rss',JSON.stringify(r),JSON.stringify(bytype(bpid)));try{process.kill(bpid,'SIGKILL')}catch(e){};process.exit(3);}},1000);
+ const p=await b.newPage({viewport:{width:W,height:H}});p.setDefaultTimeout(1800000);p.on('pageerror',e=>console.log('PAGEERROR',e.message));
+ await p.goto(`http://127.0.0.1:${port}/index.html?snap&${query}`,{timeout:600000});
+ await p.waitForFunction('window.__G && window.__G.ready',null,{timeout:900000,polling:1000});
+ const cdp=await p.context().newCDPSession(p);const hu=async()=>{const h=await cdp.send('Runtime.getHeapUsage');return Object.fromEntries(Object.entries(h).map(([k,v])=>[k,Math.round(v/1048576)]));};console.log('heapusage',JSON.stringify(await hu()));console.log('loaded',((Date.now()-t0)/1000)|0,'s rss',JSON.stringify(rss(bpid)));
+ console.log("scan0",JSON.stringify(await p.evaluate(fs.readFileSync(__dirname+"/scan.js","utf8"))),"rss",JSON.stringify(rss(bpid)));let r;if(process.env.STEPS){await p.evaluate(js);for(let i=0;i<+process.env.STEPS;i++){const t=Date.now();await p.evaluate('__G.step(1)');console.log('step',i,Date.now()-t,'ms',JSON.stringify(bytype(bpid)),'heap',await p.evaluate('Math.round(performance.memory.usedJSHeapSize/1048576)'));}r=await p.evaluate(fs.readFileSync(__dirname+'/scan.js','utf8'));}else r=await p.evaluate(js);console.log('js',JSON.stringify(r));
+ await p.evaluate('window.__G.render()');
+ const info=await p.evaluate(()=>{const R=window.__G.renderer||null;const st=window.__G.stats();const inf=R?{geo:R.info.memory.geometries,tex:R.info.memory.textures,prog:R.info.programs&&R.info.programs.length}:null;return {st,inf,heap:performance.memory&&Math.round(performance.memory.usedJSHeapSize/1048576)};});
+ console.log('after render',JSON.stringify(info),'rss',JSON.stringify(rss(bpid)),JSON.stringify(bytype(bpid)));
+ if(rb==='1'){const t1=Date.now();const url=await p.evaluate(()=>document.getElementById('c').toDataURL('image/png'));fs.writeFileSync(process.env.OUT||'/tmp/probe.png',Buffer.from(url.split(',')[1],'base64'));console.log('readback',((Date.now()-t1)/1000)|0,'s rss',JSON.stringify(rss(bpid)));}
+ console.log('PEAK',JSON.stringify(peak));clearInterval(iv);await b.close();srv.close();process.exit(0);});

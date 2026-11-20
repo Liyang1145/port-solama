@@ -2,6 +2,7 @@
 // top-left slim status bars (health / armour / stamina), top-right small 6-star wanted row + evidence dots + weapon/ammo + cash,
 // bottom-left light translucent rounded-rect minimap that tints blue in a chase and shows a red search zone once police lose you.
 // Everything except the minimap fades out when nothing is happening; Tab peeks all of it.
+import { routePath } from './roadroute.js';
 import { LAYOUT } from './city.js';
 import { POI, MISSION_STARTS } from './mapdata.js';
 import { shoreX, beachOff, islandEndPoly, pearlPoly, districtAt as districtGTA } from './maps/gta/mapgeo.js';
@@ -90,6 +91,17 @@ export class HUD {
   big(t, col) { const b = this.$('big'); b.textContent = t; b.style.color = col; b.style.opacity = t ? 1 : 0; }
   cash(n) { this.cashEl.textContent = '+$' + n; this.cashEl.style.opacity = 1; this.cashT = 2.5; this.statT = Math.max(this.statT, 3); }
   hurt() { this.hurtT = 0.35; this.statT = 5; }
+  // r6.2 GPS follows the roads (was a straight dashed line across water and buildings); recomputed at most twice a second
+  gpsRoute(G, p, tg) {
+    const now = performance.now(); const R = this._gps;
+    if (R && now - R.t < 500 && R.tx === tg.x && R.tz === tg.z && Math.hypot(R.x - p.x, R.z - p.z) < 6) return R.pts;
+    let pts = [];
+    try {
+      if (G.city.graph && G.traffic.waypoint) { const v = { x: p.x, z: p.z }; G.traffic.waypoint(v, tg.x, tg.z); pts = ((v._route && v._route.path) || []).map((n) => [n.x, n.z]); }
+      else pts = routePath(p.x, p.z, tg.x, tg.z).slice(1, -1);
+    } catch (e) { pts = []; }
+    this._gps = { t: now, tx: tg.x, tz: tg.z, x: p.x, z: p.z, pts }; return pts;
+  }
   update(dt, G) {
     const P = G.P;
     this.msgT -= dt; if (this.msgT <= 0) this.$('msg').style.opacity = 0;
@@ -160,7 +172,7 @@ export class HUD {
     if (G.waypoint && Math.hypot(G.waypoint.x - P.pos.x, G.waypoint.z - P.pos.z) < 8) G.waypoint = null;
     if (tg) { // v4.3 mission GPS: magenta route hint + yellow blip
       const tx = (tg.x - M.X0) * M.S, tz = (tg.z - M.Z0) * M.S, px = (P.pos.x - M.X0) * M.S, pz = (P.pos.z - M.Z0) * M.S;
-      if (tg !== undefined && (G.mission.target || (G.missions && G.missions.target) || G.waypoint)) { g.strokeStyle = 'rgba(214,60,190,.85)'; g.lineWidth = 3.2 / zoom; g.setLineDash([5 / zoom, 4 / zoom]); g.beginPath(); g.moveTo(px, pz); g.lineTo(tx, tz); g.stroke(); g.setLineDash([]); }
+      if (tg !== undefined && (G.mission.target || (G.missions && G.missions.target) || G.waypoint)) { g.strokeStyle = 'rgba(214,60,190,.85)'; g.lineWidth = 3.2 / zoom; g.setLineDash([5 / zoom, 4 / zoom]); g.beginPath(); const rt = this.gpsRoute(G, P.pos, tg); g.moveTo(px, pz); for (const q of rt) g.lineTo((q[0] - M.X0) * M.S, (q[1] - M.Z0) * M.S); g.lineTo(tx, tz); g.stroke(); g.setLineDash([]); }
       g.fillStyle = '#ffc34d'; g.strokeStyle = '#3a2a00'; g.lineWidth = 1.5 / zoom; g.beginPath(); g.arc(tx, tz, 6 / zoom, 0, 7); g.fill(); g.stroke();
     }
     g.restore();

@@ -9,7 +9,7 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.jpg': 'image/j
 const srv = http.createServer((q, s) => { const p = path.join(__dirname, process.env.DIST || 'dist', decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' }); s.end(d); }); });
 srv.listen(0, async () => {
   const port = srv.address().port; const t0 = Date.now();
-  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', `--window-size=${W},${H}`] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', `--window-size=${W},${H}`] });
   const p = await b.newPage({ viewport: { width: W, height: H } }); p.setDefaultTimeout(1800000);
   const logs = []; p.on('console', (m) => { logs.push(m.type() + ': ' + m.text()); if (m.type() === 'error') console.log('CONSOLE-ERR', m.text().slice(0, 1500)); }); p.on('pageerror', (e) => { logs.push('PAGEERROR: ' + e.message); console.log('PAGEERROR', e.message); });
   await p.goto(`http://127.0.0.1:${port}/index.html?snap&${plan.query || ''}`, { timeout: 600000 });
@@ -18,6 +18,7 @@ srv.listen(0, async () => {
   for (const s of plan.shots) {
     const t1 = Date.now();
     try {
+      if (!s.keep && plan.reset !== false) await p.evaluate('window.__G.reset && window.__G.reset()'); // r6.2: each step starts from a clean state
       const r = await p.evaluate(s.js || '0');
       if (r !== undefined && r !== 0) { console.log(s.name, 'js->', JSON.stringify(r).slice(0, 600)); fs.writeFileSync(path.join(outdir, s.name + '.json'), JSON.stringify(r, null, 1)); }
       if (s.noshot) continue;

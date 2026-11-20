@@ -52,7 +52,8 @@ void main(){
   // shore foam
   float wave = sin(p.x * 0.35 - t * 1.2 + sin(p.y * 0.05) * 2.0) * 0.5 + 0.5;
   float foamN = texture2D(tNormal, p * 0.12 + t * 0.02).r;
-  float foam = smoothstep(0.55, 0.0, depth + wave * 0.18) * smoothstep(0.35, 0.7, foamN + 0.25);
+  // vis-sweep: narrower band that thins with distance (aerials showed a 10 m wide snow-white scalloped rim on every coast)
+  float foam = smoothstep(0.42, 0.0, depth + wave * 0.16) * smoothstep(0.35, 0.7, foamN + 0.25) * mix(1.0, 0.45, smoothstep(150.0, 700.0, dist));
   col = mix(col, vec3(0.95, 0.96, 0.95) * (0.15 + 0.85 * (1.0 - uNight)) * clamp(dot(uSunCol, vec3(0.33)) * 0.35 + 0.25, 0.0, 1.3), foam * 0.85);
   // height fog (same model as the scene)
   vec3 rd = -V; float k = uFogFalloff; float tt = k * rd.y * dist; float f = abs(tt) > 1e-4 ? (1.0 - exp(-tt)) / tt : 1.0;
@@ -126,7 +127,9 @@ export function buildWater(scene, T, size = 0.5) {
     u.fogColor.value.copy(scene.fog.color); u.fogDensity.value = scene.fog.density;
   };
   // r6.0 map 霓港 (v4.5): sea pushed back in depth so land caps / terrain never lose the depth test at aerial distances
-  if (CYBER) { refl.material.polygonOffset = true; refl.material.polygonOffsetFactor = 2; refl.material.polygonOffsetUnits = 10; }
+  // vis-sweep: map A too — aerials over ~600 m showed the shallow-sand water colour z-fighting through the mainland / island
+  // ground (only 0.94 m above the water plane) as beige stripes and wedges
+  refl.material.polygonOffset = true; refl.material.polygonOffsetFactor = 2; refl.material.polygonOffsetUnits = 10;
   const setBed = (b) => { u.tBed.value = b.tex; u.uBedBox.value.copy(b.box); u.uBedOn.value = 1; };
   return { mesh: refl, shared, update, renderRefl, setBed };
 }

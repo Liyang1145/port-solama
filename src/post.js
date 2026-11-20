@@ -205,6 +205,29 @@ export function buildPost(renderer, scene, camera, opts = {}) {
   gtao.updateGtaoMaterial({ radius: 1.4, distanceExponent: 1.6, thickness: 1.8, scale: 1.15, samples: 12, distanceFallOff: 1.0 });
   gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
   composer.addPass(gtao);
+  // vis-sweep: GTAO's normal/depth G-buffer is drawn with one override MeshNormalMaterial (no alpha test), so every leaf card /
+  // palm frond / fence cut-out landed in the depth buffer as a full quad -> contact shadows + AO painted dark sky-blue
+  // rectangles around tree canopies, god rays were blocked by invisible quads, DOF/motion blur used the wrong depth.
+  // Alpha-tested meshes now render into that pass with a cut-out normal material of their own.
+  const cutN = new WeakMap();
+  const cutMat = (m) => { let c = cutN.get(m); if (c) return c;
+    c = new THREE.ShaderMaterial({ side: m.side, allowOverride: false, uniforms: { map: { value: m.map }, uvT: { value: new THREE.Matrix3() }, aT: { value: m.alphaTest } },
+      vertexShader: `uniform mat3 uvT; varying vec2 vUv; varying vec3 vN;
+        void main(){ vUv = (uvT * vec3(uv, 1.0)).xy; vec4 p = vec4(position, 1.0); vec3 n = normal;
+        #ifdef USE_INSTANCING
+          p = instanceMatrix * p; n = mat3(instanceMatrix) * n;
+        #endif
+        vN = normalize(normalMatrix * n); gl_Position = projectionMatrix * modelViewMatrix * p; }`,
+      fragmentShader: `uniform sampler2D map; uniform float aT; varying vec2 vUv; varying vec3 vN;
+        void main(){ if (texture2D(map, vUv).a < aT) discard; vec3 n = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0); gl_FragColor = vec4(n * 0.5 + 0.5, 1.0); }` });
+    c.allowOverride = false; cutN.set(m, c); return c; };
+  const swp = [];
+  const ro = gtao._renderOverride.bind(gtao);
+  gtao._renderOverride = (r, mat, tgt, cc, ca) => {
+    if (mat === gtao.normalMaterial) scene.traverseVisible((o) => { const m = o.material; if (!o.isMesh || !m || Array.isArray(m) || !(m.alphaTest > 0) || !m.map) return;
+      const c = cutMat(m); if (m.map.matrixAutoUpdate) m.map.updateMatrix(); c.uniforms.uvT.value.copy(m.map.matrix); c.uniforms.map.value = m.map; swp.push(o, m); o.material = c; });
+    try { ro(r, mat, tgt, cc, ca); } finally { for (let i = 0; i < swp.length; i += 2) swp[i].material = swp[i + 1]; swp.length = 0; }
+  };
   const PP = new URLSearchParams(location.search).get('pp') || 'cbmgf';
   const lfx = new ShaderPass(LightFXShader); lfx.uniforms.tDepth.value = gtao.depthTexture; lfx.uniforms.tNormal.value = gtao.normalTexture;
   if (PP.includes('c')) composer.addPass(lfx);
