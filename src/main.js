@@ -1,0 +1,145 @@
+// PORT SOLANA — entry: renderer, asset loading, world assembly, main loop, test hooks (window.__G)
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { Env, U } from './env.js';
+import { setCSM, buildingMaterial, roadMaterial, simpleMats, M } from './mats.js';
+import { buildCity } from './city.js';
+import { buildVegetation } from './veg.js';
+import { buildWater } from './water.js';
+import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
+import { buildPost } from './post.js';
+import { Game } from './game.js';
+import { addStreetTrees, buildStreet, buildShopSigns } from './street.js';
+import { CAST, charLodReady } from './people.js';
+import { setCarEnv } from './vehicles.js';
+
+const Q = new URLSearchParams(location.search);
+const SNAP = Q.has('snap');
+if (SNAP) document.body.classList.add('snap');
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SNAP });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.has('dpr') ? +Q.get('dpr') : 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = Q.get('tm') === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 4200);
+
+const lbar = document.querySelector('#lbar i');
+const texList = ['sky_day.jpg', 'sky_golden.jpg', 'sky_sunset.jpg', 'sky_dusk.jpg', 'asphalt_d.jpg', 'asphalt_n.jpg', 'asphalt_arm.jpg', 'pavers_d.jpg', 'pavers_n.jpg', 'pavers_arm.jpg', 'plaster_d.jpg', 'plaster_n.jpg', 'plaster_arm.jpg',
+  'concrete_d.jpg', 'concrete_n.jpg', 'concrete_arm.jpg', 'sand_d.jpg', 'sand_n.jpg', 'sand_arm.jpg', 'grass_d.jpg', 'grass_n.jpg', 'grass_arm.jpg', 'sidewalk_d.jpg', 'sidewalk_n.jpg', 'sidewalk_arm.jpg',
+  'frond.png', 'leafcluster.png', 'bark_d.jpg', 'waternormals.jpg'];
+// asset path: single-file builds (tools/single.cjs) embed every asset as a data: URI in window.__A
+const AP = (f) => (window.__A && window.__A[f]) || 'assets/' + f;
+const glbList = { car: 'car_sport.glb', carLod: 'car_sport_lod.glb', ph_hydrant: 'ph_hydrant.glb', ph_bin: 'ph_bin.glb', ph_cafe: 'ph_cafe.glb' };
+for (const k in CAST) glbList['ch_' + k] = CAST[k].file;
+
+async function load() {
+  const T = {}; let done = 0; const total = texList.length + Object.keys(glbList).length;
+  const tick = () => { done++; lbar.style.width = (100 * done / total) + '%'; };
+  const tl = new THREE.TextureLoader();
+  // publishing hosts may keep assets/ or flatten every file next to index.html: try assets/ first, then the bare name
+  const loadTex = (f) => new Promise((res, rej) => tl.load(AP(f), res, undefined, () => (window.__A && window.__A[f]) ? rej(new Error(f)) : tl.load(f, res, undefined, () => rej(new Error('missing ' + f)))));
+  await Promise.all(texList.map((f) => loadTex(f).then((t) => { T[f.replace(/\.(jpg|png)$/, '')] = t; tick(); })));
+  const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
+  const G = {};
+  await Promise.all(Object.entries(glbList).map(([k, f]) => gl.loadAsync(AP(f)).catch(() => gl.loadAsync(f)).then((g) => { G[k] = g; tick(); })));
+  try { await document.fonts.load('40px Anton'); } catch (e) { }
+  return { T, G };
+}
+
+(async function boot() {
+  const { T, G } = await load();
+  await charLodReady;
+  const env = new Env(renderer, scene, camera, { day: T.sky_day, golden: T.sky_golden, sunset: T.sky_sunset, dusk: T.sky_dusk });
+  setCSM(env.csm, Math.min(8, renderer.capabilities.getMaxAnisotropy()));
+  simpleMats(T);
+  const water = buildWater(scene, T, SNAP ? 0.5 : 0.5);
+  if (Q.has('nowater')) water.mesh.visible = false;
+  M.building = buildingMaterial(T);
+  M.road = roadMaterial(T, water.shared);
+  const city = buildCity(scene, M, T);
+  const meshes = city.world.build(scene, M, { neon: { cast: false }, road: { cast: false }, sidewalk: { cast: false }, pavers: { cast: false }, grass: { cast: false }, sand: { cast: false }, glassRail: { cast: false } });
+  addStreetTrees(city);
+  const veg = buildVegetation(scene, city, T);
+  const props = buildProps(scene, city, T);
+  buildFurniture(scene, city, G);
+  const street = buildStreet(scene, city); const shopSigns = buildShopSigns(scene, city);
+  const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
+
+  // v3.4 reflection probe: a cube capture of the city from over the bay, used as the env map of the building material so
+  // tower glass reflects the skyline / island / water instead of only the sky (GTA6_REFERENCE §4 reflections). Refreshed with the sky.
+  const probe = { rt: new THREE.WebGLCubeRenderTarget(Q.has('snap') ? 128 : 256, { type: THREE.HalfFloatType }), pm: new THREE.PMREMGenerator(renderer), tex: null, hour: -99 };
+  probe.cam = new THREE.CubeCamera(2, 3600, probe.rt); probe.cam.position.set(-420, 38, -30); scene.add(probe.cam);
+  probe.update = () => {
+    if (Q.get('probe') === '0') return;
+    const envKeep = scene.environment; probe.cam.update(renderer, scene);
+    const t = probe.pm.fromCubemap(probe.rt.texture); if (probe.tex) probe.tex.dispose(); probe.tex = t;
+    M.building.envMap = t.texture; M.building.envMapIntensity = 1.0; M.building.needsUpdate = true; scene.environment = envKeep;
+  };
+  // v4.0 street probe: a low cube capture near the camera (every ~2 s of game time, or on demand) -> car paint / glass / chrome
+  // reflect the real street (palms, hotels, neon at night) instead of only the sky.
+  const sprobe = { rt: new THREE.WebGLCubeRenderTarget(SNAP ? 128 : 128, { type: THREE.HalfFloatType }), pm: probe.pm, tex: null, t: 99, pos: new THREE.Vector3(1e9, 0, 0) };
+  sprobe.cam = new THREE.CubeCamera(0.5, 900, sprobe.rt); scene.add(sprobe.cam);
+  sprobe.update = (force) => {
+    if (Q.get('probe') === '0') return;
+    const p = camera.position; if (!force && sprobe.t < 2 && sprobe.pos.distanceTo(p) < 25) return;
+    sprobe.t = 0; sprobe.pos.copy(p); sprobe.cam.position.set(p.x, 2.2, p.z);
+    const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; const vis = pl ? pl.visible : null; if (pl) pl.visible = false;
+    sprobe.cam.update(renderer, scene); if (pl) pl.visible = vis;
+    const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0);
+  };
+  const game = new Game({ renderer, scene, camera, env, city, G, T, props, Q, SNAP });
+  let hour = Q.has('hour') ? +Q.get('hour') : 18.3;
+  env.setHour(hour, true);
+  probe.update(); probe.hour = hour;
+
+  const W = window.__G = {
+    game, env, city, street, scene, camera, renderer, post, U, water, sprobe,
+    setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(); sprobe.t = 99; },
+    photo(on = true, focus = 0, ap = 1.2) { post.dof = on ? 1 : 0; post.focus = focus || 6; post.aperture = ap; document.body.classList.toggle('photo', !!on); },
+    get hour() { return hour; },
+    step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
+    render() { renderFrame(0); },
+    stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length }; },
+  };
+
+  const clock = new THREE.Timer(); clock.connect?.(document);
+  function frame(dt, noRender = false) {
+    post.storePrev();
+    U.uTime.value += dt; sprobe.t += dt;
+    if (!SNAP || W.timeFlow) { hour += dt * game.timeScale / 3600; if (hour >= 24) hour -= 24; }
+    if (Math.abs(env.hour - hour) > 0.002) env.setHour(hour);
+    if (Math.abs(probe.hour - hour) > 0.75 && Math.abs(probe.hour - hour) < 23.25) { probe.hour = hour; probe.update(); }
+    U.uWet.value = THREE.MathUtils.smoothstep(env.look.night, 0.3, 0.8) * 0.9;
+    game.update(dt);
+    if (!noRender) renderFrame(dt);
+  }
+  function renderFrame(dt) {
+    env.update(dt);
+    water.update(scene);
+    camera.updateMatrixWorld(); water.renderRefl(renderer, scene, camera);
+    veg.update?.(camera.position); updateProps(props, camera, env.look.night, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
+    updateLampLights(props, city.lamps, camera.position, env.look.night);
+    updateNeonLights(props, city.signs, camera.position, env.look.night);
+    renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;
+    sprobe.update(false);
+    const pc = game.P && game.P.car; const kmh = pc ? Math.abs(pc.speed || 0) * 3.6 : 0;
+    post.blur = Q.get('mb') === '0' ? 0 : THREE.MathUtils.smoothstep(kmh, 25, 110) * 0.6;
+    if (post.dof && game.P) post.focus = camera.position.distanceTo(game.P.pos) + 0.3;
+    const sy = U.uSunDir.value.y; const gold = THREE.MathUtils.smoothstep(sy, 0.55, 0.08) * (1 - env.look.night);
+    post.update(U.uSunDir.value, U.uSunCol.value, env.look.night, U.uTime.value, gold);
+    if (Q.has('nopost')) renderer.render(scene, camera); else post.render();
+  }
+  window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); post.setSize(window.innerWidth, window.innerHeight); });
+  document.getElementById('load').style.display = SNAP ? 'none' : 'flex';
+  const st = document.getElementById('start'); st.style.display = 'block';
+  st.onclick = () => { document.getElementById('load').style.display = 'none'; game.start(); };
+  addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
+  if (SNAP) { game.start(true); W.ready = true; return; }
+  renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), 1 / 20); frame(dt); });
+  W.ready = true;
+})().catch((e) => { console.error(e); document.querySelector('#load p').textContent = /WebGL/i.test(e.message) ? '无法创建 WebGL2 画面：请用开启了硬件加速的 Chrome / Edge / Safari 打开' : '载入失败: ' + e.message; });

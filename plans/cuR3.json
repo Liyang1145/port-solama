@@ -1,0 +1,6 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"cu_prom","js":"const g=__G.game; g.tp(303,40,0); __G.step(4); const c=__G.camera; c.position.set(304,1.6,30); c.lookAt(300,0.8,50); c.updateMatrixWorld(); 0"},
+ {"name":"cu_beach","js":"const g=__G.game; g.tp(360,40,0); __G.step(4); const c=__G.camera; c.position.set(358,1.7,20); c.lookAt(372,0.6,45); c.updateMatrixWorld(); 0"},
+ {"name":"cu_lamp","js":"const g=__G.game; g.tp(299.8,-90,0); __G.step(4); const c=__G.camera; c.position.set(294.8,1.7,-86); c.lookAt(297.8,4.5,-92); c.updateMatrixWorld(); 0"},
+ {"name":"cu_crown","js":"const g=__G.game; g.tp(-602,-60,0); __G.step(4); const c=__G.camera; c.position.set(-560,120,40); c.lookAt(-700,140,-60); c.updateMatrixWorld(); 0"}
+]}

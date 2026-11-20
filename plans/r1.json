@@ -1,0 +1,4 @@
+{"query":"hour=18.4&ao=0","shots":[
+ {"name":"street","js":"__G.camera.position.set(287,1.8,40);__G.camera.lookAt(280,6,-60);0"},
+ {"name":"aerial","js":"__G.camera.position.set(420,140,320);__G.camera.lookAt(-200,0,-150);0"}
+]}

@@ -1,0 +1,5 @@
+{"query":"hour=12&ao=0","shots":[
+ {"name":"noon","js":"__G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"},
+ {"name":"golden","js":"__G.setHour(18.4);__G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"},
+ {"name":"golden2","js":"__G.setHour(17.5);__G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"}
+]}

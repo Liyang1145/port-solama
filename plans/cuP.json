@@ -1,0 +1,5 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"cu_palm","js":"const g=__G.game; const P=__G.city.palms.filter(p=>!p.street).sort((a,b)=>Math.hypot(a.x-318,a.z-60)-Math.hypot(b.x-318,b.z-60))[0]; g.tp(P.x-6,P.z+6,0); __G.step(4); const c=__G.camera; c.position.set(P.x-5,P.h*0.55,P.z+6); c.lookAt(P.x,P.h*0.92,P.z); c.updateMatrixWorld(); [P.x,P.z,P.h, __G.city.palms.length]"},
+ {"name":"cu_palms2","js":"const g=__G.game; g.tp(150,-150,0); __G.step(4); const c=__G.camera; c.position.set(162,4,-128); c.lookAt(178,7,-170); c.updateMatrixWorld(); 0"},
+ {"name":"cu_deco","js":"const g=__G.game; g.tp(300,26,Math.PI); __G.step(4); const c=__G.camera; c.position.set(297,2.2,44); c.lookAt(283,8,26); c.updateMatrixWorld(); 0"}
+]}

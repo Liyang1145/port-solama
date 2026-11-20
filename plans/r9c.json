@@ -1,0 +1,4 @@
+{"query":"hour=17.6&ao=1","shots":[
+ {"name":"lineup2","js":"const g=__G.game; const V=g.parked.constructor; g.tp(270,-40,Math.PI); const ts=['sedan','suv','pickup','sport2','taxi','police']; ts.forEach((t,i)=>{const v=new V(__G.scene,t); v.place(281.5+(i%2)*5, 34+Math.floor(i/2)*8, Math.PI); v.ai=null; v.parked=true; g.traffic.cars.push(v);}); __G.step(3); g.__noCam=1; __G.camera.position.set(290.5,1.9,25); __G.camera.lookAt(281,0.7,44); __G.render(); 0"},
+ {"name":"sim","noshot":true,"js":"const g=__G.game; g.__noCam=0; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(60); const a=g.state(); g.override=null; g.toggleCar(); g.crime(3,'test'); __G.step(150); const b=g.state(); const c=g.peds.list.find(p=>!p.dead); c&&c.kill(1); __G.step(30); [a.inCar,a.speedKmh,b.wanted,b.policeCars,b.cops,c&&c.dead]"}
+]}

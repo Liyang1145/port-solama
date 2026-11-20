@@ -1,0 +1,7 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"tri","noshot":true,"js":"let tot=0; __G.scene.traverse(o=>{ if(!o.isMesh||!o.visible) return; const g=o.geometry; let t=(g.index?g.index.count:g.attributes.position.count)/3; tot+=t*(o.isInstancedMesh?o.count:1); }); Math.round(tot/1000)+'k tris'"},
+ {"name":"golden","js":"__G.setHour(18.3); const g=__G.game; g.tp(283,40,Math.PI); g.cam.yaw=0.15; g.cam.pitch=-0.05; __G.step(12); 0"},
+ {"name":"detail","js":"__G.setHour(17.6); const g=__G.game; g.tp(282,30,0); __G.step(4); const c=__G.camera; c.position.set(282.5,1.6,40); c.lookAt(279,3.6,26); c.updateMatrixWorld(); 0"},
+ {"name":"night","js":"__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"drive","js":"__G.setHour(18.0); const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); let i=0; for(const v of g.traffic.cars){ if(v===g.P.car) continue; if(Math.abs(v.x-288)<9 && v.z<24 && v.z>-160){ v.ai=null; v.parked=true; v.place(52,-330+(i++)*9,0); } } g.override={throttle:1,steer:0}; __G.step(70); g.override={throttle:0.6,steer:0}; __G.step(6); g.state()"}
+]}

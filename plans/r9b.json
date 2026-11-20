@@ -1,0 +1,4 @@
+{"query":"hour=17.6&ao=1","shots":[
+ {"name":"lineup","js":"const g=__G.game; const V=g.parked.constructor; g.tp(276,10,Math.PI); const ts=['sedan','suv','pickup','sport2','taxi','police']; ts.forEach((t,i)=>{const v=new V(__G.scene,t); v.place(283.5-(i%2)*4.2, 30+Math.floor(i/2)*7.5, Math.PI*0.5+0.35); v.ai=null; v.parked=true; g.traffic.cars.push(v);}); __G.step(3); g.__noCam=1; __G.camera.position.set(277,2.2,28); __G.camera.lookAt(285,0.8,42); __G.render(); g.state()"},
+ {"name":"night","js":"__G.setHour(21.6); const g=__G.game; g.__noCam=0; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"}
+]}

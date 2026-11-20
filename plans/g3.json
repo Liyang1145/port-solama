@@ -1,0 +1,7 @@
+{"query":"hour=18.3&ao=0","shots":[
+ {"name":"sim1","noshot":true,"js":"const g=__G.game; __G.step(10); const v=g.nearestCar(8); g.toggleCar(); const a=g.state(); g.override={throttle:1,steer:0.0}; __G.step(150); const b=g.state(); g.override={throttle:0.5,steer:0.6}; __G.step(60); const c=g.state(); ({a,b,c})"},
+ {"name":"crime","noshot":true,"js":"const g=__G.game; g.override={throttle:0,steer:0,handbrake:true}; __G.step(30); g.toggleCar(); g.override=null; g.cam.pitch=-0.05; let fired=0; for(let i=0;i<6;i++){ g.P.fireT=0; if(g.shoot()) fired++; __G.step(8);} const s=g.state(); __G.step(300); ({fired, s, s2:g.state()})"},
+ {"name":"cops","js":"__G.step(60); __G.game.state()"},
+ {"name":"night","js":"const g=__G.game; g.wanted=0; __G.step(200); __G.setHour(21.8); g.tp(287,40,Math.PI); g.cam.pitch=-0.05; __G.step(30); 0"},
+ {"name":"beach","js":"__G.setHour(18.2); const g=__G.game; g.tp(372,30,Math.PI/2); g.cam.yaw=-Math.PI/2+0.5; g.cam.pitch=-0.02; __G.step(20); 0"}
+]}

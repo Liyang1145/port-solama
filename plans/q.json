@@ -1,0 +1,4 @@
+{"query":"hour=18.3&ao=0","shots":[
+ {"name":"onfoot","js":"const g=__G.game; g.tp(281,36,Math.PI); g.cam.yaw=-0.25; g.cam.pitch=-0.1; g.override={mz:1}; __G.step(25); g.override=null; __G.step(3); 0"},
+ {"name":"night","js":"__G.setHour(21.6); const g=__G.game; g.tp(281,60,Math.PI); g.cam.yaw=-0.3; g.cam.pitch=-0.06; __G.step(20); 0"}
+]}

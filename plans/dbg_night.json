@@ -1,0 +1,6 @@
+{"query":"hour=21.6&ao=1","shots":[
+ {"name":"n0","js":"const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"n_nomoon","js":"__G.env.sun.intensity=0; 0"},
+ {"name":"n_dry","js":"__G.env.sun.intensity=0.12; __G.U.uWet.value=0; 0"},
+ {"name":"n_norefl","js":"__G.U.uWet.value=0.9; __G.water.shared.on.value=0; __G.water.mesh.visible=false; 0"}
+]}

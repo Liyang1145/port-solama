@@ -1,0 +1,4 @@
+{"query":"hour=12&ao=0&pp=bo","shots":[
+ {"name":"noon","js":"__G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"},
+ {"name":"d","noshot":true,"js":"const s=__G.env.sun; ({map: !!s.shadow.map, tex: s.shadow.map && s.shadow.map.texture.type, depth: s.shadow.map && !!s.shadow.map.depthTexture, progs: __G.renderer.info.programs.length, castCount: (()=>{let n=0;__G.scene.traverse(o=>{if(o.castShadow)n++});return n})(), pos:s.position.toArray(), tg: s.target.position.toArray(), int: s.intensity})"}
+]}

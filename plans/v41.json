@@ -1,0 +1,37 @@
+{
+"query": "hour=18.3&ao=1",
+"shots": [
+{
+"name": "golden",
+"js": "__G.setHour(18.3); const g=__G.game; g.tp(283,40,Math.PI); g.cam.yaw=0.15; g.cam.pitch=-0.05; __G.step(12); 0"
+},
+{
+"name": "detail",
+"js": "__G.setHour(17.6); const g=__G.game; g.tp(282,30,0); __G.step(4); const c=__G.camera; c.position.set(282.5,1.6,40); c.lookAt(279,3.6,26); c.updateMatrixWorld(); 0"
+},
+{
+"name": "night",
+"js": "__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"
+},
+{
+"name": "drive",
+"js": "__G.setHour(18.0); const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); let i=0; for(const v of g.traffic.cars){ if(v===g.P.car) continue; if(Math.abs(v.x-288)<9 && v.z<24 && v.z>-160){ v.ai=null; v.parked=true; v.place(52,-330+(i++)*9,0); } } g.override={throttle:1,steer:0}; __G.step(70); g.override={throttle:0.6,steer:0}; __G.step(6); g.state()"
+},
+{
+"name": "backlit",
+"js": "__G.setHour(7.4); const g=__G.game; g.tp(330,-60,Math.PI/2); g.cam.yaw=-Math.PI/2+0.25; g.cam.pitch=-0.02; __G.step(12); 0"
+},
+{
+"name": "cu_shelter",
+"js": "__G.setHour(16.5); const g=__G.game; g.tp(304,10,0); __G.step(4); const c=__G.camera; c.position.set(305.5,1.7,21); c.lookAt(299.2,1.3,29.5); c.updateMatrixWorld(); 0"
+},
+{
+"name": "cu_window",
+"js": "__G.setHour(16.0); const g=__G.game; g.tp(58,-140,0); __G.step(4); const c=__G.camera; c.position.set(57,1.7,-128); c.lookAt(38,16,-150); c.updateMatrixWorld(); 0"
+},
+{
+"name": "cu_pickup",
+"js": "__G.setHour(16.2); const g=__G.game; g.tp(275,40,Math.PI); __G.step(2); const V=g.traffic.cars[0].constructor; const v=new V(__G.scene,'pickup'); v.place(284.5,30,0.6); v.ai=null; v.parked=true; g.traffic.cars.push(v); __G.step(1); const c=__G.camera; c.position.set(287.5,2.6,25.5); c.lookAt(284.3,0.9,29.2); c.updateMatrixWorld(); 0"
+}
+]
+}

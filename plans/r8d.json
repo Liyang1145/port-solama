@@ -1,0 +1,5 @@
+{"query":"hour=21.6&ao=1","shots":[
+ {"name":"night","js":"const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"night_road","js":"const g=__G.game; g.tp(284,30,Math.PI); g.cam.yaw=Math.PI*0+0.02; g.cam.pitch=-0.04; __G.step(10); 0"},
+ {"name":"cops2","js":"__G.setHour(17.6); const g=__G.game; g.tp(283,-150,Math.PI); g.crime(4,'test'); let n=0; for(let i=0;i<12 && g.cops.length===0;i++){__G.step(40);} const c=g.cops[0]; if(c){ const p=c.pos; __G.camera.position.set(p.x+3,1.7,p.z+3.5); __G.camera.lookAt(p.x,1.1,p.z);} g.__noCam=1; [g.cops.length, c&&c.proto, g.state()]"}
+]}

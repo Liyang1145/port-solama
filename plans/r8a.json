@@ -1,0 +1,4 @@
+{"query":"hour=21.6&ao=1","shots":[
+ {"name":"night","js":"const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"night_drive","js":"const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(60); g.override={throttle:0.4,steer:0}; __G.step(10); g.state()"}
+]}

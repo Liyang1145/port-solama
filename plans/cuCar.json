@@ -1,0 +1,6 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"car_lineup","js":"const g=__G.game; g.tp(275,40,Math.PI); __G.step(3); const V=g.traffic.cars[0].constructor; for(const v of g.traffic.cars) v.root.visible=false; window.__L=[]; ['sedan','suv','van','pickup','taxi','police'].forEach((t,i)=>{const v=new V(__G.scene,t); v.place(283.5,30-i*7.5,0.0); v.ai=null; v.parked=true; v.root.position.set(283.5,0,30-i*7.5); v.root.rotation.y=0; window.__L.push(v);}); __G.step(1); const c=__G.camera; c.position.set(279,1.6,36); c.lookAt(284,0.7,22); c.updateMatrixWorld(); 0"},
+ {"name":"car_sedan","js":"const c=__G.camera; c.position.set(280.3,1.25,33.2); c.lookAt(283.5,0.65,29.3); c.updateMatrixWorld(); 0"},
+ {"name":"car_rear","js":"const c=__G.camera; c.position.set(280,1.4,-26); c.lookAt(283.5,0.7,-21); c.updateMatrixWorld(); 0"},
+ {"name":"car_wheel","js":"const c=__G.camera; c.position.set(281.6,0.55,30.9); c.lookAt(282.6,0.35,29.0+1.35); c.updateMatrixWorld(); 0"}
+]}

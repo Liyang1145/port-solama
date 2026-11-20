@@ -1,0 +1,4 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"tri","noshot":true,"js":"let tot=0; __G.scene.traverse(o=>{ if(!o.isMesh||!o.visible) return; const g=o.geometry; let t=(g.index?g.index.count:g.attributes.position.count)/3; tot+=t*(o.isInstancedMesh?o.count:1); }); Math.round(tot/1000)+'k tris'"},
+ {"name":"golden","js":"__G.setHour(18.3); const g=__G.game; g.tp(283,40,Math.PI); g.cam.yaw=0.15; g.cam.pitch=-0.05; __G.step(12); 0"}
+]}

@@ -1,0 +1,3 @@
+{"query":"hour=17.6&ao=1","shots":[
+ {"name":"cops3","js":"const g=__G.game; g.tp(283,-150,Math.PI); g.crime(4,'test'); const log=[]; for(let i=0;i<16;i++){__G.step(30); log.push(g.cops.length+'/'+Math.round(g.P.health)); if(g.cops.length) break;} const c=g.cops[0]; if(c){ const p=c.pos; __G.camera.position.set(p.x+3,1.7,p.z+3.5); __G.camera.lookAt(p.x,1.1,p.z);} [log.join(' '), c&&c.proto, g.policeCars.map(v=>[Math.round(Math.hypot(v.x-g.P.pos.x,v.z-g.P.pos.z)),v.crew,Math.round(v.speed)].join(':')).join(' ')]"}
+]}

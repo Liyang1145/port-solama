@@ -1,0 +1,5 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"street","js":"__G.step(4); __G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"},
+ {"name":"onfoot","js":"const g=__G.game; g.tp(280.5,36,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.08; g.override={mz:1}; __G.step(25); g.override=null; __G.step(3); 0"},
+ {"name":"closeup","js":"const g=__G.game; const p=g.player.pos; __G.camera.position.set(p.x+2.2,1.5,p.z-2.6); __G.camera.lookAt(p.x,1.0,p.z); 0"}
+]}

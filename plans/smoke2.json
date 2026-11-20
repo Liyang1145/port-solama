@@ -1,0 +1,2 @@
+{"query":"hour=15.5","shots":[{"name":"smoke","js":"1"},
+ {"name":"shopfront","js":"const g=__G.game; g.tp(-602,-60,0); __G.step(4); const c=__G.camera; c.position.set(-603,1.7,-30); c.lookAt(-612,4,-60); c.updateMatrixWorld(); 0"}]}

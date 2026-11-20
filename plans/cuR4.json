@@ -1,0 +1,6 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"cu_awning","js":"const g=__G.game; g.tp(282,30,0); __G.step(4); const c=__G.camera; c.position.set(282.5,1.6,40); c.lookAt(279,3.6,26); c.updateMatrixWorld(); [__G.city.kerbRamps]"},
+ {"name":"cu_ramp","js":"const g=__G.game; g.tp(160,-160,0); __G.step(4); const c=__G.camera; c.position.set(168,1.5,-168); c.lookAt(178,0.1,-157); c.updateMatrixWorld(); 0"},
+ {"name":"cu_deco3","js":"const g=__G.game; g.tp(290,-120,Math.PI); __G.step(4); const c=__G.camera; c.position.set(292,2.0,-128); c.lookAt(281,5,-112); c.updateMatrixWorld(); 0"},
+ {"name":"cu_signal","js":"const g=__G.game; g.tp(160,-160,0); __G.step(4); const c=__G.camera; c.position.set(172,2.0,-140); c.lookAt(170,5.5,-152); c.updateMatrixWorld(); 0"}
+]}

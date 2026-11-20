@@ -1,0 +1,9 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"tri","noshot":true,"js":"const by={}; let tot=0; __G.scene.traverse(o=>{ if(!o.isMesh||!o.visible) return; const g=o.geometry; let t=(g.index?g.index.count:g.attributes.position.count)/3; const n=o.isInstancedMesh?o.count:1; const k=(o.material.customProgramCacheKey? o.material.customProgramCacheKey(): o.material.type)+(o.isInstancedMesh?'[I]':''); by[k]=(by[k]||0)+t*n; tot+=t*n; }); const top=Object.entries(by).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([k,v])=>k.slice(0,10)+':'+Math.round(v/1000)); ['TOT',Math.round(tot/1000), ...top]"},
+ {"name":"golden","js":"__G.setHour(18.3); const g=__G.game; g.tp(283,40,Math.PI); g.cam.yaw=0.15; g.cam.pitch=-0.05; __G.step(12); 0"},
+ {"name":"detail","js":"__G.setHour(17.6); const g=__G.game; g.tp(282,30,0); __G.step(4); const c=__G.camera; c.position.set(282.5,1.6,40); c.lookAt(279,3.6,26); c.updateMatrixWorld(); 0"},
+ {"name":"backlit","js":"__G.setHour(7.4); const g=__G.game; g.tp(330,-60,Math.PI/2); g.cam.yaw=-Math.PI/2+0.25; g.cam.pitch=-0.02; __G.step(12); 0"},
+ {"name":"night","js":"__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"drive","js":"__G.setHour(18.0); const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(75); g.override={throttle:0.4,steer:0}; __G.step(10); g.state()"},
+ {"name":"bay","js":"__G.setHour(18.6); const g=__G.game; g.tp(-12,-150,-Math.PI/2); g.cam.yaw=Math.PI/2-0.2; g.cam.pitch=0.02; __G.step(12); 0"}
+]}

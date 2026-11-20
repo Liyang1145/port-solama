@@ -1,0 +1,6 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"cu_tower","js":"const g=__G.game; g.tp(-602,-60,0); __G.step(4); const c=__G.camera; c.position.set(-601,1.8,-40); c.lookAt(-650,30,-80); c.updateMatrixWorld(); 0"},
+ {"name":"cu_car","js":"const g=__G.game; g.tp(283,-150,Math.PI); __G.step(30); const v=g.traffic.cars.filter(v=>v.type!=='sport2').map(v=>[v,Math.hypot(v.x-283,v.z+150)]).sort((a,b)=>a[1]-b[1])[0][0]; g.tp(v.x+4,v.z+4,0); __G.step(1); const c=__G.camera; const fx=Math.sin(v.yaw), fz=Math.cos(v.yaw); c.position.set(v.x+fx*2.6+fz*2.8, 1.1, v.z+fz*2.6-fx*2.8); c.lookAt(v.x+fx*1.2,0.5,v.z+fz*1.2); c.updateMatrixWorld(); v.type"},
+ {"name":"cu_palms2","js":"const g=__G.game; g.tp(150,-150,0); __G.step(4); const c=__G.camera; c.position.set(162,4,-128); c.lookAt(178,7,-170); c.updateMatrixWorld(); 0"},
+ {"name":"cu_condo","js":"const g=__G.game; g.tp(-66,-75,0); __G.step(4); const c=__G.camera; c.position.set(-64,1.8,-50); c.lookAt(-110,30,-80); c.updateMatrixWorld(); 0"}
+]}

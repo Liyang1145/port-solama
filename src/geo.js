@@ -1,0 +1,101 @@
+// Geometry accumulation helpers: per-material, per-chunk merged buffers with custom attributes
+import * as THREE from 'three';
+
+export class GeoBucket {
+  constructor(attrs = {}) { this.p = []; this.n = []; this.uv = []; this.idx = []; this.c = []; this.custom = {}; this.attrSizes = attrs; for (const k in attrs) this.custom[k] = []; this.vc = 0; }
+  // add a quad given 4 corners (counter-clockwise when viewed from the front), uv per corner, attribute values constant
+  quad(a, b, c, d, uvs, at = {}, col = null) {
+    const nx = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a)).normalize();
+    const base = this.vc;
+    for (let i = 0; i < 4; i++) {
+      const v = [a, b, c, d][i]; this.p.push(v.x, v.y, v.z); this.n.push(nx.x, nx.y, nx.z); this.uv.push(uvs[i * 2], uvs[i * 2 + 1]);
+      for (const k in this.custom) { const val = at[k] || [0, 0, 0, 0]; for (let j = 0; j < this.attrSizes[k]; j++) this.custom[k].push(val[j] ?? 0); }
+      if (col) this.c.push(col[0], col[1], col[2]);
+    }
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    this.vc += 4;
+  }
+  // append a THREE.BufferGeometry (non-indexed or indexed) transformed by matrix, with constant attrs/colour
+  geom(g, m, at = {}, col = null) {
+    const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
+    const nm = new THREE.Matrix3().getNormalMatrix(m);
+    const v = new THREE.Vector3(), n = new THREE.Vector3();
+    const base = this.vc;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m); this.p.push(v.x, v.y, v.z);
+      if (nor) { n.fromBufferAttribute(nor, i).applyMatrix3(nm).normalize(); this.n.push(n.x, n.y, n.z); } else this.n.push(0, 1, 0);
+      if (uv) this.uv.push(uv.getX(i), uv.getY(i)); else this.uv.push(0, 0);
+      for (const k in this.custom) { const val = at[k] || [0, 0, 0, 0]; for (let j = 0; j < this.attrSizes[k]; j++) this.custom[k].push(val[j] ?? 0); }
+      if (col) this.c.push(col[0], col[1], col[2]);
+    }
+    if (g.index) for (let i = 0; i < g.index.count; i++) this.idx.push(base + g.index.getX(i));
+    else for (let i = 0; i < pos.count; i++) this.idx.push(base + i);
+    this.vc += pos.count;
+  }
+  build() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    if (this.c.length) g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
+    for (const k in this.custom) g.setAttribute(k, new THREE.Float32BufferAttribute(this.custom[k], this.attrSizes[k]));
+    g.setIndex(this.vc > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1));
+    g.computeBoundingSphere(); g.computeBoundingBox();
+    return g;
+  }
+}
+
+// Chunked collection: key = material name + chunk id
+export class World {
+  constructor(chunk = 250) { this.chunk = chunk; this.buckets = new Map(); this.attrs = {}; }
+  b(mat, x, z, attrs) {
+    const cx = Math.floor(x / this.chunk), cz = Math.floor(z / this.chunk);
+    const key = mat + '|' + cx + '|' + cz;
+    let b = this.buckets.get(key); if (!b) { b = new GeoBucket(attrs || this.attrs[mat] || {}); b.mat = mat; this.buckets.set(key, b); }
+    return b;
+  }
+  build(scene, mats, opts = {}) {
+    const meshes = [];
+    for (const [key, b] of this.buckets) {
+      if (!b.vc) continue;
+      const m = new THREE.Mesh(b.build(), mats[b.mat]);
+      const o = opts[b.mat] || {};
+      m.castShadow = o.cast !== false; m.receiveShadow = o.receive !== false;
+      m.name = key; scene.add(m); meshes.push(m);
+    }
+    return meshes;
+  }
+}
+
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+// vertical prism walls along a closed polygon (xz points, CCW seen from above), facade uv in metres.
+export function prismWalls(bucket, poly, y0, y1, atFn, col = null, uOff = 0, perEdge = false) {
+  let u = uOff;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    const at = atFn ? atFn(i, len) : {};
+    // outward normal for CCW (seen from +y, x right, z down) polygon
+    bucket.quad(V(p[0], y0, p[1]), V(q[0], y0, q[1]), V(q[0], y1, q[1]), V(p[0], y1, p[1]), [u, y0, u + len, y0, u + len, y1, u, y1], at, col);
+    u = perEdge ? 0 : u + len;
+  }
+}
+export function polyCap(bucket, poly, y, at = {}, col = null, down = false) {
+  const pts = poly.map((p) => new THREE.Vector2(p[0], p[1]));
+  const tris = THREE.ShapeUtils.triangulateShape(pts, []);
+  for (const t of tris) {
+    const [a, b, c] = t.map((i) => V(poly[i][0], y, poly[i][1]));
+    // ensure normal up (or down)
+    const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
+    const tri = (n.y > 0) !== down ? [a, b, c] : [a, c, b];
+    // emit degenerate quad (tri + repeated vertex) to reuse quad()
+    bucket.quad(tri[0], tri[1], tri[2], tri[2], [tri[0].x, tri[0].z, tri[1].x, tri[1].z, tri[2].x, tri[2].z, tri[2].x, tri[2].z], at, col);
+  }
+}
+export function rect(x0, z0, x1, z1) { return [[x0, z1], [x1, z1], [x1, z0], [x0, z0]]; }
+// a closed box with uv in metres on every face
+export function box(bucket, x0, y0, z0, x1, y1, z1, at = {}, col = null, skipBottom = true) {
+  prismWalls(bucket, rect(x0, z0, x1, z1), y0, y1, () => at, col);
+  polyCap(bucket, rect(x0, z0, x1, z1), y1, at, col);
+  if (!skipBottom) polyCap(bucket, rect(x0, z0, x1, z1), y0, at, col, true);
+}

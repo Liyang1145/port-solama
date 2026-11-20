@@ -1,0 +1,4 @@
+{"query":"hour=18.3&ao=0","shots":[
+ {"name":"onfoot","js":"__G.step(20); 0"},
+ {"name":"chars","js":"const g=__G.game; const ps=g.peds.list.slice(0,4); ps.forEach((c,i)=>{c.pos.set(281+i*1.3,0.15,30-i*0.5); c.ai.mode='cower'; c.ai.t=-99; c.yaw=-0.5;}); __G.step(2); __G.camera.position.set(285.5,1.6,26.5); __G.camera.lookAt(281.5,1.0,30); 0"}
+]}

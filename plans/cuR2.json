@@ -1,0 +1,6 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"cu_deco","js":"const g=__G.game; g.tp(300,26,Math.PI); __G.step(4); const c=__G.camera; c.position.set(297,2.2,44); c.lookAt(283,8,26); c.updateMatrixWorld(); 0"},
+ {"name":"cu_deco2","js":"const g=__G.game; g.tp(290,-120,Math.PI); __G.step(4); const c=__G.camera; c.position.set(293,1.7,-110); c.lookAt(281,7,-150); c.updateMatrixWorld(); 0"},
+ {"name":"cu_trees","js":"const g=__G.game; const t=__G.city.trees.filter(t=>t.street&&t.x>-200).sort((a,b)=>Math.hypot(a.x-60,a.z+150)-Math.hypot(b.x-60,b.z+150))[0]; g.tp(t.x+3,t.z+3,0); __G.step(4); const c=__G.camera; c.position.set(t.x+7,1.7,t.z+9); c.lookAt(t.x,3.5,t.z); c.updateMatrixWorld(); [t.x,t.z]"},
+ {"name":"cu_kerb","js":"const g=__G.game; g.tp(178,-140,0); __G.step(4); const c=__G.camera; c.position.set(176.2,0.9,-135); c.lookAt(177.5,0,-150); c.updateMatrixWorld(); 0"}
+]}

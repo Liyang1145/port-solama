@@ -1,0 +1,10 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"street","js":"__G.step(4); __G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"},
+ {"name":"onfoot","js":"const g=__G.game; g.tp(280.5,36,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.08; g.override={mz:1}; __G.step(25); g.override=null; __G.step(3); 0"},
+ {"name":"drive","js":"const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(75); g.override={throttle:0.4,steer:0}; __G.step(10); g.state()"},
+ {"name":"beach","js":"const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(380,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.03; __G.step(15); 0"},
+ {"name":"skyline","js":"__G.setHour(19.0); const g=__G.game; g.tp(-138,-40,-Math.PI/2); g.cam.yaw=Math.PI/2-0.15; g.cam.pitch=-0.12; __G.step(10); 0"},
+ {"name":"night","js":"__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"cops","js":"__G.setHour(17.8); const g=__G.game; g.tp(283,-150,Math.PI); g.crime(3,'test'); __G.step(150); g.cam.pitch=-0.15; __G.step(5); g.state()"},
+ {"name":"aerial","js":"__G.setHour(18.3); __G.camera.position.set(420,140,320);__G.camera.lookAt(-200,0,-150);0"}
+]}

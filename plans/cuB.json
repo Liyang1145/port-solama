@@ -1,0 +1,6 @@
+{"query":"hour=15.5&ao=1","shots":[
+ {"name":"cu_ped","js":"const g=__G.game; g.tp(283,-150,Math.PI); __G.step(10); const p=g.peds.list.filter(p=>!p.dead).map(p=>[p,p.pos?Math.hypot(p.pos.x-283,p.pos.z+150):1e9]).sort((a,b)=>a[1]-b[1])[0][0]; g.tp(p.pos.x+3,p.pos.z+3,0); __G.step(1); const c=__G.camera; c.position.set(p.pos.x+1.6,p.pos.y+1.5,p.pos.z+1.6); c.lookAt(p.pos.x,p.pos.y+1.0,p.pos.z); c.updateMatrixWorld(); 0"},
+ {"name":"cu_condo","js":"const g=__G.game; g.tp(-66,-75,0); __G.step(4); const c=__G.camera; c.position.set(-64,1.8,-50); c.lookAt(-110,30,-80); c.updateMatrixWorld(); 0"},
+ {"name":"cu_street","js":"const g=__G.game; g.tp(170+9,-160,0); __G.step(4); const c=__G.camera; c.position.set(170+10.5,1.7,-170); c.lookAt(170+9,1.2,-150); c.updateMatrixWorld(); 0"},
+ {"name":"cu_hero","js":"const g=__G.game; g.tp(280.5,36,Math.PI); __G.step(4); const c=__G.camera; const p=g.P.pos; c.position.set(p.x+0.5,p.y+1.5,p.z-2.2); c.lookAt(p.x,p.y+1.0,p.z); c.updateMatrixWorld(); 0"}
+]}

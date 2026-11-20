@@ -1,0 +1,4 @@
+{"query":"hour=18.3&ao=0&nopost","shots":[
+ {"name":"n_refloff","js":"__G.setHour(21.6); const g=__G.game; g.tp(281,60,Math.PI); g.cam.yaw=-0.3; g.cam.pitch=-0.06; __G.step(20); __G.water.shared.on.value=0; __G.water.mesh.onBeforeRender=()=>{}; 0"},
+ {"name":"n_dry","js":"__G.U.uWet.value=0; 0"}
+]}

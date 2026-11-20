@@ -1,0 +1,3 @@
+{"query":"hour=12&ao=0","shots":[
+ {"name":"d","noshot":true,"js":"const out=[]; __G.game.player.model.traverse(o=>{ if(o.isMesh) out.push([o.name,o.material.name,o.visible,!!o.material.userData.tint, o.material.userData.tint && o.material.userData.tint.uVal.value, o.material.customProgramCacheKey()]) }); out"}
+]}

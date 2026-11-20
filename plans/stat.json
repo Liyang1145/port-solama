@@ -1,0 +1,3 @@
+{"query":"hour=15.5","shots":[
+ {"name":"st","noshot":true,"js":"const r={}; __G.scene.traverse(o=>{ if(!o.isMesh||!o.geometry) return; const k=(o.material&&(o.material.name||o.material.type))+'|'+(o.isInstancedMesh?'I':'M')+'|'+(o.name||'').split('|')[0]; const g=o.geometry; const t=(g.index?g.index.count:g.attributes.position.count)/3*(o.isInstancedMesh?o.count:1); r[k]=(r[k]||0)+t; }); const a=Object.entries(r).sort((a,b)=>b[1]-a[1]).slice(0,25).map(([k,v])=>k+':'+Math.round(v/1000)+'k'); a.push('trees '+__G.city.trees.length+' palms '+__G.city.palms.length); a"}
+]}

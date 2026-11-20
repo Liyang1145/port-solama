@@ -1,0 +1,4 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"sidest_single","js":"const g=__G.game; g.tp(110,-157,Math.PI/2); g.cam.yaw=-Math.PI/2-0.3; g.cam.pitch=-0.05; __G.step(12); 0"},
+ {"name":"golden_single","js":"const g=__G.game; g.tp(283,40,Math.PI); g.cam.yaw=0.15; g.cam.pitch=-0.05; __G.step(12); 0"}
+]}

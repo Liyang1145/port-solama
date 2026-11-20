@@ -1,0 +1,3 @@
+{"query":"hour=12&ao=0","shots":[
+ {"name":"d","noshot":true,"js":"const by={}; __G.scene.traverse(o=>{ if(!o.isMesh) return; const g=o.geometry; let t=(g.index?g.index.count:g.attributes.position.count)/3; const n=o.isInstancedMesh?o.count:1; const k=(o.material.customProgramCacheKey? o.material.customProgramCacheKey(): o.material.type)+(o.isInstancedMesh?'[I]':''); by[k]=(by[k]||0)+t*n; }); Object.fromEntries(Object.entries(by).map(([k,v])=>[k,Math.round(v/1000)+'k']).sort())"}
+]}

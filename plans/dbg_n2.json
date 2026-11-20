@@ -1,0 +1,4 @@
+{"query":"hour=21.6&ao=1","shots":[
+ {"name":"a_onoff","js":"const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(3); __G.water.shared.on.value=0; const o=__G.water.mesh.onBeforeRender; __G.water.mesh.onBeforeRender=function(...a){o.apply(this,a); __G.water.shared.on.value=0;}; 0"},
+ {"name":"b_nowater","js":"__G.water.mesh.visible=false; 0"}
+]}

@@ -1,0 +1,9 @@
+{"query":"hour=17.8&ao=1","shots":[
+ {"name":"drive","js":"__G.setHour(18.3); const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(75); g.override={throttle:0.4,steer:0}; __G.step(10); g.state()"},
+ {"name":"cops","js":"__G.setHour(17.8); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(283,-150,Math.PI); g.crime(3,'test'); __G.step(150); g.cam.pitch=-0.15; __G.step(5); g.state()"},
+ {"name":"deadped","noshot":true,"js":"const g=__G.game; const c=g.peds.list.find(p=>!p.dead); c.kill(1); __G.step(40); [c.proto, c.dead, !!c.deathA, g.state(), __G.city.trees.length, __G.city.palms.length]"},
+ {"name":"car_lineup","js":"__G.setHour(15.5); const g=__G.game; g.tp(275,40,Math.PI); __G.step(3); const V=g.traffic.cars[0].constructor; for(const v of g.traffic.cars) v.root.visible=false; window.__L=[]; ['sedan','suv','van','pickup','taxi','police'].forEach((t,i)=>{const v=new V(__G.scene,t); v.place(283.5,30-i*7.5,0.0); v.ai=null; v.parked=true; v.root.position.set(283.5,0,30-i*7.5); v.root.rotation.y=0; window.__L.push(v);}); __G.step(1); const c=__G.camera; c.position.set(279,1.6,36); c.lookAt(284,0.7,22); c.updateMatrixWorld(); 0"},
+ {"name":"car_sedan","js":"const c=__G.camera; c.position.set(280.3,1.25,33.2); c.lookAt(283.5,0.65,29.3); c.updateMatrixWorld(); 0"},
+ {"name":"car_rear","js":"const c=__G.camera; c.position.set(279.8,1.5,-14.5); c.lookAt(283.5,0.7,-6); c.updateMatrixWorld(); 0"},
+ {"name":"car_side","js":"const c=__G.camera; c.position.set(278.0,1.3,11); c.lookAt(283.5,0.8,11); c.updateMatrixWorld(); 0"}
+]}

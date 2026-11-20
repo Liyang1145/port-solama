@@ -1,0 +1,6 @@
+{"query":"hour=18.3&ao=0","shots":[
+ {"name":"onfoot","js":"__G.step(20); __G.game.state()"},
+ {"name":"chars","js":"const g=__G.game; const ps=g.peds.list.slice(0,3); ps.forEach((c,i)=>{c.pos.set(281+i*1.2,0.15,30-i*0.5); c.ai.mode='cower'; c.ai.t=-99;}); __G.step(2); __G.camera.position.set(284.5,1.6,27.5); __G.camera.lookAt(281,1.0,30); 0"},
+ {"name":"drive","js":"const g=__G.game; g.tp(283.5,26,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(90); g.state()"},
+ {"name":"sim","noshot":true,"js":"const g=__G.game; g.override={throttle:0.6,steer:0.0}; __G.step(60); const s1=g.state(); g.crime(2,'test'); __G.step(240); const s2=g.state(); g.override=null; ({s1,s2})"}
+]}

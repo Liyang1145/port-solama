@@ -1,0 +1,8 @@
+{"query":"hour=16.5&ao=1","shots":[
+ {"name":"cu_shelter","js":"__G.setHour(16.5); const g=__G.game; g.tp(304,10,0); __G.step(4); const c=__G.camera; c.position.set(305.5,1.7,21); c.lookAt(299.2,1.3,29.5); c.updateMatrixWorld(); 0"},
+ {"name":"cu_box","js":"__G.setHour(16.5); const g=__G.game; g.tp(185,130,0); __G.step(4); const c=__G.camera; c.position.set(183.5,1.5,137); c.lookAt(179.5,0.7,141.6); c.updateMatrixWorld(); 0"},
+ {"name":"cu_pole","js":"__G.setHour(16.5); const g=__G.game; g.tp(120,140,0); __G.step(4); const c=__G.camera; c.position.set(128,3.5,146); c.lookAt(100,7,156); c.updateMatrixWorld(); 0"},
+ {"name":"cu_window","js":"__G.setHour(16.0); const g=__G.game; g.tp(58,-140,0); __G.step(4); const c=__G.camera; c.position.set(57,1.7,-128); c.lookAt(38,16,-150); c.updateMatrixWorld(); 0"},
+ {"name":"cu_window_n","js":"__G.setHour(21.3); const g=__G.game; g.tp(58,-140,0); __G.step(4); const c=__G.camera; c.position.set(57,1.7,-128); c.lookAt(38,16,-150); c.updateMatrixWorld(); 0"},
+ {"name":"cu_deco","js":"__G.setHour(17.2); const g=__G.game; g.tp(290,-120,Math.PI); __G.step(4); const c=__G.camera; c.position.set(292,2.0,-128); c.lookAt(281,6,-112); c.updateMatrixWorld(); 0"}
+]}

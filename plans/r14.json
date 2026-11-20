@@ -1,0 +1,10 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"street","js":"__G.step(4); __G.camera.position.set(287,1.8,40);__G.camera.lookAt(278,6,-60);0"},
+ {"name":"onfoot","js":"const g=__G.game; g.tp(280.5,36,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.08; g.override={mz:1}; __G.step(25); g.override=null; __G.step(3); 0"},
+ {"name":"sidest","js":"const g=__G.game; g.tp(110,-157,Math.PI/2); g.cam.yaw=-Math.PI/2-0.3; g.cam.pitch=-0.05; __G.step(12); 0"},
+ {"name":"beach","js":"const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(380,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.03; __G.step(15); 0"},
+ {"name":"skyline","js":"__G.setHour(19.0); const g=__G.game; g.tp(-138,-40,-Math.PI/2); g.cam.yaw=Math.PI/2-0.15; g.cam.pitch=-0.12; __G.step(10); 0"},
+ {"name":"night","js":"__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+ {"name":"nightdrive","js":"__G.setHour(22.0); const g=__G.game; g.tp(283.5,120,Math.PI); g.toggleCar(); g.override={throttle:1,steer:0}; __G.step(60); g.override={throttle:0.3,steer:0}; __G.step(8); g.state()"},
+ {"name":"noon","js":"__G.setHour(12.5); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(170-9,-150+20,0); g.cam.yaw=Math.PI*0.75; g.cam.pitch=-0.04; __G.step(12); 0"}
+]}

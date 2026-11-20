@@ -1,0 +1,3 @@
+{"query":"hour=18.3&ao=1","shots":[
+ {"name":"single_onfoot","js":"const g=__G.game; g.tp(280.5,36,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.08; __G.step(5); [Object.keys(window.__A||{}).length]"}
+]}
