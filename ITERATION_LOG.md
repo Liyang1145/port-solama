@@ -229,3 +229,16 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - **环境说明**：沙盒重装了 chromium-headless-shell 1255 + 依赖。新环境下夜间湿路面镜面反射不出现——用 r5.0 原始源码重建对照（shots/r6/night_r50/night.png）同样没有，属测试环境差异，不是合并回退。
 - **发布**：dist_single 23.8 MB（< 45 MB，两图共用一套素材，无重复）→ Page 3fffda2d（action=edit 原样替换；检查器无 WebGL 报的标题对比度/按钮报错是误报）；副本 release/port-solana-r6.0.html。GitHub：fetch 后 main 无他人提交、无 open PR → sync_github.sh 推送 **ae42e8d**；issue #1 留言 https://github.com/Liyang1145/port-solama/issues/1#issuecomment-7043593700（新目录、选图方式、mapapi 两图用法、回归、建议 GPT 接手项）。最佳截图复制到 shots/best/r6_*.png。
 - **遗留**：B 图 3 星在场警车 2 辆（A 图 4 辆）；B 图远景楼白天偏暗；Deco 核心区生成器在 maps/gta/city.js 与 maps/cyber/city.js 各有一份（技术债）；新测试环境下湿路面镜面反射不出现（r5.0 原版同样，环境问题，待真机确认）；A 图 r5.0 遗留（堤道高速车损、沙丘逆光、航拍灰带）未动。
+
+---
+# r6.1 — 2026-11-21 02:35 CST：自然光影 / 建筑材质与风化 / B 图雨林瀑布
+三个方向，两图都做；A 图「索拉纳港」昼夜都不允许任何霓虹/赛博元素，B 图「霓港」保持赛博朋克。玩法代码未改。
+- **自然光影（两图）**：A 图改 PBR-Neutral 色调（B 保留 ACES），曝光随之 ×1.1–1.25；雾色取天空色（航拍灰带变淡）；IBL 下半球加地面反弹（A 暖沙/灰泥，B 湿混凝土）；太阳圆盘 60→22、天空上限 48、后期高光上限 24（逆光不再整片泛白）；黄金时刻光束减弱、18.7 h 雾色偏冷。收尾加：A 图远海 2.3–4 km 渐隐成天空的"地平线以下海色"（water.js，B 图不受影响）——shots/r61/lab_gta/aerial_day.png 水面截断硬线消失；B 图水洼最低粗糙度 0.03→0.11（mats.js，CYBER 才生效），路灯倒影从过亮小点变成拉长倒影（shots/r61/lab_cyber3/night_street.png）。
+- **建筑材质与风化（两图）**：凹窗视差 + 窗洞侧壁（顶部最暗）+ 窗框磨损；抹灰浮雕（A）/ 清水混凝土 + 拉杆孔（B），随距离淡出；窗台雨痕；只作用于间接光的 AO（墙脚、窗洞、窗台下）；店铺室内分咖啡馆/精品店/办公室等类型；装饰线脚/柱/檐口不再是平塑料。**A 图去霓虹**：灯管 → 彩绘 Deco 色带，招牌白天彩绘搪瓷字、夜里暖色灯泡光，顶冠泛光白/暖白，摩天轮暖色灯泡圈，立面泛光暖卤素色；店名「霓虹理发」在 A 图改「海湾理发」（street.js）。
+- **B 图雨林/瀑布**：第二层林下小树、林下棕榈（3 种）、阔叶植物（3 种）、落叶斑块，蕨类上限 3200，藤蔓更多；巨石按占地最低点落座 + 苔藓顶面 + 水雾区湿岩；瀑布三层水帘 + 220 粒水雾 + 潭面泡沫；林中光束/雾增强。
+- **修的 bug**：B 雨林 LodSet 实例缓冲固定 6000 槽，第二层林下让单集超过容量 → 黑色大块/白色长刺（shots/r61/lab_cyber/rf2.png、falls_close.png）。改为首次 update 按 items.length 分配（nature.js LodSet.alloc），修后 shots/r61/after_cyber2/rainforest.png、rainforest2.png、falls_close.png 无伪影（一次修复即通过）。rainforest2 机位近景的"黑色巨石"经探测不是岩石实例（隐藏全部岩石图像不变），是机位贴着一棵树的根部/树干——记入遗留。
+- **回归（最终构建，dist/main.js 1266 KB）**：新工具 `tools/regress_fresh.cjs`（一个浏览器、一次锁、每项测试新开 context/page）。A `plans/r5_regress.json` 11/11 通过（shots/r61/regress_gta：代客泊车 +$420 + 通缉失败分支；6 武器、换弹 1.3 s、球棍 2 下、掩体；四任务 1696/1266/1100/1600、码头帮派向玩家开枪；手机 7 页；3 星 4 警车、路障、直升机探照灯、甩星、升星；驾驶 79 km/h；r5_drive 到 x=−1020 车况 38（与 r5.0 遗留一致）；r5_world 15 车 15 行人；r5_aim rifle aimW=1），0 PAGEERROR。B `plans/r6_cyber_smoke.json` 7/7 跑通（shots/r61/smoke_cyber：79 km/h；零点堤道到 (−1542,−265) 最高 163 km/h 车况 100；6 武器；代客泊车 +$398；四任务 1931/1297/1100/1600；13 车 12 在路网、15 行人、0 落水），0 PAGEERROR。注意：B 的 cops 测试在新页面上 3 星但 150 帧内在场警车 0（r6.0 同页跑在驾驶之后为 2）；police.js/game.js 本轮未改，属 B 图原有问题。
+- **截图**（1280×720，lowshadow&probe=0 + CAP=canvas，均 read_file 检查）：前 shots/r61/before_gta/*、before_cyber/*；后 shots/r61/after_gta2/*、after_cyber2/*、lab_gta/aerial_day.png、lab_cyber3/night_street.png；最佳复制到 shots/best/r61_*.png。
+- **发布**：dist_single 23.8 MB → Page 3fffda2d（action=edit 原样替换；检查器的 WebGL/对比度报错是无 GPU 误报）；release/port-solana-r6.1.html。GitHub：fetch 后 main 无他人提交、无 open PR → sync_github.sh 推送 **3383c49**；issue #1 留言 https://github.com/Liyang1145/port-solama/issues/1#issuecomment-7047502517。
+- **环境**：本轮同时有多个其他 agent 在 /workspace/work/wt/ 跑无头浏览器，CHROMIUM.lock 竞争严重（回归等锁约 40 分钟）；有进程在 17:32 用同一份 src 重建过 real/dist（内容一致）。
+- **遗留**：A 夜景远处个别店招灯箱底色偏粉（彩绘灯箱，非灯管）；A 航拍大陆地面北/西直线截断、远海右上一条斜向接缝；B 雨林近景贴树根时树干死黑、偶见灰白无贴图细条；B 湿路倒影仍偏亮；B 3 星在场警车少；r5.0 遗留（堤道车损、沙丘逆光）。
