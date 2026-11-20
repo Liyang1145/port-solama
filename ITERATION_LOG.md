@@ -211,3 +211,5 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - **动作**：角色加上半身瞄准层（自带的 Pistol aim 片段只保留脊柱/颈/头/手臂轨道，权重叠加在走/跑上），玩家瞄准、警察/帮派 45 m 内举枪（shots/r5/b/aim.png；smoke r5_aim：rifle 在手、aimW=1）。
 - **贴图**：6 张原创程序化壁画（落日棕榈、热带叶花、几何瓷砖 + 抽象人脸；底部污渍、褪色斑、流痕），贴在甘蔗区侧墙和仓库外墙。
 - **Bug**：便利店 C 预留地块缺 face/id 导致近景块生成异常（Node 离线构建 34 块复现并修复）；大陆地面用 polygonOffset 时在掠射角被推到水面后面（航拍里地面"消失"成浅水沙色）→ 改为地面低于路面 6 cm；星湾桥岔口被堤道护栏/草堤挡住 → 岔口两侧开口；湾岸大道临海一侧不再生成建筑（留作公园）；runplan.cjs 原来 `pkill -f ms-playwright` 会误杀另一条线的浏览器 → 改为全局锁 + 只杀自己的进程组（含 playwright 另起的浏览器进程组）。
+- **收尾/发布（2026-11-20 22:00 CST）**：最终构建回归 plans/r5_regress.json 11 项全过、0 PAGEERROR（shots/r5/regress）；补拍 shots/r5/final/beach_day.png、mainland_day.png、dunes.png。单文件 23.6 MB → 新 Page「索拉纳港 Port Solana 写实版」project_id 3fffda2d-4e56-495b-9ce7-5dc21581ec86（原样发布，私有，需用户在 App 内 Share 才能外链）；release/port-solana-r5.0.html。GitHub：origin/main 无他人新提交、无 open PR → sync_github.sh 推送 commit 3ee6c50；issue #1 留言 https://github.com/Liyang1145/port-solama/issues/1#issuecomment-7041380015（mapapi 接口、r5.0 改动点、建议 GPT 做交通灯/警察 A* 寻路/存档降级/新区任务点）。最佳截图 shots/best/r5_*.png。
+- **遗留**：堤道高速驾驶车损（r5_drive 100→38）；海燕沙丘逆光过曝、起伏不足；航拍天空灰带 + 右上扇形伪影。
