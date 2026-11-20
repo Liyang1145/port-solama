@@ -215,7 +215,7 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - **遗留**：堤道高速驾驶车损（r5_drive 100→38）；海燕沙丘逆光过曝、起伏不足；航拍天空灰带 + 右上扇形伪影。
 
 ---
-# r6.0 — 2026-11-20 23:xx CST：两条线合并，一个游戏两张地图
+# r6.0 — 2026-11-20 23:35 CST：两条线合并，一个游戏两张地图
 用户 22:37：「现在两个会话合并，不要分开，不然浪费资源。另一个会话在那造赛博朋克地图。我们以现在这个会话为基准，合并进来。另一个会话停止。我们最终给出两个地图，一个是gta6，一个是赛博朋克。」
 - **基准**：real/ r5.0（地图 A「索拉纳港」）。**并入**：v3/ v4.5（另一会话 22:40 停止；v3/ 归档只读），成为地图 B「霓港 NEOPORT」。开工前 GitHub main 仍是 32a4036，无 GPT 新提交、无 open PR。
 - **结构**：`src/mapsel.js`（MAP/CYBER，载入前确定）；门面 `src/city.js`（LAYOUT + buildCity）、`src/mapdata.js`（当前图 POI/MISSION_STARTS）、`src/mapapi.js`（两图同签名，Node 用 useMap 切换）；`src/maps/gta/`（mapdata/mapgeo/region/city/mapapi）、`src/maps/cyber/`（mapdata/roadgraph/parcels/region/stream/nature/neon/city/traffic/mapapi/names）。
@@ -227,3 +227,5 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - **验证**：node build.cjs 通过（dist/main.js 1242 KB）。A 图 `plans/r5_regress.json` 11 项：9 项同页通过，drive/missions 单独复跑通过（shots/r6/regress_gta + regress_gta_b；代客泊车 +$417、四任务 1696/1266/1100/1600、3 星 4 警车、路障/直升机、r5_drive 堤道、r5_world 15 车 15 行人、rifle aimW=1），0 PAGEERROR。B 图冒烟 `plans/r6_cyber_smoke.json`（shots/r6/smoke_cyber）：开车 79 km/h；零点堤道 1.5 km 开到大陆 (−1542,−265) 最高 163 km/h 车况 100；赛博枪械坊买齐 6 种武器、四种枪命中；3 星通缉（在场警车 2）；代客泊车 +$341；四个任务全部付款 1931/1297/1100/1600；数据核心区 13 车 12 在路网、15 行人走路网人行道、0 落水；0 PAGEERROR。菜单测试（单文件）：菜单显示、点「霓港」进入 cyber、标题 NEOPORT、0 错误（shots/r6/menu.png）。
 - **截图**（1280×720，lowshadow&probe=0 + CAP=canvas，均 read_file 检查）：A：shots/r6/gta/aerial.png、mainland_day.png、night.png、beach_day.png（与 r5.0 一致）；B：shots/r6/cyber3/night_aerial.png、shots/r6/cyber/night_deco.png、night_street.png、falls.png、prairie2.png、cyber3/aerial_day.png。
 - **环境说明**：沙盒重装了 chromium-headless-shell 1255 + 依赖。新环境下夜间湿路面镜面反射不出现——用 r5.0 原始源码重建对照（shots/r6/night_r50/night.png）同样没有，属测试环境差异，不是合并回退。
+- **发布**：dist_single 23.8 MB（< 45 MB，两图共用一套素材，无重复）→ Page 3fffda2d（action=edit 原样替换；检查器无 WebGL 报的标题对比度/按钮报错是误报）；副本 release/port-solana-r6.0.html。GitHub：fetch 后 main 无他人提交、无 open PR → sync_github.sh 推送 **ae42e8d**；issue #1 留言 https://github.com/Liyang1145/port-solama/issues/1#issuecomment-7043593700（新目录、选图方式、mapapi 两图用法、回归、建议 GPT 接手项）。最佳截图复制到 shots/best/r6_*.png。
+- **遗留**：B 图 3 星在场警车 2 辆（A 图 4 辆）；B 图远景楼白天偏暗；Deco 核心区生成器在 maps/gta/city.js 与 maps/cyber/city.js 各有一份（技术债）；新测试环境下湿路面镜面反射不出现（r5.0 原版同样，环境问题，待真机确认）；A 图 r5.0 遗留（堤道高速车损、沙丘逆光、航拍灰带）未动。
