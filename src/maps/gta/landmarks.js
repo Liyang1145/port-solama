@@ -89,11 +89,12 @@ export function landmarksBase(ctx, pick, ds) {
   // live in one mesh whose vertices are re-translated per frame to their pivot points (they hang level: pure translation,
   // no rotation). Legs, axle, hub drum and the deck stay in the static city batches.
   { const { x, z, R } = WH; const H = R + 3; const v = W.b('vcol', x, z); const m = W.b('metal', x, z);
-    const rv = new GeoBucket(), rb = new GeoBucket(), gv = new GeoBucket(); const gr = [], ang = [];
+    const rv = new GeoBucket(), rb = new GeoBucket(), gv = new GeoBucket(), fv = new GeoBucket(); const gr = [], ang = [], fg = [];
     for (const sz of [-1.2, 1.2]) {
       rput(rv, new THREE.TorusGeometry(R, 0.24, 6, 64), 0, 0, sz, [0.95, 0.95, 0.94]);           // outer chord
       rput(rv, new THREE.TorusGeometry(R - 1.5, 0.13, 5, 48), 0, 0, sz, [0.95, 0.95, 0.94]);     // inner chord (truss)
       for (let k = 0; k < 48; k++) { const a = (k + 0.5) / 48 * Math.PI * 2; rput(rb, g.bulb, Math.cos(a) * (R + 0.36), Math.sin(a) * (R + 0.36), sz, BULB, 0, 0, a, 0.1, 0.13, 0.1); } // rim bulbs
+      for (let k = 0; k < 48; k++) { const a = (k + 0.5) / 48 * Math.PI * 2; const v0 = fv.vc; rput(fv, g.bulb2, 0, 0, 0, null); fg.push([v0, fv.vc, Math.cos(a) * (R + 0.36), Math.sin(a) * (R + 0.36), sz * 1.05]); } // a4: far glow points (same bulbs, scaled with distance)
       for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.08, 0.08, R - 1.5, 4); sp.translate(0, (R - 1.5) / 2, 0); sp.rotateZ(a); rput(rv, sp, 0, 0, sz, [0.9, 0.9, 0.9]); }
       for (const dx of [-1, 1]) { const L = Math.hypot(H, R * 0.55); const leg = new THREE.CylinderGeometry(0.3, 0.48, L, 8); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, L / 2, 0); leg.rotateZ(ang); rput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
     }
@@ -104,12 +105,12 @@ export function landmarksBase(ctx, pick, ds) {
       const v0 = gv.vc; rput(gv, g.box, 0, -1.45, 0, c, 0, 0, 0, 1.6, 1.6, 1.8); gr.push([v0, gv.vc]); }
     // boarding deck (top 0.75, matches the cabin floor at the bottom of the turn) on the sloping sand
     rput(v, g.box, x, 0.05, z, [0.85, 0.82, 0.76], 0, 0, 0, 12, 1.4, 6.4);
-    col.add(x - R * 0.7, z - 3.2, x + R * 0.7, z + 3.2, 6, 'wheel');
-    // a2: the ticket kiosk and the drive house are solid too (the queue stanchions already sit inside the 'wheel' box)
+    wheelColliders(col);
+    // a2: the ticket kiosk and the drive house (the wheel's control booth) are solid too
     col.add(KIOSK.x - 1.5, KIOSK.z - 1.3, KIOSK.x + 1.5, KIOSK.z + 1.3, 2.9, 'kiosk');
     col.add(x - 2.15, z + 3.65, x + 2.15, z + 6.35, 2.2, 'kiosk');
     if (ds) ds.add(x, z, R + 8, job('wheel', (Wd) => wheelDetail(Wd)));
-    rig = { x, z, H, R, rv, rb, gv, gr, ang, cols, ds, base: null, det: null, th: 0, f: 0 };
+    rig = { x, z, H, R, rv, rb, gv, gr, ang, cols, ds, fv, fg, far: null, fs: 0, base: null, det: null, th: 0, f: 0 };
   }
   return { attach: wheelAttach, update: wheelUpdate };
 }
@@ -134,7 +135,14 @@ function wheelAttach(scene, M) {
   // frosted warm-white glass by day, incandescent glow at night (emissive follows U.uNight in wheelUpdate)
   WM = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.15, side: THREE.DoubleSide }), 'vcolc'); // same program as M.vcolCloth (roughness/metalness are uniforms)
   BM = prep(new THREE.MeshStandardMaterial({ color: 0xf2ede2, roughness: 0.18, metalness: 0.0, emissive: 0xffc27a, emissiveIntensity: 0.0 }), 'pool'); // same program as M.pool (plain colour + emissive)
-  rig.base = rigMeshes(rig.rv, rig.rb, rig.gv, rig.gr); rig.rv = rig.rb = rig.gv = null; wheelUpdate({ x: 1e9, z: 1e9 });
+  rig.base = rigMeshes(rig.rv, rig.rb, rig.gv, rig.gr); rig.rv = rig.rb = rig.gv = null;
+  // a4: far glow points — the 96 rim bulbs again, in the same bulb material (same 'pool' program, no new shader), each re-scaled
+  // about its own socket with camera distance so the lit rim still reads as a ring of warm dots from the promenade / causeway.
+  // Shown only at night and beyond ~60 m (the real bulbs take over close up); casts no shadow.
+  { const geo = rig.fv.build(); geo.userData.loc = Float32Array.from(geo.attributes.position.array); geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), WH.R + 6); const ms = new THREE.Mesh(geo, BM); ms.position.set(rig.x, rig.H, rig.z);
+    ms.name = 'wheelFarGlow'; ms.userData.far = true; ms.visible = false; ms.frustumCulled = true; SC.add(ms); rig.far = ms; rig.base.push(ms); rig.fv = null; }
+  wheelUpdate({ x: 1e9, z: 1e9 });
 }
 function wheelUpdate(cam) {
   if (!rig || !rig.base) return;
@@ -142,9 +150,49 @@ function wheelUpdate(cam) {
   if (!rig.det && d < DLOAD) { rig.det = wheelSpinDetail(); if (rig.ds) rig.ds.mark(rig.det); }
   else if (rig.det && d > DFREE) { for (const ms of rig.det) { SC.remove(ms); ms.geometry.dispose(); } rig.det = null; }
   BM.emissiveIntensity = 0.02 + U.uNight.value * 4.5;
+  if (rig.far) { const dd = Math.hypot(cam.x - rig.x, cam.z - rig.z); const on = U.uNight.value > 0.05 && dd > 60; rig.far.visible = on;
+    if (on) { const sc = Math.min(3.0, Math.max(0.16, dd * 0.0034)); if (Math.abs(sc - rig.fs) > rig.fs * 0.04) { rig.fs = sc; farScale(rig.far.geometry, sc); } } }
   // far away the motion is sub-pixel: re-pose the cabins only every 8th frame there
   if (d > 600 && (rig.f++ & 7)) return;
   for (const ms of rig.det ? rig.base.concat(rig.det) : rig.base) { if (ms.userData.gond) gondMove(ms.geometry, th); else ms.rotation.z = th; }
+}
+
+function farScale(geo, sc) { const p = geo.attributes.position.array, loc = geo.userData.loc;
+  for (const [a, b, cx, cy, cz] of rig.fg) for (let i = a * 3, e = b * 3; i < e; i += 3) { p[i] = cx + loc[i] * sc; p[i + 1] = cy + loc[i + 1] * sc; p[i + 2] = cz + loc[i + 2] * sc; }
+  geo.attributes.position.needsUpdate = true; }
+
+// ======================================================================== a4: walkable decks + split colliders =====
+// Boarding deck of the wheel (top 0.75, rail around it, three steps down to the sand on the promenade side) and the lighthouse
+// access bridge (top BR.y) are walkable surfaces now: the city's groundH asks landmarkDeckH first.
+const WD = { x0: WH.x - 6, x1: WH.x + 6, z0: WH.z - 3.2, z1: WH.z + 3.2, y: 0.75 };
+export function landmarkDeckH(x, z) {
+  if (z >= WD.z0 && z <= WD.z1) { if (x >= WD.x0 && x <= WD.x1) return WD.y;
+    if (x >= WD.x0 - 1.06 && x < WD.x0 && Math.abs(z - WH.z) <= 1.4) { const k = Math.min(2, Math.floor((WD.x0 - x) / 0.35)); return WD.y - (k + 1) * 0.25; } } // the three steps
+  if (x >= BR.x0 && x <= BR.x1 && z >= BR.z0 && z <= BR.z1) return BR.y;
+  return undefined;
+}
+// The wheel used to be one 22 x 6.4 m, 6 m tall box (nobody could reach the deck). Now: the four A-frame feet (footing + the low
+// part of each leg), the two X-braced frames (their diagonals cross the deck at body height in the planes z +-1.56), the deck's
+// perimeter railing (gap at the steps), and the queue stanchion ropes — so you queue between the ropes, climb the steps and walk
+// down the boarding lane between the two braced frames to the cabin gate. The rim's lowest point (2.76 m) and the cabins clear
+// a standing person on the deck, so they get no collider.
+function wheelColliders(col) {
+  const { x, z, R } = WH; const fx = R * 0.55, RH = WD.y + 1.1;
+  for (const dx of [-1, 1]) for (const s of [-1, 1]) { const cx = x - dx * fx, cz = z + s * 1.56; // foot + lowest ~2 m of the leg (leans inward 0.46 m per m)
+    col.add(Math.min(cx - 0.8, cx + dx * 1.0), cz - 0.8, Math.max(cx + 0.8, cx + dx * 1.0), cz + 0.8, 6, 'wheel'); }
+  for (const s of [-1, 1]) col.add(x - fx, z + s * 1.56 - 0.14, x + fx, z + s * 1.56 + 0.14, 3.2, 'wheel');      // X-braced frames
+  const r = (x0, z0, x1, z1) => col.add(x0, z0, x1, z1, RH, 'rail');
+  r(WD.x0, WD.z0 - 0.08, WD.x1, WD.z0 + 0.08); r(WD.x0, WD.z1 - 0.08, WD.x1, WD.z1 + 0.08); r(WD.x1 - 0.08, WD.z0, WD.x1 + 0.08, WD.z1);
+  r(WD.x0 - 0.08, WD.z0, WD.x0 + 0.08, WH.z - 1.4); r(WD.x0 - 0.08, WH.z + 1.4, WD.x0 + 0.08, WD.z1);
+  for (const zz of [WH.z - 1.1, WH.z + 1.1]) r(x - 9.5 - 0.06, zz - 0.06, x - 9.5 + 4 * 1.3 + 0.06, zz + 0.06);      // queue ropes
+}
+// The old jetty collider (one 1.6 m box over the whole groyne) also covered the lighthouse bridge; cut the bridge's footprint out
+// of it (the box stays on the west, east and south sides of the bridge), so the bridge's own railings are what stops you there.
+export function jettyCollider(col, x0, z0, x1, z1, h) {
+  const B = BR; if (x1 <= B.x0 || x0 >= B.x1 || z1 <= B.z0 || z0 >= B.z1) { col.add(x0, z0, x1, z1, h, 'rail'); return 1; }
+  let n = 0; const add = (a, b, c, d) => { if (c - a > 0.01 && d - b > 0.01) { col.add(a, b, c, d, h, 'rail'); n++; } };
+  add(x0, z0, B.x0, z1); add(B.x1, z0, x1, z1); add(B.x0, z0, B.x1, B.z0); add(B.x0, B.z1, B.x1, z1);
+  return n;
 }
 
 // ======================================================================== lighthouse near detail =====

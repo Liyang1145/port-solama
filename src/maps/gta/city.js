@@ -7,7 +7,7 @@ import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
 import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
-import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear } from './landmarks.js';
+import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear, landmarkDeckH, jettyCollider } from './landmarks.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -225,6 +225,7 @@ export function buildCity(scene, mats, T) {
   };
   const groundH = (x, z) => {
     { const h = region.groundH(x, z); if (h !== undefined) return h; }
+    { const h = landmarkDeckH(x, z); if (h !== undefined) return h; } // r6.4 a_landmarks4: wheel boarding deck + lighthouse bridge
     if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z), -1.6);
     if (!isLand(x, z)) return L.waterY - 3;
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
@@ -798,7 +799,7 @@ function districtEdges(ctx, deco) {
       for (const y of [dy + 1.0, dy + 0.55]) box(m, x0 + 1, y, zj + e - 0.03, x1 - 0.2, y + 0.05, zj + e + 0.03);
     }
     lamps.push({ x: x1 - 1.2, z: zj + 1.2, y: dy, dir: [0, -sg], kind: 'bridge' });
-    col.add(x0, zj - 4.5, x1 + 4, zj + 4.5, 1.6, 'rail');
+    jettyCollider(col, x0, zj - 4.5, x1 + 4, zj + 4.5, 1.6); // r6.4 a_landmarks4: the lighthouse bridge is cut out of it
     // walls the sand off past the jetty so the beach ends at the rocks
     // (r5.0: the sand wall past the jetty is gone — the beach continues to the island tips)
   }
