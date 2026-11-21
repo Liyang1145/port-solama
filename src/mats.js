@@ -683,7 +683,22 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   diffuseColor.rgb *= mix(vec3(0.82, 0.95, 0.74), vec3(1.18, 1.08, 0.78), smoothstep(0.3, 0.75, m));
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.30, 0.22), smoothstep(0.80, 0.9, vnoise(vLW.xz * 0.09 + 7.0)) * 0.3);${CYBER ? '' : `
   // vis-sweep (map A, GTA6 Florida look): St. Augustine lawns read olive / sun-bleached, not lime -> 25% desaturate, warmer
-  { float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.75) * vec3(1.03, 0.97, 0.88); }`} }`);
+  { float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.75) * vec3(1.03, 0.97, 0.88); }
+  // r6.4 flora_a: lawns were one tone from the air. Yard-scale tone patches (irrigated emerald / olive St. Augustine / straw
+  // Bahia / dry), soft parcel-like edges on a warped 26 m lattice; clumps + clover mottling up close; dark shrub/weed speckle
+  // and mower stripes on some patches, all faded by footprint so nothing shimmers at distance
+  { vec2 q = vLW.xz + vec2(vnoise(vLW.xz * 0.021) - 0.5, vnoise(vLW.xz * 0.021 + 5.0) - 0.5) * 30.0; vec2 c = q / 26.0; vec2 ci = floor(c), cf = fract(c);
+    vec2 w = smoothstep(0.30, 0.70, cf); float h00 = h12(ci), h10 = h12(ci + vec2(1.0, 0.0)), h01 = h12(ci + vec2(0.0, 1.0)), h11 = h12(ci + vec2(1.0, 1.0));
+    float hv = mix(mix(h00, h10, w.x), mix(h01, h11, w.x), w.y);
+    vec3 tone = hv < 0.3 ? mix(vec3(0.80, 1.06, 0.78), vec3(0.95, 1.02, 0.86), hv / 0.3) : hv < 0.62 ? mix(vec3(0.95, 1.02, 0.86), vec3(1.08, 1.03, 0.80), (hv - 0.3) / 0.32) : mix(vec3(1.08, 1.03, 0.80), vec3(1.26, 1.08, 0.66), (hv - 0.62) / 0.38);
+    diffuseColor.rgb *= tone;
+    float fw = length(fwidth(vLW.xz)); float nearF = 1.0 - smoothstep(0.35, 2.2, fw);
+    float cl = vnoise(vLW.xz * 0.6) * 0.6 + vnoise(vLW.xz * 2.1 + 3.0) * 0.4;
+    diffuseColor.rgb *= mix(1.0, 0.80 + 0.36 * cl, nearF);
+    float hc = h12(ci + 17.0); vec2 sd = vec2(cos(hc * 6.28), sin(hc * 6.28)); float stripe = step(0.5, fract(dot(vLW.xz, sd) / 3.2));
+    diffuseColor.rgb *= 1.0 + (stripe - 0.5) * 0.10 * step(0.55, hc) * (1.0 - smoothstep(0.25, 0.7, fw)); // iter2: faded earlier (aliased into diagonal moire on aerials)
+    float sp = smoothstep(0.70, 0.80, vnoise(vLW.xz * 0.33 + 11.0)) * (0.6 + 0.4 * step(0.6, h12(ci + 3.0)));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.52, 0.66, 0.44), sp * 0.55 * (1.0 - 0.75 * smoothstep(0.6, 2.0, fw))); }`} }`);
   };
   M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', lawn); // vis-sweep: lawn macro-variation on both maps (map A lawns were one flat tiled green, aerials showed the 4 m tile)
   // v4.4 land caps under the open world: pushed back in depth so district pavers / roads drawn just above never z-fight from the air
