@@ -12,6 +12,7 @@ import { box, polyCap, prismWalls, rect } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL, RUST } from './kit.js';
 import { grime, sidewalk, hangingSign, laundryLine, streak } from './dress.js';
+import { crownKind, plantDeck, crownScreen, roofBillboard, mastExtras, ladder, railRect, RED, STROBE } from './crown.js';
 
 // --------------------------------------------------------------- shop street ----
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
@@ -101,20 +102,29 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
       tx = ntx; tz = ntz;
     }
   }
-  // crown
+  // crown (r6.4 b_tower2: kind from the parcel seed so the far impostor shows the same crown; plant deck / stepped fin screen /
+  // rooftop billboard / mast ladders + platforms + guy wires / aviation lights — see crown.js)
   const T = tiers[tiers.length - 1]; const H = T.y1; const v = W.b('vcol', cx, cz), nb = W.b('neon', cx, cz);
-  const crown = rng();
-  if (crown < 0.4 && tx > 9 && tz > 9) helipad(W, cx, H, cz, Math.min(tx, tz) - 0.5, v, nb, rooftop, ctx, T);
-  else if (crown < 0.68) { rooftop(ctx, T.X0, T.Z0, T.X1, T.Z1, H, 'any', [[cx - 3, cz - 3, cx + 3, cz + 3]]); mast(v, nb, cx, H, cz, rand(28, 52)); }
+  const crown = rng(); let ck = ctx.pseed != null ? crownKind(ctx.pseed) : crown < 0.4 ? 'heli' : crown < 0.68 ? 'mast' : 'spire';
+  if (ck === 'heli' && !(tx > 9 && tz > 9)) ck = 'mast';
+  let bmuOk = true;
+  if (ck === 'heli') helipad(W, cx, H, cz, Math.min(tx, tz) - 0.5, v, nb, rooftop, ctx, T);
+  else if (ck === 'mast') { plantDeck(W, T.X0, T.Z0, T.X1, T.Z1, H, [[cx - 3.2, cz - 3.2, cx + 3.2, cz + 3.2]]); const mh = rand(28, 52); mast(v, nb, cx, H, cz, mh); mastExtras(W, cx, H + 3, cz, mh, 1.8, 0.3, T, H); }
+  else if (ck === 'bill') { const ex = roofBillboard(W, T.X0, T.Z0, T.X1, T.Z1, H); plantDeck(W, T.X0, T.Z0, T.X1, T.Z1, H, [ex]); bmuOk = false; }
+  else if (ck === 'screen') { plantDeck(W, T.X0, T.Z0, T.X1, T.Z1, H, [], { tank: true }); const top = crownScreen(W, T.X0, T.Z0, T.X1, T.Z1, H, RIB.map((q) => q * 0.9 + 0.04), glow);
+    put(v, G.cyl8, cx, top + 7, cz, 0.22, 14, 0.22, STEEL); put(nb, G.ball, cx, top + 14.3, cz, 0.3, 0.3, 0.3, STROBE); bmuOk = false; }
   else { // stepped spire crown with neon edges
+    plantDeck(W, T.X0, T.Z0, T.X1, T.Z1, H, [], { parapetOnly: true });
     let s = Math.min(tx, tz); let yy = H;
-    for (let i = 0; i < 3; i++) { const h = rand(4, 7); box(v, cx - s, yy, cz - s, cx + s, yy + h, cz + s, {}, i % 2 ? RIB : WALL); for (const [px, pz] of [[cx - s, cz - s], [cx + s, cz - s], [cx + s, cz + s], [cx - s, cz + s]]) box(nb, px - 0.1, yy, pz - 0.1, px + 0.1, yy + h, pz + 0.1, {}, glow); yy += h; s *= 0.62; }
-    put(v, G.cyl8, cx, yy + 12, cz, 0.35, 24, 0.35, STEEL); put(nb, G.ball, cx, yy + 24.3, cz, 0.35, 0.35, 0.35, [1, 0.1, 0.08]);
+    for (let i = 0; i < 3; i++) { const h = rand(4, 7); box(v, cx - s, yy, cz - s, cx + s, yy + h, cz + s, {}, i % 2 ? RIB : WALL); for (const [px, pz] of [[cx - s, cz - s], [cx + s, cz - s], [cx + s, cz + s], [cx - s, cz + s]]) box(nb, px - 0.1, yy, pz - 0.1, px + 0.1, yy + h, pz + 0.1, {}, glow);
+      if (i === 0) { ladder(W.b('vcolD', cx, cz), cx + s + 0.2, cz, yy, yy + h, 0, 1, true, 1, 0); railRect(W.b('vcolD', cx, cz), cx - s * 0.62, cz - s * 0.62, cx + s * 0.62, cz + s * 0.62, yy + h); }
+      yy += h; s *= 0.62; }
+    put(v, G.cyl8, cx, yy + 12, cz, 0.35, 24, 0.35, STEEL); put(nb, G.ball, cx, yy + 12, cz, 0.25, 0.25, 0.25, RED); put(nb, G.ball, cx, yy + 24.3, cz, 0.35, 0.35, 0.35, STROBE);
   }
   // antennas / aviation lights on the tier corners
   for (const t of tiers) put(nb, G.ball, t.X1, t.y1 + 0.8, t.Z1, 0.18, 0.18, 0.18, [1, 0.12, 0.08]);
   // r6.3 building-maintenance unit on the top tier: roof rail ring, slewing jib, cables down to a cradle on one face
-  if (rng() < 0.6) bmu(v, nb, T, H);
+  if (bmuOk && rng() < 0.6) bmu(v, nb, T, H);
   return tiers;
 }
 // r6.3 tower skin pieces for one tier [X0..X1]x[Z0..Z1], y..yT:
@@ -202,7 +212,26 @@ function helipad(W, cx, H, cz, R, v, nb, rooftop, ctx, T) {
   const hs = r * 0.3; box(v, cx - hs, y, cz - hs * 0.8, cx - hs + 0.6, y + 0.04, cz + hs * 0.8, {}, mc); box(v, cx + hs - 0.6, y, cz - hs * 0.8, cx + hs, y + 0.04, cz + hs * 0.8, {}, mc); box(v, cx - hs, y, cz - 0.3, cx + hs, y + 0.04, cz + 0.3, {}, mc);
   // windsock mast
   put(v, G.cyl8, cx + r * 0.95, H + 4, cz, 0.06, 8, 0.06, STEEL); put(v, G.cyl8, cx + r * 0.95 + 0.5, H + 7.6, cz, 0.18, 1.0, 0.18, [0.95, 0.4, 0.1], 0);
+  // r6.4 b_tower2: TLOF edge band (white / yellow dashes) + white flood lights on the rim + slanted safety net on outriggers,
+  // an access stair from the roof up to the deck with handrails, a beacon on a short pole, plant under the deck
+  const d = W.b('vcolD', cx, cz);
+  for (let i = 0; i < 8; i++) { const a = oct[i], b = oct[(i + 1) % 8]; const ia = [cx + (a[0] - cx) * 0.93, cz + (a[1] - cz) * 0.93], ib = [cx + (b[0] - cx) * 0.93, cz + (b[1] - cz) * 0.93];
+    beam(v, [ia[0], y + 0.025, ia[1]], [ib[0], y + 0.025, ib[1]], 0.35, i % 2 ? mc : yc, 0.03);
+    const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; put(nb, G.box, m[0], y + 0.12, m[1], 0.3, 0.16, 0.3, [0.95, 0.92, 0.8]);
+    const oa = [cx + (a[0] - cx) * 1.16, cz + (a[1] - cz) * 1.16], ob = [cx + (b[0] - cx) * 1.16, cz + (b[1] - cz) * 1.16];
+    d.quad(new THREE.Vector3(a[0], y - 0.32, a[1]), new THREE.Vector3(b[0], y - 0.32, b[1]), new THREE.Vector3(ob[0], y - 0.05, ob[1]), new THREE.Vector3(oa[0], y - 0.05, oa[1]), [0, 0, 1, 0, 1, 1, 0, 1], {}, [0.16, 0.17, 0.16]); }
+  { const sa = Math.PI * 2 * (0.5 / 8); const ex = [cx + Math.cos(sa) * r * 1.02, cz - Math.sin(sa) * r * 1.02]; const ux = -Math.sin(sa), uz = -Math.cos(sa); // stair along the rim tangent
+    const L = 3.2 / Math.tan(0.75); const sx0 = ex[0] + ux * L, sz0 = ex[1] + uz * L; const ox = Math.cos(sa), oz = -Math.sin(sa);
+    for (const o of [-0.55, 0.55]) { beam(v, [sx0 + ox * o, H + 0.1, sz0 + oz * o], [ex[0] + ox * o, y - 0.2, ex[1] + oz * o], 0.1, STEEL, 0.25); beam(d, [sx0 + ox * o, H + 1.05, sz0 + oz * o], [ex[0] + ox * o, y + 0.9, ex[1] + oz * o], 0.05, [0.9, 0.7, 0.12]); }
+    for (let k = 1; k < 16; k++) { const t = k / 16; const px = sx0 + (ex[0] - sx0) * t, pz = sz0 + (ex[1] - sz0) * t; beam(d, [px - ox * 0.55, H + 0.1 + (y - 0.3 - H) * t, pz - oz * 0.55], [px + ox * 0.55, H + 0.1 + (y - 0.3 - H) * t, pz + oz * 0.55], 0.26, [0.32, 0.33, 0.34], 0.05); } }
+  put(v, G.cyl8, cx - r * 0.95, y + 1.0, cz, 0.08, 2.0, 0.08, STEEL); put(nb, G.ball, cx - r * 0.95, y + 2.15, cz, 0.22, 0.22, 0.22, [1, 0.6, 0.1]);
+  const pc = [0.62, 0.64, 0.63];
+  for (let i = 0; i < 4; i++) { const t = (i / 4) * Math.PI * 2 + 0.4; const px = cx + Math.cos(t) * r * 0.3, pz = cz + Math.sin(t) * r * 0.3;
+    box(v, px - 0.9, H, pz - 0.9, px + 0.9, H + 1.6, pz + 0.9, {}, pc); put(d, G.cyl8, px, H + 1.62, pz, 0.7, 0.04, 0.7, DARK); }
+  pipesUnder(v, d, cx, cz, H, r);
 }
+function pipesUnder(v, d, cx, cz, H, r) { const G = kg(); for (let k = 0; k < 3; k++) { const o = (k - 1) * 0.45; tube(v, [cx - r * 0.85, H + 2.3 + o * 0.2, cz + o], [cx + r * 0.85, H + 2.3 + o * 0.2, cz + o], 0.13, k === 1 ? [0.7, 0.55, 0.15] : [0.6, 0.62, 0.64], G.tube6); }
+  for (let x = -r * 0.7; x <= r * 0.7; x += 3) beam(d, [cx + x, H, cz], [cx + x, H + 2.15, cz], 0.12, DARK); }
 // lattice antenna mast: 4 tapering legs + ring and diagonal braces + whips, aviation lights
 function mast(v, nb, cx, H, cz, mh) {
   const G = kg(); box(v, cx - 2.6, H, cz - 2.6, cx + 2.6, H + 3, cz + 2.6, {}, [0.3, 0.31, 0.33]);
