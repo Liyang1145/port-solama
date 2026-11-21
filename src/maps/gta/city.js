@@ -7,7 +7,7 @@ import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
 import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
-import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear, landmarkDeckH, jettyCollider } from './landmarks.js';
+import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear, landmarkDeckH, jettyWalk } from './landmarks.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -154,7 +154,7 @@ export function buildCity(scene, mats, T) {
   const DS = detailStream(128);
   // r6.3 (ground_a): mainland urban fabric around the district — lattice + downtown blocks first (the skyline snaps into them)
   const fab = planFabric();
-  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS, fab };
+  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS, fab, beachH }; // a_jetty: beachH for the jetty steps
   for (const b of blocks) {
     if (b.area === 'promenade') { promenade(W, b, shrubs, trees); { const zc = (b.z0 + b.z1) / 2 + 22; DS.add(b.x1, zc, 8, job('beach', (Wd) => beachDetail(Wd, b.x1, zc, mulb(seedOf(b.x1, zc, 9))))); } continue; }
     if (b.area === 'island') islandBlock(bld, b, palms, trees, shrubs);
@@ -793,13 +793,9 @@ function districtEdges(ctx, deco) {
     const dy = 0.95;
     box(W.b('concrete', (x0 + x1) / 2, zj), x0, -1.5, zj - 1.6, x1, dy, zj + 1.6);
     box(v, x1 - 3, -1.5, zj - 2.4, x1 + 0.5, dy + 0.05, zj + 2.4, {}, [0.72, 0.71, 0.68]); // round-head platform
-    const m = W.b('metal', (x0 + x1) / 2, zj);
-    for (const e of [-1.45, 1.45]) {
-      for (let x = x0 + 1; x < x1; x += 2.2) box(m, x - 0.035, dy, zj + e - 0.035, x + 0.035, dy + 1.05, zj + e + 0.035);
-      for (const y of [dy + 1.0, dy + 0.55]) box(m, x0 + 1, y, zj + e - 0.03, x1 - 0.2, y + 0.05, zj + e + 0.03);
-    }
-    lamps.push({ x: x1 - 1.2, z: zj + 1.2, y: dy, dir: [0, -sg], kind: 'bridge' });
-    jettyCollider(col, x0, zj - 4.5, x1 + 4, zj + 4.5, 1.6); // r6.4 a_landmarks4: the lighthouse bridge is cut out of it
+    // a_jetty: walkway deck — shore steps, edge railings (the only colliders), end rail, bollards; railings are built there too
+    jettyWalk(ctx, x0, x1, zj, dy, ctx.beachH);
+    lamps.push({ x: x1 - 1.2, z: zj + sg * 1.2, y: dy, dir: [0, -sg], kind: 'bridge' }); // a_jetty: on the outer side, clear of the bridge opening
     // walls the sand off past the jetty so the beach ends at the rocks
     // (r5.0: the sand wall past the jetty is gone — the beach continues to the island tips)
   }

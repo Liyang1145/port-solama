@@ -7,7 +7,7 @@
 //     'lighthouse' / 'wheel' / 'deco2', deterministic (local mulb seed), they never touch the city's global rng sequence.
 import * as THREE from 'three';
 import { job, mulb, seedOf, edgesOf, lb, frame, fbox, COL, DLOAD, DFREE } from './bldgdetail.js';
-import { GeoBucket } from '../../geo.js';
+import { GeoBucket, box } from '../../geo.js';
 import { prep } from '../../mats.js';
 import { U } from '../../env.js';
 
@@ -59,6 +59,7 @@ const LENS = [1.0, 0.82, 0.5], BULB = [1.0, 0.86, 0.6];
 // the shared layout rng sequence after this point is unchanged); ds: the r6.2 detail stream.
 export const LH = { x: 528, z: -374 }, WH = { x: 384, z: 352, R: 16 };
 const BR = { x0: 522.2, x1: 525.4, z0: -376.0, z1: -372.0, y: 0.95 }; // lighthouse access bridge (deck top y)
+const JO = { a: BR.x0 + 0.16, b: BR.x1 - 0.4 }; // a_jetty: opening in the bridge's south rail / the jetty's north rail (x range)
 export function landmarksBase(ctx, pick, ds) {
   const { W, col } = ctx; const g = geos();
   // ---------------------------------------------------------------- lighthouse 「南堤灯塔」 ----
@@ -81,7 +82,11 @@ export function landmarksBase(ctx, pick, ds) {
     rput(v, g.cyl8, x, 28.2, z, BLACK, 0, 0, 0, 0.13, 0.5, 0.13);
     rput(v, g.cyl8, x, 29.2, z, [0.3, 0.3, 0.3], 0, 0, 0, 0.025, 1.6, 0.025);
     col.add(x - 3.9, z - 3.9, x + 3.9, z + 3.9, 30, 'lighthouse');
-    for (const zz of [BR.z0 + 0.12, BR.z1 - 0.12]) col.add(BR.x0, zz - 0.1, BR.x1, zz + 0.1, BR.y + 1.1, 'rail'); // a2: bridge railings are solid
+    // a2: bridge railings are solid. a_jetty: the south one opens onto the jetty walkway (JO), the west end gets its own rail
+    { const zs = BR.z0 + 0.12, zn = BR.z1 - 0.12, h = BR.y + 1.1;
+      col.add(BR.x0, zn - 0.1, BR.x1, zn + 0.1, h, 'rail');
+      col.add(BR.x0, zs - 0.1, JO.a, zs + 0.1, h, 'rail'); col.add(JO.b, zs - 0.1, BR.x1, zs + 0.1, h, 'rail');
+      col.add(BR.x0 - 0.04, BR.z0, JO.a, BR.z1, h, 'rail'); }
     if (ds) ds.add(x, z, 9, job('lighthouse', (Wd) => lighthouseDetail(Wd)));
   }
   // ---------------------------------------------------------------- Ferris wheel 「海风之眼」 ----
@@ -169,6 +174,9 @@ export function landmarkDeckH(x, z) {
   if (z >= WD.z0 && z <= WD.z1) { if (x >= WD.x0 && x <= WD.x1) return WD.y;
     if (x >= WD.x0 - 1.06 && x < WD.x0 && Math.abs(z - WH.z) <= 1.4) { const k = Math.min(2, Math.floor((WD.x0 - x) / 0.35)); return WD.y - (k + 1) * 0.25; } } // the three steps
   if (x >= BR.x0 && x <= BR.x1 && z >= BR.z0 && z <= BR.z1) return BR.y;
+  for (const J of JT) { const dz = Math.abs(z - J.zj); if (dz > 2.4 || x < J.sx0 || x > J.x1 + 0.5) continue; // a_jetty: groyne walkway
+    if (x >= J.x0) { if (dz <= 1.6 || x >= J.x1 - 3) return J.dy; continue; }                         // deck / round head
+    if (dz <= 1.6) return J.base + (J.dy - J.base) * (Math.min(J.n - 1, Math.floor((x - J.sx0) / J.T)) + 1) / (J.n + 1); } // shore stairs
   return undefined;
 }
 // The wheel used to be one 22 x 6.4 m, 6 m tall box (nobody could reach the deck). Now: the four A-frame feet (footing + the low
@@ -194,6 +202,56 @@ export function jettyCollider(col, x0, z0, x1, z1, h) {
   add(x0, z0, B.x0, z1); add(B.x1, z0, x1, z1); add(B.x0, z0, B.x1, B.z0); add(B.x0, B.z1, B.x1, z1);
   return n;
 }
+
+// ======================================================================== a_jetty: walkable groynes =====
+// The two beach groynes used to be one 1.6 m solid box each (nobody could get on them, and the lighthouse bridge was unreachable).
+// Now the concrete deck is a walkway (landmarkDeckH returns its top), a flight of steps climbs to it from the sand at the root,
+// the only colliders are the two edge railings (+ the end rail), and two iron bollards at the foot of the steps keep cars off.
+// On the lighthouse groyne the north railing and the bridge's south railing open onto each other (JO), so you can walk from the
+// beach to the lighthouse door. Materials: the city's concrete / metal / vcol buckets (no new programs).
+const JT = []; const JT_HW = 1.45, JT_T = 0.45;
+export function jettyWalk(ctx, x0, x1, zj, dy, sandH) {
+  const { W, col } = ctx; const g = geos();
+  let n = 6; for (let it = 0; it < 4; it++) n = Math.max(2, Math.ceil((dy - sandH(x0 - n * JT_T, zj)) / 0.19) - 1);
+  const sx0 = x0 - n * JT_T, base = sandH(sx0, zj);
+  const br = zj < 0 && Math.abs(zj + JT_HW - BR.z0) < 1 && x1 + 0.5 > JO.b; // this groyne carries the lighthouse bridge
+  const J = { x0, x1, zj, dy, sx0, base, n, T: JT_T, br, xe: x1 + 0.45 };
+  { const i = JT.findIndex((j) => j.zj === zj); if (i >= 0) JT.splice(i, 1); } JT.push(J);
+  const stepY = (k) => base + (dy - base) * (k + 1) / (n + 1);
+  // -------- colliders: edge railings over steps + deck, end rail, bridge-opening side wall, bollards
+  const h = dy + 1.1, xe = J.xe; const r = (a, b, c, d) => { if (c - a > 0.01 && d - b > 0.01) col.add(a, b, c, d, h, 'rail'); };
+  r(sx0, zj - JT_HW - 0.08, xe, zj - JT_HW + 0.08);
+  if (br) { r(sx0, zj + JT_HW - 0.08, JO.a, zj + JT_HW + 0.08); r(JO.b, zj + JT_HW - 0.08, xe, zj + JT_HW + 0.08);
+    r(BR.x0 - 0.04, zj + JT_HW - 0.08, JO.a, BR.z0); r(JO.b - 0.16, zj + JT_HW - 0.08, JO.b, BR.z0); }
+  else r(sx0, zj + JT_HW - 0.08, xe, zj + JT_HW + 0.08);
+  r(xe - 0.08, zj - JT_HW - 0.08, xe + 0.08, zj + JT_HW + 0.08);
+  const bx = sx0 - 0.7, bz = [zj - 0.75, zj + 0.75];
+  for (const z of bz) col.add(bx - 0.14, z - 0.14, bx + 0.14, z + 0.14, 1.2, 'bollard');
+  // -------- visuals
+  const c = W.b('concrete', (sx0 + x0) / 2, zj), m = W.b('metal', (x0 + x1) / 2, zj), v = W.b('vcol', sx0, zj);
+  for (let k = 0; k < n; k++) box(c, sx0 + k * JT_T, base - 0.6, zj - 1.6, x0, stepY(k), zj + 1.6);   // the flight of steps
+  const POST = 0.035, RT = 0.03;
+  for (const e of [-1, 1]) { const zz = zj + e * JT_HW;
+    // stairs handrail: a post on every other tread, two sloped rails parallel to the stair line
+    for (let k = 0; k < n; k += 2) { const xx = sx0 + k * JT_T + 0.2; box(m, xx - POST, stepY(k), zz - POST, xx + POST, stepY(k) + 1.05, zz + POST); }
+    for (const yo of [1.0, 0.55]) rod(m, g.tube, sx0 + 0.2, stepY(0) + yo, zz, x0 + 0.2, dy + yo, zz, RT, null);
+    // deck rails (with the bridge opening on the lighthouse groyne's north side)
+    const segs = br && e > 0 ? [[x0 + 0.2, JO.a - 0.1], [JO.b, xe]] : [[x0 + 0.2, xe]];
+    for (const [a, b] of segs) { if (b - a < 0.2) continue; const np = Math.max(1, Math.round((b - a) / 2.2));
+      for (let i = 0; i <= np; i++) { const xx = a + (b - a) * i / np; box(m, xx - POST, dy, zz - POST, xx + POST, dy + 1.05, zz + POST); }
+      for (const y of [dy + 1.0, dy + 0.55]) box(m, a, y, zz - RT, b, y + 0.05, zz + RT); }
+  }
+  for (const zz of [zj - JT_HW, zj - 0.48, zj + 0.48, zj + JT_HW]) box(m, xe - POST, dy, zz - POST, xe + POST, dy + 1.05, zz + POST); // end rail
+  for (const y of [dy + 1.0, dy + 0.55]) box(m, xe - RT, y, zj - JT_HW, xe + RT, y + 0.05, zj + JT_HW);
+  if (br) { const xw = JO.a - 0.1; box(m, xw - POST, dy, BR.z0 - POST, xw + POST, dy + 1.05, BR.z0 + POST);           // opening side rail
+    for (const y of [dy + 1.0, dy + 0.55]) box(m, xw - RT, y, zj + JT_HW, xw + RT, y + 0.05, BR.z0 + 0.12); }
+  for (const z of bz) { const y0 = sandH(bx, z) - 0.15; // cast-iron bollards (black, a white reflective band)
+    rput(v, g.cyl8, bx, y0, z, [0.1, 0.105, 0.11], 0, 0, 0, 0.13, 1.1, 0.13);
+    rput(v, g.cyl8, bx, y0 + 0.82, z, [0.9, 0.9, 0.86], 0, 0, 0, 0.135, 0.08, 0.135);
+    rput(v, g.ball, bx, y0 + 1.1, z, [0.1, 0.105, 0.11], 0, 0, 0, 0.14, 0.09, 0.14); }
+  return J;
+}
+export const jettyInfo = () => JT.map((j) => ({ ...j }));
 
 // ======================================================================== lighthouse near detail =====
 function lighthouseDetail(W) {
@@ -238,8 +296,12 @@ function lighthouseDetail(W) {
   }
   const deckY = BR.y, bx0 = BR.x0, bx1 = BR.x1, bz0 = BR.z0, bz1 = BR.z1;
   fbox(v, frame(0, 0), bx0, bx1, bz0, bz1, -1.2, deckY, [0.46, 0.45, 0.43]);
-  for (const zz of [bz0 + 0.12, bz1 - 0.12]) { for (let xx = bx0 + 0.2; xx <= bx1; xx += 1.0) rput(m, g.cyl8, xx, deckY, zz, null, 0, 0, 0, 0.035, 1.05, 0.035);
-    for (const y of [deckY + 1.0, deckY + 0.55]) rput(m, g.box, (bx0 + bx1) / 2, y, zz, null, 0, 0, 0, bx1 - bx0, 0.05, 0.05); }
+  for (const zz of [bz0 + 0.12, bz1 - 0.12]) { const south = zz < LH.z; // a_jetty: the south rail opens onto the jetty walkway
+    for (let xx = bx0 + 0.2; xx <= bx1; xx += 1.0) { if (south && xx > JO.a - 0.1 && xx < JO.b) continue; rput(m, g.cyl8, xx, deckY, zz, null, 0, 0, 0, 0.035, 1.05, 0.035); }
+    if (south) rput(m, g.cyl8, JO.b, deckY, zz, null, 0, 0, 0, 0.035, 1.05, 0.035);
+    for (const y of [deckY + 1.0, deckY + 0.55]) for (const [a, b] of south ? [[bx0, JO.a - 0.1], [JO.b, bx1]] : [[bx0, bx1]]) rput(m, g.box, (a + b) / 2, y, zz, null, 0, 0, 0, b - a, 0.05, 0.05); }
+  { const xw = bx0 + 0.06; for (const zz of [bz0 + 1.4, bz0 + 2.7]) rput(m, g.cyl8, xw, deckY, zz, null, 0, 0, 0, 0.035, 1.05, 0.035); // a_jetty: west end rail
+    for (const y of [deckY + 1.0, deckY + 0.55]) rput(m, g.box, xw, y, (bz0 + bz1) / 2, null, 0, 0, 0, 0.05, 0.05, bz1 - bz0 - 0.24); }
   // plinth rim: iron mooring bollards, a steel access ladder into the water (east), rubble boulders hugging the drum
   for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2 + Math.PI / 4; rput(v, g.cyl8, x + Math.cos(a) * 3.35, 1.28, z + Math.sin(a) * 3.35, [0.13, 0.14, 0.15], 0, 0, 0, 0.17, 0.45, 0.17);
     rput(v, g.ball, x + Math.cos(a) * 3.35, 1.74, z + Math.sin(a) * 3.35, [0.13, 0.14, 0.15], 0, 0, 0, 0.2, 0.12, 0.2); }
