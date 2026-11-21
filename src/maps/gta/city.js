@@ -2,10 +2,11 @@
 // across a bay from a glass-tower downtown, linked by a causeway.
 import * as THREE from 'three';
 import { World, prismWalls, polyCap, rect, box } from '../../geo.js';
-import { ColliderGrid, rng, rand, randi, pick, clamp } from '../../util.js';
+import { ColliderGrid, rng, rand, randi, pick, clamp, withSeed } from '../../util.js';
 import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
+import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -149,7 +150,9 @@ export function buildCity(scene, mats, T) {
   const B = W.b.bind(W);
   // r6.2: streamed per-building geometric detail (bldgdetail.js / archdetail.js); jobs register here, meshes build near the camera
   const DS = detailStream(128);
-  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS };
+  // r6.3 (ground_a): mainland urban fabric around the district — lattice + downtown blocks first (the skyline snaps into them)
+  const fab = planFabric();
+  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS, fab };
   for (const b of blocks) {
     if (b.area === 'promenade') { promenade(W, b, shrubs, trees); { const zc = (b.z0 + b.z1) / 2 + 22; DS.add(b.x1, zc, 8, job('beach', (Wd) => beachDetail(Wd, b.x1, zc, mulb(seedOf(b.x1, zc, 9))))); } continue; }
     if (b.area === 'island') islandBlock(bld, b, palms, trees, shrubs);
@@ -160,13 +163,15 @@ export function buildCity(scene, mats, T) {
   districtEdges(bld, deco);
   skyline(bld);
   marina(bld); landmarks(bld);
+  fab.populate(col); // own RNG stream: the shared rng sequence (island / district layout) is unchanged
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
-  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT });
+  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal });
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); };
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); region.fabStats = attachFabric(fab, scene, M); };
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); };
+    region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;
     const sun = region.data.byId.sun; let sb0 = 1e9, sb1 = -1e9; for (let s = 0; s < sun.path.len; s += 2) if (region.inBridge(sun.path.at(s).x)) { sb0 = Math.min(sb0, s); sb1 = Math.max(sb1, s); }
@@ -223,7 +228,7 @@ export function buildCity(scene, mats, T) {
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
     return blockAt(x, z) ? 0.15 : 0;
   };
-  return { detail: DS, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
+  return { detail: DS, fabric: fab, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
 }
 
 function roadQuad(rd, s) {
@@ -801,8 +806,15 @@ function districtEdges(ctx, deco) {
 function skyline(ctx) {
   const glassT = [[0.10, 0.20, 0.24], [0.16, 0.24, 0.30], [0.22, 0.26, 0.28], [0.12, 0.18, 0.22]];
   const lightCols = [[0.62, 0.6, 0.56], [0.7, 0.6, 0.45]];
-  const tower = (cx, cz, w, d, h, kind) => {
-    const opt = { collide: false, relief: false };
+  // r6.3 (ground_a): towers used to stand on bare grass at random spots. Phase 1 runs the original code on a scratch context so the
+  // shared rng sequence is exactly as before (and records every pick); phase 2 snaps the downtown towers into the fabric's paved
+  // blocks (shrunk / slid / dropped if they would hit a street or a neighbour) and builds them for real, replaying the picks.
+  const recs = []; const SCR = { W: new World(1e6), col: { add() {}, addOBB() {} }, ds: null };
+  let REC = null, REPLAY = null; const draw = (f) => { if (REPLAY) return REPLAY.shift(); const v = f(); REC.push(v); return v; };
+  const rngR = () => draw(rng), pickR = (a) => draw(() => pick(a));
+  const tower = (cx, cz, w, d, h, kind) => { REC = []; build(SCR, cx, cz, w, d, h, kind); recs.push({ cx, cz, w, d, h, kind, picks: REC, seed: Math.floor(cx * 31 + cz * 17) }); REC = null; };
+  const build = (ctx, cx, cz, w, d, h, kind) => {
+    const opt = { collide: false, relief: false }; const rng = rngR, pick = pickR;
     const tdet = (poly, wall) => { if (!ctx.ds) return; const p = { kind, poly, cx, cz, w, d, h, wall }; ctx.ds.add(cx, cz, Math.max(w, d) / 2 + 4, job('tower', (Wd) => towerDetail(Wd, p))); };
     ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); // r5.0: the far skyline is reachable now (causeway / island ends)
     if (kind === 0) { const poly = rng() < 0.5 ? chamfer(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, Math.min(w, d) * 0.15) : rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2);
@@ -820,8 +832,26 @@ function skyline(ctx) {
     for (let r = 0; r < 3; r++) { if (rng() > 0.35 + f * 0.6) continue;
       tower(SKY_X - 130 - r * 120 - rand(0, 60), z + rand(-15, 15), rand(26, 44), rand(26, 44), 40 + f * rand(90, 230) * (1 - r * 0.2), randi(0, 3)); }
   }
-  // coast to the north and south of the district (beyond the jetties): condo/hotel strips on the barrier island
-  const L = LAYOUT;
+  const L = LAYOUT; void L;
+  coastStrips(tower);
+  // phase 2: snap + build
+  const fab = ctx.fab;
+  for (const r of recs) {
+    const b = fab && fab.blockAt(r.cx, r.cz);
+    if (b) {
+      let w = r.w, d = r.d; if (r.kind === 1) w = d = Math.min(w, d);
+      w = Math.min(w, b.ix1 - b.ix0 - 2); d = Math.min(d, b.iz1 - b.iz0 - 2); const s = w / r.w; if (r.kind === 1) d = w; void s;
+      const cl = (v, a, c) => Math.max(a, Math.min(c, v)); const fits = (x, z) => !b.towers.some((t) => x - w / 2 - 4 < t[2] && x + w / 2 + 4 > t[0] && z - d / 2 - 4 < t[3] && z + d / 2 + 4 > t[1]);
+      let x = cl(r.cx, b.ix0 + 1 + w / 2, b.ix1 - 1 - w / 2), z = cl(r.cz, b.iz0 + 1 + d / 2, b.iz1 - 1 - d / 2);
+      if (!fits(x, z)) { let best = null, bd = 1e9; for (let zz = b.iz0 + 1 + d / 2; zz <= b.iz1 - 1 - d / 2; zz += 2) for (let xx = b.ix0 + 1 + w / 2; xx <= b.ix1 - 1 - w / 2; xx += 2) { const dd = Math.hypot(xx - x, zz - z); if (dd < bd && fits(xx, zz)) { bd = dd; best = [xx, zz]; } } if (!best) continue; [x, z] = best; }
+      b.towers.push([x - w / 2, z - d / 2, x + w / 2, z + d / 2, r.h]); r.cx = x; r.cz = z; r.w = w; r.d = d;
+    }
+    REPLAY = r.picks.slice(); withSeed(r.seed >>> 0, () => build(ctx, r.cx, r.cz, r.w, r.d, r.h, r.kind)); REPLAY = null;
+  }
+}
+// coast to the north and south of the district (beyond the jetties): condo/hotel strips on the barrier island
+function coastStrips(tower) {
+  const L = LAYOUT; void L;
   for (const sg of [-1, 1]) {
     // r5.0: no rectangular pads any more — towers stand on the natural island-end ground (region.js), inside its coastline
     for (let z = 660; z < 1300; z += rand(32, 52)) { const zz = sg * z; const xe = 335 + beachOff(zz) - 22, xw = westCoast(zz) + 22;

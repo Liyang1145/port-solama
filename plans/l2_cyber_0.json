@@ -1,0 +1,14 @@
+{
+ "query": "map=cyber&hour=13&mb=0&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "b_night_street",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); 0"
+  },
+  {
+   "name": "b_night_low",
+   "js": "__G.setHour(22.5); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); const c=__G.camera; c.position.set(-1604,1.4,-805); c.lookAt(-1590,4,-760); c.updateMatrixWorld(); __G.streamSync(); 0"
+  }
+ ]
+}

@@ -82,6 +82,7 @@ async function load() {
   const street = buildStreet(scene, city); const shopSigns = buildShopSigns(scene, city);
   if (CYBER) neon = buildNeon(scene, city);
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
+  post.shaftLight = env.sunFar; post.shaft = U.uShaft.value; // light2 volumetric sun shafts (far cascade)
 
   // v3.4 reflection probe: a cube capture of the city from over the bay, used as the env map of the building material so
   // tower glass reflects the skyline / island / water instead of only the sky (GTA6_REFERENCE §4 reflections). Refreshed with the sky.

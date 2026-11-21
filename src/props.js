@@ -7,6 +7,7 @@ import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
 import { CYBER } from './mapsel.js';
+import { furnMat, PB } from './streetkit.js';
 
 function streetLightGeo() {
   const b = new GeoBucket();
@@ -112,9 +113,33 @@ export function buildProps(scene, city, T) {
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
     m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
-  for (const x of [im, glow, pools]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
+  // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
+  // the lamp head, fading toward its rim (view-facing ratio) and the ground; warm sodium/LED white on 索拉纳港, the cyan/magenta
+  // lamp tints on 霓港 (denser, rain-hazed air). One instanced draw, no depth reads.
+  const coneGeo = new THREE.CylinderGeometry(0.16, 4.6, 8.6, 20, 6, true); coneGeo.translate(0, 9.0 - 4.3, 2.95);
+  const coneMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
+    uniforms: { uNight: U.uNight, uK: { value: CYBER ? 0.11 : 0.06 } },
+    vertexShader: `varying vec3 vC; varying float vH; varying vec3 vN; varying vec3 vV; varying float vD;
+      void main(){ vC = vec3(1.0, 0.66, 0.36);
+      #ifdef USE_INSTANCING_COLOR
+        vC = instanceColor;
+      #endif
+        vH = clamp((9.0 - position.y) / 8.6, 0.0, 1.0); vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+        vN = normalize(mat3(modelMatrix * instanceMatrix) * vec3(normal.x, 0.0, normal.z)); vV = cameraPosition - wp.xyz; vD = length(vV);
+        gl_Position = projectionMatrix * viewMatrix * wp; }`,
+    fragmentShader: `uniform float uNight, uK; varying vec3 vC; varying float vH; varying vec3 vN; varying vec3 vV; varying float vD;
+      void main(){ float f = abs(dot(normalize(vN), normalize(vV)));            // 1 at the cone's centre line, 0 at its silhouette
+        float a = pow(f, 2.2) * pow(1.0 - vH, 1.6) * smoothstep(1.0, 0.72, vH) * (0.35 + 0.65 * smoothstep(0.0, 0.08, vH));
+        a *= smoothstep(220.0, 60.0, vD) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
+        gl_FragColor = vec4(vC * a * uK * smoothstep(0.35, 0.9, uNight), 1.0); }`,
+  });
+  const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
+  { const cA = new THREE.Color(1.0, 0.66, 0.36), cL = new THREE.Color(1.0, 0.86, 0.68), cC = new THREE.Color(0.45, 0.82, 1.0), cM = new THREE.Color(1.0, 0.35, 0.85);
+    lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); }); }
+  for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
-  if (CYBER) out.lampCull = { im, glow, pools, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
+  if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
   out.lampGlow = glowMat; out.pools = pools;
   // a pool of real point lights that follow the nearest lamps at night
   for (let i = 0; i < 10; i++) { const pl = new THREE.PointLight(0xffa860, 0, 30, 1.6); pl.castShadow = false; scene.add(pl); out.lampLights.push(pl); }
@@ -297,8 +322,8 @@ export function buildProps(scene, city, T) {
 export function updateProps(P, cam, night, phase) {
   const n = night;
   { const L = P.lampCull, cx = cam.position.x, cz = cam.position.z; if (L && Math.hypot(cx - L.lx, cz - L.lz) > 25) { L.lx = cx; L.lz = cz; let k = 0;
-    for (const [a, b, x, z] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); k++; }
-    for (const m of [L.im, L.glow, L.pools]) { m.count = k; m.instanceMatrix.needsUpdate = true; } } }
+    for (const [a, b, x, z, ci] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); L.cones.setMatrixAt(k, a); L.cones.setColorAt(k, ci); k++; }
+    for (const m of [L.im, L.glow, L.pools, L.cones]) { m.count = k; m.instanceMatrix.needsUpdate = true; } L.cones.instanceColor.needsUpdate = true; } }
   if (CYBER) P.lampGlow.color.setRGB(0.62 * (0.4 + 7 * n), 0.88 * (0.4 + 7 * n), 1.0 * (0.4 + 7 * n)); // v4.5 cool LED street lights (cyberpunk night)
   else P.lampGlow.color.setRGB(1.0 * (0.4 + 7 * n), 0.62 * (0.4 + 7 * n), 0.32 * (0.4 + 7 * n));
   for (const m of P.signMats) m.emissiveIntensity = CYBER ? 0.05 + n * 3.5 : n * 1.5; // r6.1 map A: unlit painted letters by day, warm bulb glow at night
@@ -309,12 +334,13 @@ export function updateProps(P, cam, night, phase) {
   }
 }
 export function updateLampLights(P, lamps, pos, night) {
-  if (night < 0.05) { for (const l of P.lampLights) l.intensity = 0; return; }
+  if (night < 0.05) { for (const l of P.lampLights) l.intensity = 0; for (const v of U.uLampP.value) v.w = 0; return; }
   // nearest lamps
   const best = [];
   for (const l of lamps) { const d = (l.hx - pos.x) ** 2 + (l.hz - pos.z) ** 2; if (d > 90 * 90) continue; best.push([d, l]); }
   best.sort((a, b) => a[0] - b[0]);
-  P.lampLights.forEach((pl, i) => { const e = best[i]; if (!e) { pl.intensity = 0; return; } pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = 60 * night; if (CYBER) pl.color.setRGB(...(i % 3 === 2 ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); });
+  P.lampLights.forEach((pl, i) => { const e = best[i]; const lp = U.uLampP.value[i]; if (!e) { pl.intensity = 0; lp.w = 0; return; }
+    lp.set(e[1].hx, e[1].hy + 0.05, e[1].hz, night); U.uLampC.value[i].setRGB(...(CYBER ? (e[1].mag ? [1.0, 0.35, 0.85] : [0.5, 0.85, 1.0]) : (e[1].led ? [1.0, 0.86, 0.7] : [1.0, 0.64, 0.34]))); pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = 60 * night; if (CYBER) pl.color.setRGB(...(e[1].mag ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); else pl.color.setRGB(...(e[1].led ? [1.0, 0.82, 0.62] : [1.0, 0.62, 0.34])); });
 }
 
 // ---------- street furniture: café terraces on Tideline Drive, benches, bins, hydrants, parking spots
@@ -337,7 +363,7 @@ const TR = (x, y, z, ry = 0, s = 1) => new THREE.Matrix4().compose(new THREE.Vec
 export function buildFurniture(scene, city, G = {}) {
   const PH = { hyd: [], bin: [], cafe: [] };
   const g = new GeoBucket(); const r = mulberry(4242);
-  const add = (geo, m, c) => g.geom(geo, m, {}, c);
+  const add = (geo, m, c) => g.geom(geo, m, {}, c); const fb = new GeoBucket({ aPbr: 3 });
   const T = (x, y, z, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1));
   const umbCols = [[0.95, 0.95, 0.92], [0.9, 0.35, 0.4], [0.2, 0.55, 0.6], [0.95, 0.75, 0.45], [0.3, 0.3, 0.32]];
   const parking = [];
@@ -359,7 +385,9 @@ export function buildFurniture(scene, city, G = {}) {
   }
   // benches + bins along the promenade, hydrants + bins on island street corners
   for (let z = -LAYOUT.islandZ[1] + 12; z < LAYOUT.islandZ[1] - 8; z += 24) {
-    const x = 301.5; const BG = benchGeo(1.8); add(BG.wood, T(x, 0.15, z), [0.58, 0.42, 0.29]); add(BG.iron, T(x, 0.15, z), [0.12, 0.13, 0.13]);
+    const x = 301.5; const BG = benchGeo(1.8);
+    if (!CYBER) { fb.geom(BG.wood, T(x, 0.15, z), { aPbr: PB.wood }, [0.55, 0.40, 0.28]); fb.geom(BG.iron, T(x, 0.15, z), { aPbr: PB.paint }, [0.06, 0.09, 0.08]); } // r6.3 PBR bench (weathered teak, painted cast iron)
+    else { add(BG.wood, T(x, 0.15, z), [0.58, 0.42, 0.29]); add(BG.iron, T(x, 0.15, z), [0.12, 0.13, 0.13]); }
     city.col.add(x - 0.35, z - 0.95, x + 0.35, z + 0.95, 1, 'bench');
     if (G.ph_bin) PH.bin.push(TR(x, 0.15, z + 3, Math.PI / 2)); else { const bin = new THREE.CylinderGeometry(0.28, 0.25, 0.95, 10); add(bin, T(x, 0.62, z + 3), [0.15, 0.3, 0.25]); }
   }
@@ -373,6 +401,7 @@ export function buildFurniture(scene, city, G = {}) {
     const bin = new THREE.CylinderGeometry(0.3, 0.27, 1.0, 10); add(bin, T(bx, 0.65, bz), [0.2, 0.22, 0.24]); }
   }
   const mesh = new THREE.Mesh(g.build(), M.vcolCloth); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
+  if (fb.vc) { const fm = new THREE.Mesh(fb.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); }
   instGLB(scene, G.ph_hydrant, PH.hyd, 'hyd'); instGLB(scene, G.ph_bin, PH.bin, 'bin'); instGLB(scene, G.ph_cafe, PH.cafe, 'cafe');
   city.parking = parking;
 }

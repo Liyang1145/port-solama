@@ -100,6 +100,16 @@ function calibrate(P) {
   return cal;
 }
 
+// r6.3 fix: the shipped cast glbs carry a few corrupt keyframes (~1e35-1e38, < 1 % of values) in the face morph-weight tracks
+// (every proto; the beach-dude / f6 rigs even in Idle / Walk). One such weight flung face / eye vertices to ~1e34 m: a pale skin-
+// coloured sliver across the screen (the "seawall strip") and garbage raycasts. Weights live in [0, 1]: zero anything outside.
+const MORPH_BAD = { tracks: 0, values: 0 };
+function cleanMorphTrack(t) {
+  if (!t.name.endsWith('.morphTargetInfluences')) return; const v = t.values; let n = 0;
+  for (let i = 0; i < v.length; i++) { const x = v[i]; if (!(x >= -0.01 && x <= 1.01)) { v[i] = 0; n++; } }
+  if (n) { MORPH_BAD.tracks++; MORPH_BAD.values += n; }
+}
+export const morphFixStats = () => ({ ...MORPH_BAD });
 export function prepareCharacters(G) {
   for (const key in CAST) {
     const g = G['ch_' + key]; if (!g) continue;
@@ -112,7 +122,7 @@ export function prepareCharacters(G) {
       if (o.isSkinnedMesh && key !== 'hero') makeLods(o.geometry);
     });
     // tracks for nodes the rig lacks (props in some clips) would only spam binding warnings: keep bones / mesh weights that exist
-    const clip = (nm) => { const c = g.animations.find((a) => a.name === nm); if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => !t.name.endsWith('.scale') && names.has(t.name.split('.')[0])); return k; };
+    const clip = (nm) => { const c = g.animations.find((a) => a.name === nm); if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => !t.name.endsWith('.scale') && names.has(t.name.split('.')[0])); k.tracks.forEach(cleanMorphTrack); return k; };
     const upper = (c, nm) => { if (!c) return null; const k = c.clone(); k.tracks = k.tracks.filter((t) => UPPER_RE.test(t.name.split('.')[0])); k.name = nm; return k; };
     const clips = {}; for (const k in CLIP_NAMES) clips[k] = clip(CLIP_NAMES[k]);
     clips.idle = clips.idle || g.animations[0];

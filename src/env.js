@@ -11,6 +11,12 @@ export const U = {
   uNight: { value: 0 },
   uTime: { value: 0 },
   uWet: { value: 0 },
+  // light2 volumetric sun shafts in the height fog (far-cascade shadow map marched along the view ray)
+  uShMat: { value: new THREE.Matrix4() },
+  uShaft: { value: new THREE.Vector4(0, 0, 0, 0) },
+  // light2 wet-road lamp streaks: the 10 street lamps nearest the camera (xyz = lamp head, w = intensity) + their colours
+  uLampP: { value: Array.from({ length: 10 }, () => new THREE.Vector4()) },
+  uLampC: { value: Array.from({ length: 10 }, () => new THREE.Color()) },
 };
 
 // ---- global height-fog patch for every built-in material -------------------------------
@@ -47,6 +53,39 @@ THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
  gl_FragColor.rgb = applyHeightFog(gl_FragColor.rgb, vFogWP);
 #endif`;
 
+const L2Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+const L2_SOFT = !L2Q.has('nosoft'); // light2 bisect toggles: ?nosoft = stock PCF near cascade, ?noshaft = no volumetric shafts
+// ---- light2: contact-hardening sun shadows (PCSS-style) for the near cascade. The shadow map is a hardware-compare
+// (sampler2DShadow) texture, so the blocker search cannot read depths; instead each search tap is compared at two depth
+// offsets (2 / 9 m nearer the sun) and a layer-cake integral estimates the mean receiver->blocker distance. Penumbra
+// = sun cone (0.53 deg, widened ~2x for haze) x that distance: crisp where a pole meets the pavement, soft 20-40 cm edges
+// for a hotel cornice shadow 15 m up. Fully lit pixels exit after the 6 plain taps.
+THREE.ShaderChunk.shadowmap_pars_fragment += `
+#if defined( USE_SHADOWMAP ) && defined( SHADOWMAP_TYPE_PCF ) && NUM_DIR_LIGHT_SHADOWS > 0
+#define L2_SHADOWPARS
+float getShadowSoft( sampler2DShadow sm, float bias, vec4 sc, float worldW ) {
+  sc.xyz /= sc.w; sc.z += bias;
+  if ( sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0 ) return 1.0;
+  float phi = interleavedGradientNoise( gl_FragCoord.xy ) * PI2;
+  const float DR = 899.0;               // ortho shadow camera depth range (near 1, far 900) -> depth is linear in metres
+  float sr = 0.42 / worldW;             // search radius 42 cm
+  // light2 r2 (lighter for SwiftShader memory): 6 search taps, two depth layers (2 m / 9 m) x 6 taps, 8 filter taps = 26 taps
+  float b0 = 0.0, b1 = 0.0, b2 = 0.0;
+  for ( int i = 0; i < 6; i ++ ) b0 += 1.0 - texture( sm, vec3( sc.xy + vogelDiskSample( i, 6, phi ) * sr, sc.z ) );
+  if ( b0 < 0.01 ) return 1.0;           // fully lit: 6 taps
+  for ( int i = 0; i < 6; i ++ ) { vec2 t = sc.xy + vogelDiskSample( i, 6, phi ) * sr;
+    b1 += 1.0 - texture( sm, vec3( t, sc.z - 2.0 / DR ) );
+    b2 += 1.0 - texture( sm, vec3( t, sc.z - 9.0 / DR ) ); }
+  float p1 = b1 / b0, p2 = b2 / b0;
+  float dB = 1.0 + p1 * 4.5 + p2 * 9.0;  // E[receiver-blocker distance], m (layer-cake estimate)
+  float rW = clamp( 0.004 + dB * 0.0115, 0.0, 0.40 );
+  vec2 r = vec2( max( rW / worldW, 1.2 / ${4096}.0 ) );
+  float s = 0.0;
+  for ( int i = 0; i < 8; i ++ ) s += texture( sm, vec3( sc.xy + vogelDiskSample( i, 8, phi + 1.3 ) * r, sc.z ) );
+  return s / 8.0;
+}
+#endif`;
+
 // ---- v4.0 two-cascade sun shadows: directional light 0 = near cascade (sharp, ~1.5 cm texels), light 1 = far cascade
 // (black light, shadow map only). Fragments blend near->far at the edge of the near map. ----
 THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin.replace(
@@ -56,7 +95,7 @@ THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begi
      vec3 c0 = vDirectionalShadowCoord[ 0 ].xyz / vDirectionalShadowCoord[ 0 ].w;
      float e0 = max( abs( c0.x - 0.5 ), abs( c0.y - 0.5 ) );
      float kf = smoothstep( 0.40, 0.47, e0 );
-     float sN = kf < 0.999 ? getShadow( directionalShadowMap[ 0 ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ 0 ] ) : 1.0;
+     float sN = kf < 0.999 ? ${L2_SOFT ? 'mix( 1.0, getShadowSoft( directionalShadowMap[ 0 ], directionalLightShadow.shadowBias, vDirectionalShadowCoord[ 0 ], 64.0 ), directionalLightShadow.shadowIntensity )' : 'getShadow( directionalShadowMap[ 0 ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ 0 ] )'} : 1.0;
      float sF = kf > 0.001 ? getShadow( directionalShadowMap[ 1 ], directionalLightShadows[ 1 ].shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadows[ 1 ].shadowBias, directionalLightShadows[ 1 ].shadowRadius, vDirectionalShadowCoord[ 1 ] ) : 1.0;
      directLight.color *= mix( sN, sF, kf );
    }
@@ -183,14 +222,14 @@ export class Env {
     sun.shadow.bias = -0.00018; sun.shadow.normalBias = 0.01; // vis-sweep: 0.02 normal bias peter-panned a lit 1–3 px dashed sliver along every wall base on the shadow side sun.shadow.radius = 1.6;
     const far = mk2(this.shadowSize = 180, Q.has('lowshadow') ? 2048 : 4096, 0x000000);
     far.shadow.bias = -0.0003; far.shadow.normalBias = 0.06; far.shadow.radius = 2.5; far.intensity = 0;
-    this.sun = sun; this.sunFar = far;
+    this.sun = sun; this.sunFar = far; U.uShMat.value = far.shadow.matrix; // same object: three rewrites it every shadow pass
     this.lightDir = new THREE.Vector3(0, -1, 0);
     this.csm = { lights: [sun], lightDirection: this.lightDir, setupMaterial() {}, update: () => this.updateShadowFrustum() };
     this.hemi = new THREE.HemisphereLight(0x8899aa, 0x332822, 0); scene.add(this.hemi);
     this.hour = -1; this.lastEnvHour = -99; this.look = {};
     // r6.1 natural-light tunables (window.__G.env.tune; lab plans tweak them live)
-    this.tune = CYBER ? { albedo: 0.2, bounce: 1.0, groundTint: [0.86, 0.88, 0.92], nightGround: new THREE.Color(0.085, 0.055, 0.10), hazeSky: 0.4, hazeAmt: 0.75 }
-      : { albedo: 0.26, bounce: 1.0, groundTint: [1.0, 0.86, 0.68], nightGround: new THREE.Color(0.11, 0.075, 0.045), hazeSky: 0.45, hazeAmt: 0.72 };
+    this.tune = CYBER ? { albedo: 0.2, bounce: 1.0, groundTint: [0.86, 0.88, 0.92], nightGround: new THREE.Color(0.085, 0.055, 0.10), hazeSky: 0.4, hazeAmt: 0.75, shaft: 1.0 }
+      : { albedo: 0.26, bounce: 1.0, groundTint: [1.0, 0.86, 0.68], nightGround: new THREE.Color(0.11, 0.075, 0.045), hazeSky: 0.45, hazeAmt: 0.72, shaft: 1.0 };
   }
   sample(h) {
     let a = KEYS[0], b = KEYS[KEYS.length - 1];
@@ -259,6 +298,8 @@ export class Env {
     this.scene.fog.density = L.fogD;
     U.uFogSunCol.value.setRGB(L.fogSun[0], L.fogSun[1], L.fogSun[2]);
     U.uFogFalloff.value = 0.012;
+    { const gold = smooth(0.55, 0.06, sd.y) * (1 - night) * sunUp; // light2 shafts: strong at golden hour (A/B: x3 golden weight reads as warm aerial haze, no clipping), faint by day, none at night
+      U.uShaft.value.set(sunCol.r * L.sunI, sunCol.g * L.sunI, sunCol.b * L.sunI, (0.12 + 2.6 * gold) * (1 - night) * sunUp * this.tune.shaft * (L2Q.has('noshaft') ? 0 : 1)); }
     // directional light: sun by day, moon by night
     const ld = sd.clone();
     let li = L.sunI * sunUp;

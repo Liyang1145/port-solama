@@ -9,6 +9,7 @@ import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
+import { furnMat, PB, parkingMeter, litterBin, bollard, coverAtlas, coverQuad } from './streetkit.js';
 
 const RH = LAYOUT.roadHW;
 const STREETS_Z = ['北滨路', '珊瑚街', '鹈鹕路', '海葡萄街', '第五大道', '棕榈巷', '日落街', '灯塔路', '贝壳街']; // EW roads by index
@@ -74,11 +75,14 @@ export function addStreetTrees(city) {
 
 export function buildStreet(scene, city) {
   const r = mulberry(31337);
-  const g = new GeoBucket();          // vertex-coloured solid props
+  const g = new GeoBucket(CYBER ? {} : { aPbr: 3 }); // vertex-coloured solid props (r6.3 索拉纳港: + per-vertex roughness / metalness / wear class)
   const w = new GeoBucket();          // wires (double-sided ribbons)
   const sg = new GeoBucket();         // sign faces (atlas uv)
   const T = (x, y, z, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1));
   const add = (geo, m, c) => g.geom(geo, m, {}, c);
+  const addP = (pb) => (geo, m, c) => g.geom(geo, m, { aPbr: pb }, c); // r6.3: stamp() with a PBR class
+  const stamp3 = (parts, m) => { for (const [geo, c, pb] of parts) g.geom(geo, m, { aPbr: pb }, c); };
+  const cov = new GeoBucket(); const covers = (i, w, d, m) => cov.geom(coverQuad(i, w, d), m); // r6.3 cast-iron floor covers
   const occupied = (x, z, d) => city.palms.some((p) => Math.abs(p.x - x) < d && Math.abs(p.z - z) < d) || city.lamps.some((l) => Math.abs(l.x - x) < d && Math.abs(l.z - z) < d) || city.trees.some((t) => Math.abs(t.x - x) < d && Math.abs(t.z - z) < d);
   const signFace = (cellU0, cellV0, cellU1, cellV1, x, y, z, ry, wdt, hgt) => {
     const geo = new THREE.PlaneGeometry(wdt, hgt); const uv = geo.attributes.uv;
@@ -123,7 +127,7 @@ export function buildStreet(scene, city) {
     for (const p of L.pts) {
       const gh = city.groundH(p.x, p.z); const H = 10.5 + r() * 1.2; const c = woodC[Math.floor(r() * woodC.length)];
       // v4.2 detailed wooden pole (steps, tag, braces, ribbed insulators, transformer) — src/detail.js
-      const pm = T(p.x, gh, p.z, ry); stamp(add, woodPole(H, r, c, { transformer: r() < 0.3 }), pm);
+      const pm = T(p.x, gh, p.z, ry); stamp(CYBER ? add : addP(PB.wood), woodPole(H, r, c, { transformer: r() < 0.3 }), pm);
       const ins = [];
       for (const k of [-1.05, 0, 1.05]) ins.push(new THREE.Vector3(k, H - 0.45 + 0.3, 0.15).applyMatrix4(pm));
       ins.push(new THREE.Vector3(0.2, H - 2.6, 0.18).applyMatrix4(pm)); ins.push(new THREE.Vector3(-0.2, H - 3.1, 0.18).applyMatrix4(pm));
@@ -165,7 +169,7 @@ export function buildStreet(scene, city) {
   for (const s of city.segs) if (s.axis === 'x' && s.c === 0 && s.a0 < -600 && s.a1 > -1000) shelters.push({ x: (s.a0 + s.a1) / 2, z: RH + 2.2, ry: Math.PI });
   for (const sh of shelters) {
     const gh = city.groundH(sh.x, sh.z); const m = T(sh.x, gh, sh.z, sh.ry);
-    stamp(add, busShelter(), m); // v4.2 detailed shelter (curved roof, framed glazing, slatted bench, timetable case, bin)
+    stamp(CYBER ? add : addP(PB.paint), busShelter(), m); // v4.2 detailed shelter (curved roof, framed glazing, slatted bench, timetable case, bin)
     const ad = cellUV(8 + Math.floor(r() * 8)); const lm = new THREE.Vector3(sh.x, gh + 1.3, sh.z);
     const fm = new THREE.Matrix4().multiplyMatrices(m, T(2.0, 1.3, 0, Math.PI / 2)); const e = new THREE.Vector3(); e.setFromMatrixPosition(fm);
     signFace(ad[0], ad[1], ad[2], ad[3], e.x, e.y, e.z, sh.ry + Math.PI / 2, 1.1, 1.6); void lm;
@@ -183,26 +187,37 @@ export function buildStreet(scene, city) {
       const bx = it.x + sx * (RH + 3.0), bz = it.z + sz * (RH + 1.6);
       if (occupied(bx, bz, 1.2)) continue;
       const n = 1 + Math.floor(r() * 3);
-      for (let k = 0; k < n; k++) { const c = boxCols[Math.floor(r() * boxCols.length)]; stamp(add, newsBox(c), T(bx + k * 0.52 * sz, 0.15, bz, sz > 0 ? 0 : Math.PI)); }
+      for (let k = 0; k < n; k++) { const c = boxCols[Math.floor(r() * boxCols.length)]; stamp(CYBER ? add : addP(PB.paint), newsBox(c), T(bx + k * 0.52 * sz, 0.15, bz, sz > 0 ? 0 : Math.PI)); }
       city.col.add(bx - 0.3, bz - 0.3, bx + 1.6, bz + 0.3, 1.1, 'nbox');
     }
     if (r() < 0.7) { // utility cabinet
       const ux = it.x - (RH + 3.4), uz = it.z + (RH + 4.5);
-      if (!occupied(ux, uz, 1.2)) { stamp(add, cabinet(island ? [0.48, 0.55, 0.5] : [0.55, 0.56, 0.55]), T(ux, 0.15, uz, Math.PI / 2)); city.col.add(ux - 0.45, uz - 0.6, ux + 0.45, uz + 0.6, 1.4, 'cab'); }
+      if (!occupied(ux, uz, 1.2)) { stamp(CYBER ? add : addP(PB.paintMatte), cabinet(island ? [0.48, 0.55, 0.5] : [0.55, 0.56, 0.55]), T(ux, 0.15, uz, Math.PI / 2)); city.col.add(ux - 0.45, uz - 0.6, ux + 0.45, uz + 0.6, 1.4, 'cab'); }
     }
     // bins (green island / black downtown)
     const tx = it.x + (RH + 1.2), tz = it.z - (RH + 3.2);
-    if (!occupied(tx, tz, 1.0)) { const bin = new THREE.CylinderGeometry(0.3, 0.27, 0.95, 10); add(bin, T(tx, 0.62, tz), island ? [0.14, 0.32, 0.22] : [0.12, 0.12, 0.13]); const lid = new THREE.CylinderGeometry(0.32, 0.32, 0.06, 10); add(lid, T(tx, 1.12, tz), [0.1, 0.1, 0.1]); }
+    if (!occupied(tx, tz, 1.0)) { if (!CYBER) stamp3(litterBin(island ? [0.10, 0.26, 0.17] : [0.08, 0.085, 0.09]), T(tx, 0.15, tz, r() * 6.28)); else { const bin = new THREE.CylinderGeometry(0.3, 0.27, 0.95, 10); add(bin, T(tx, 0.62, tz), island ? [0.14, 0.32, 0.22] : [0.12, 0.12, 0.13]); const lid = new THREE.CylinderGeometry(0.32, 0.32, 0.06, 10); add(lid, T(tx, 1.12, tz), [0.1, 0.1, 0.1]); } }
+    // r6.3 sidewalk utility lids (telecom / water) near the corner
+    if (!CYBER && r() < 0.6) { const lx = it.x - (RH + 1.4), lz = it.z - (RH + 2.0 + r() * 3); if (city.groundH(lx, lz) > 0.1) covers(3, 0.62, 0.9, T(lx, 0.152, lz, r() < 0.5 ? 0 : Math.PI / 2)); }
   }
   for (const s of city.segs) { // parking meters next to the beachfront parking lane
     if (!(s.axis === 'z' && s.c === 290)) continue;
-    for (let z = s.a0 + 13.4; z < s.a1 - 10; z += 6.8) { const x = 282.3; if (occupied(x, z, 0.8)) continue; const p = new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6); add(p, T(x, 0.15 + 0.55, z), [0.3, 0.3, 0.32]); const hd = new THREE.CylinderGeometry(0.1, 0.1, 0.26, 14); hd.scale(1, 1, 0.75); add(hd, T(x, 0.15 + 1.22, z), [0.25, 0.27, 0.3]);
+    let mk = 0;
+    for (let z = s.a0 + 13.4; z < s.a1 - 10; z += 6.8) { const x = 282.3; if (occupied(x, z, 0.8)) continue;
+      if (!CYBER) { // r6.3 smart meters: twin heads on a yoke every other bay (one per parking space), painted housings, galvanised posts
+        if (mk++ % 2 === 1) continue; const body = [[0.10, 0.12, 0.16], [0.13, 0.13, 0.14], [0.08, 0.2, 0.16]][Math.floor(r() * 3)];
+        stamp3(parkingMeter(true, body), T(x, 0.15, z + 3.4, Math.PI / 2)); city.col.add(x - 0.12, z + 3.0, x + 0.12, z + 3.8, 1.5, 'meter'); continue; }
+      const p = new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6); add(p, T(x, 0.15 + 0.55, z), [0.3, 0.3, 0.32]); const hd = new THREE.CylinderGeometry(0.1, 0.1, 0.26, 14); hd.scale(1, 1, 0.75); add(hd, T(x, 0.15 + 1.22, z), [0.25, 0.27, 0.3]);
       const dome = new THREE.SphereGeometry(0.1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2); dome.scale(1, 0.8, 0.75); add(dome, T(x, 0.15 + 1.35, z), [0.25, 0.27, 0.3]);
       const win = new THREE.CylinderGeometry(0.07, 0.07, 0.02, 12); win.rotateZ(Math.PI / 2); add(win, T(x - 0.07, 0.15 + 1.3, z), [0.55, 0.62, 0.62]);
       const collar = new THREE.CylinderGeometry(0.07, 0.05, 0.08, 10); add(collar, T(x, 0.15 + 1.07, z), [0.2, 0.2, 0.22]); }
   }
   // bollards at the promenade crossings
-  for (const z of LAYOUT.islandEW) for (let k = -3; k <= 3; k++) { const x = 299.4, zz = z + k * 1.6 ; if (Math.abs(k) < 1) continue; const b = new THREE.CylinderGeometry(0.11, 0.12, 0.9, 8); add(b, T(x, 0.6, zz), [0.92, 0.92, 0.9]); }
+  for (const z of LAYOUT.islandEW) for (let k = -3; k <= 3; k++) { const x = 299.4, zz = z + k * 1.6 ; if (Math.abs(k) < 1) continue;
+    if (!CYBER) { stamp3(bollard(), T(x, city.groundH(x, zz), zz, r() * 6.28)); continue; }
+    const b = new THREE.CylinderGeometry(0.11, 0.12, 0.9, 8); add(b, T(x, 0.6, zz), [0.92, 0.92, 0.9]); }
+  // r6.3 tree grates around the sidewalk street trees
+  if (!CYBER) for (const t of city.trees) if (t.street && city.groundH(t.x, t.z) > 0.1) covers(1, 1.3, 1.3, T(t.x, city.groundH(t.x, t.z) + 0.004, t.z));
 
   // ---------------- road decals: storm drains at the curb, manholes in lanes
   const dec = new GeoBucket();
@@ -212,16 +227,24 @@ export function buildStreet(scene, city) {
       for (const side of [-1, 1]) {
         const off = side * (RH - 0.35);
         const x = s.axis === 'z' ? s.c + off : a, z = s.axis === 'z' ? a : s.c + off;
+        if (!CYBER) { // r6.3 cast-iron grate in the gutter + the dark curb-inlet mouth in the kerb face behind it
+          covers(2, 0.62, 1.0, T(x, 0.013, z, s.axis === 'z' ? 0 : Math.PI / 2));
+          const kx = s.axis === 'z' ? s.c + side * (RH - 0.006) : a, kz = s.axis === 'z' ? a : s.c + side * (RH - 0.006);
+          const mouth = new THREE.PlaneGeometry(1.15, 0.075); dec.geom(mouth, T(kx, 0.07, kz, s.axis === 'z' ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : (side > 0 ? Math.PI : 0)), {}, [0.015, 0.015, 0.015]);
+          continue; }
         const q = new THREE.PlaneGeometry(s.axis === 'z' ? 0.55 : 1.0, s.axis === 'z' ? 1.0 : 0.55); q.rotateX(-Math.PI / 2); dec.geom(q, T(x, 0.012, z), {}, [0.06, 0.06, 0.06]);
         const rim = new THREE.PlaneGeometry(s.axis === 'z' ? 0.75 : 1.2, s.axis === 'z' ? 1.2 : 0.75); rim.rotateX(-Math.PI / 2); dec.geom(rim, T(x, 0.009, z), {}, [0.38, 0.37, 0.35]);
       }
-      if (r() < 0.6) { const off = (r() < 0.5 ? -1 : 1) * 3.4; const x = s.axis === 'z' ? s.c + off : a + 9, z = s.axis === 'z' ? a + 9 : s.c + off; const c = new THREE.CircleGeometry(0.42, 14); c.rotateX(-Math.PI / 2); dec.geom(c, T(x, 0.011, z), {}, [0.16, 0.15, 0.14]); }
+      if (r() < 0.6) { const off = (r() < 0.5 ? -1 : 1) * 3.4; const x = s.axis === 'z' ? s.c + off : a + 9, z = s.axis === 'z' ? a + 9 : s.c + off;
+        if (!CYBER) { const q = new THREE.CircleGeometry(0.4, 20); q.rotateX(-Math.PI / 2); const uv = q.attributes.uv; for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) / 4); cov.geom(q, T(x, 0.011, z, r() * 6.28)); continue; }
+        const c = new THREE.CircleGeometry(0.42, 14); c.rotateX(-Math.PI / 2); dec.geom(c, T(x, 0.011, z), {}, [0.16, 0.15, 0.14]); }
     }
   }
   const decMat = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.4, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), 'decal');
   const decMesh = new THREE.Mesh(dec.build(), decMat); decMesh.receiveShadow = true; scene.add(decMesh);
 
-  const solid = new THREE.Mesh(g.build(), M.vcol); solid.castShadow = true; solid.receiveShadow = true; scene.add(solid);
+  if (cov.vc) { const cm = new THREE.Mesh(cov.build(), coverAtlas()); cm.receiveShadow = true; scene.add(cm); }
+  const solid = new THREE.Mesh(g.build(), CYBER ? M.vcol : furnMat()); solid.castShadow = true; solid.receiveShadow = true; scene.add(solid);
   const wireMat = prep(new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.6, metalness: 0.3, side: THREE.DoubleSide }), 'wire');
   const wires = new THREE.Mesh(w.build(), wireMat); wires.castShadow = false; scene.add(wires);
   const atlas = signAtlas();

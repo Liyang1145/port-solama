@@ -1,0 +1,12 @@
+{
+ "query": "map=gta&hour=14&mb=0&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {"name": "a_day", "js": "__G.setHour(11.0); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"},
+  {"name": "a_golden", "js": "__G.setHour(18.45); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"},
+  {"name": "a_golden_back", "js": "__G.setHour(18.45); const g=__G.game; g.tp(282,20,Math.PI); __G.step(4); const c=__G.camera; c.position.set(292,2.2,-6); c.lookAt(240,6,10); c.updateMatrixWorld(); 0"},
+  {"name": "a_night", "js": "__G.setHour(21.6); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.25; g.cam.pitch=-0.06; __G.step(20); 0"},
+  {"name": "a_car", "js": "__G.setHour(16.2); const g=__G.game; g.tp(275,40,Math.PI); const V=g.traffic.cars[0].constructor; const v=new V(__G.scene,'sedan',0x7a1418); v.place(283.5,30,0.4); v.ai=null; g.traffic.cars.push(v); __G.step(6); const c=__G.camera; c.position.set(288.5,1.35,35.5); c.lookAt(283.5,0.8,30.0); c.updateMatrixWorld(); 0"},
+  {"name": "a_aerial", "js": "__G.setHour(15.6); const g=__G.game; g.tp(-430,-150,0); __G.step(2); const c=__G.camera; c.position.set(-150,430,560); c.lookAt(-600,0,-60); c.updateMatrixWorld(); 0"}
+ ]
+}

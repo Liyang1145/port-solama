@@ -8,3 +8,6 @@ shots/
 release/
 RUNNING.lock
 *.log
+work/
+dist_base/
+node_modules

@@ -28,9 +28,11 @@ const LightFXShader = {
     tDiffuse: { value: null }, tDepth: { value: null }, tNormal: { value: null }, uProjInv: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() },
     uNear: { value: 0.1 }, uFar: { value: 4000 }, uSunV: { value: new THREE.Vector3(0, 1, 0) }, uSunUV: { value: new THREE.Vector2(0.5, 0.5) },
     uSunOn: { value: 0 }, uRayCol: { value: new THREE.Color(1, 0.7, 0.4) }, uContact: { value: 1 }, uRes: { value: new THREE.Vector2(1280, 720) },
+    tShadow: { value: null }, uShMat: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uSunW: { value: new THREE.Vector3(0, 1, 0) }, uShaft: { value: new THREE.Vector4() },
   },
   vertexShader: VS,
-  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse, tNormal; uniform vec3 uSunV; uniform vec2 uSunUV; uniform float uSunOn, uContact; uniform vec3 uRayCol; uniform vec2 uRes;
+  fragmentShader: `precision highp sampler2DShadow; varying vec2 vUv; uniform sampler2D tDiffuse, tNormal; uniform vec3 uSunV; uniform vec2 uSunUV; uniform float uSunOn, uContact; uniform vec3 uRayCol; uniform vec2 uRes;
+  uniform sampler2DShadow tShadow; uniform mat4 uShMat, uCamWorld; uniform vec3 uSunW; uniform vec4 uShaft;
   ${DEPTH_FN}
   void main(){
     vec4 base = texture2D(tDiffuse, vUv); vec3 col = base.rgb;
@@ -74,6 +76,23 @@ const LightFXShader = {
       acc /= 36.0;
       float fall = smoothstep(1.0, 0.0, length(dl * vec2(uRes.x / uRes.y, 1.0)) * 0.9);
       col += uRayCol * acc * fall * uSunOn;
+    }
+    // --- light2 volumetric sun shafts: 12 jittered taps of the FAR shadow cascade along the view ray (<= 260 m) integrate
+    // in-scattered sun light through a low ground haze (scale height 45 m) with a forward Henyey-Greenstein phase -> at golden
+    // hour the air between buildings glows where the sun gets through and stays clear in a block's shadow (shafts down streets,
+    // past palm crowns). One screen pass instead of a loop in every material shader.
+    if (uShaft.w > 0.001) {
+      vec3 vpS = viewPos(vUv, min(d, 0.999999)); vec3 ro = (uCamWorld * vec4(0.0, 0.0, 0.0, 1.0)).xyz; vec3 wpS = (uCamWorld * vec4(vpS, 1.0)).xyz;
+      vec3 rd = wpS - ro; float L = min(length(rd), 260.0); rd = normalize(rd);
+      float j = ign(gl_FragCoord.xy + 31.0); float ds = L / 12.0; float acc = 0.0;
+      for (int i = 0; i < 12; i++) {
+        vec3 p = ro + rd * ((float(i) + j) * ds);
+        vec4 sc = uShMat * vec4(p, 1.0); sc.xyz /= sc.w;
+        float v = (sc.x > 0.0 && sc.x < 1.0 && sc.y > 0.0 && sc.y < 1.0 && sc.z < 1.0) ? texture(tShadow, vec3(sc.xy, sc.z - 0.0004)) : 1.0;
+        acc += v * exp(-max(p.y, 0.0) / 45.0);
+      }
+      float cs = dot(rd, uSunW); float g = 0.62; float hg = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cs, 1.5) * 0.25 + 0.12;
+      col += uShaft.rgb * (acc * ds * 0.0012 * hg * uShaft.w);
     }
     gl_FragColor = vec4(col, base.a);
   }`,
@@ -221,16 +240,32 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       fragmentShader: `uniform sampler2D map; uniform float aT; varying vec2 vUv; varying vec3 vN;
         void main(){ if (texture2D(map, vUv).a < aT) discard; vec3 n = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0); gl_FragColor = vec4(n * 0.5 + 0.5, 1.0); }` });
     c.allowOverride = false; cutN.set(m, c); return c; };
-  const swp = [];
+  const swp = [], hid = [];
   const ro = gtao._renderOverride.bind(gtao);
   gtao._renderOverride = (r, mat, tgt, cc, ca) => {
-    if (mat === gtao.normalMaterial) scene.traverseVisible((o) => { const m = o.material; if (!o.isMesh || !m || Array.isArray(m) || !(m.alphaTest > 0) || !m.map) return;
+    if (mat === gtao.normalMaterial) scene.traverseVisible((o) => { const m = o.material; if (!(o.isMesh || o.isPoints || o.isLine) || !m) return;
+      // light2: see-through / additive / non-depth-writing surfaces (light cones, light pools, blob shadows, glass, decals,
+      // water) must not enter the AO G-buffer: drawn there as solid quads they occluded everything behind them -> GTAO
+      // painted huge black slabs over facades and streets (default ?ao on), and contact shadows / god rays hit them too.
+      const m0 = Array.isArray(m) ? m[0] : m;
+      if (!o.isMesh || m0.depthWrite === false || m0.colorWrite === false || m0.blending === THREE.AdditiveBlending || (m0.transparent && m0.opacity < 0.75 && !(m0.alphaTest > 0))) { hid.push(o); o.visible = false; return; }
+      if (Array.isArray(m) || !(m.alphaTest > 0) || !m.map) return;
       const c = cutMat(m); if (m.map.matrixAutoUpdate) m.map.updateMatrix(); c.uniforms.uvT.value.copy(m.map.matrix); c.uniforms.map.value = m.map; swp.push(o, m); o.material = c; });
-    try { ro(r, mat, tgt, cc, ca); } finally { for (let i = 0; i < swp.length; i += 2) swp[i].material = swp[i + 1]; swp.length = 0; }
+    try { ro(r, mat, tgt, cc, ca); } finally { for (let i = 0; i < swp.length; i += 2) swp[i].material = swp[i + 1]; swp.length = 0; for (const o of hid) o.visible = true; hid.length = 0; }
   };
   const PP = new URLSearchParams(location.search).get('pp') || 'cbmgf';
   const lfx = new ShaderPass(LightFXShader); lfx.uniforms.tDepth.value = gtao.depthTexture; lfx.uniforms.tNormal.value = gtao.normalTexture;
   if (PP.includes('c')) composer.addPass(lfx);
+  { // light2: a valid compare-mode depth texture for tShadow until the far cascade's shadow map exists
+    const drt = new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) }); drt.depthTexture.compareFunction = THREE.LessEqualCompare;
+    drt.depthTexture.minFilter = drt.depthTexture.magFilter = THREE.LinearFilter;
+    const keep = renderer.getRenderTarget(); renderer.setRenderTarget(drt); renderer.clear(); renderer.setRenderTarget(keep);
+    lfx.uniforms.tShadow.value = drt.depthTexture;
+    const r0 = lfx.render.bind(lfx);
+    lfx.render = (...a) => { const L = P.shaftLight; const t = L && L.shadow.map && L.shadow.map.depthTexture;
+      if (t && t.compareFunction) { lfx.uniforms.tShadow.value = t; lfx.uniforms.uShMat.value.copy(L.shadow.matrix); } else lfx.uniforms.uShaft.value.w = 0;
+      r0(...a); };
+  }
   const bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.32, 0.6, 1.6); if (PP.includes('b')) composer.addPass(bloom);
   const lens = new ShaderPass(LensShader); lens.uniforms.tDepth.value = gtao.depthTexture; if (PP.includes('m')) composer.addPass(lens);
   const out = new OutputPass(); composer.addPass(out);
@@ -253,6 +288,7 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       lfx.uniforms.uSunUV.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
       lfx.uniforms.uSunOn.value = vis * (1 - night) * (0.22 + gold * 0.5); // r6.1 softer shafts (backlit golden hour was a white wash) // v4.4 stronger golden-hour shafts
       lfx.uniforms.uRayCol.value.copy(sunCol).multiplyScalar(0.02);
+      lfx.uniforms.uCamWorld.value.copy(camera.matrixWorld); lfx.uniforms.uSunW.value.copy(sunDir); if (P.shaft) lfx.uniforms.uShaft.value.copy(P.shaft);
       lens.uniforms.uCamWorld.value.copy(camera.matrixWorld); lens.uniforms.uPrevVP.value.copy(P.prevVP);
       lens.uniforms.uBlur.value = P.blur; lens.uniforms.uDof.value = P.dof; lens.uniforms.uFocus.value = P.focus; lens.uniforms.uAperture.value = P.aperture;
       // r5.0: the bloom threshold is in scene-linear HDR, but day exposure is ~0.5 -> sunlit sand/grass (~3-7) crossed 1.3 and the

@@ -43,3 +43,7 @@ r6.1 adds **no new third-party assets**: every new texture (broad-leaf blade, le
 
 | r6.2: car interiors (seats, dash, gauges, steering wheel, door cards, headliner) + seated drivers (src/carinterior.js, seating.js); map A building detail layer (src/maps/gta/bldgdetail.js, archdetail.js); map B megatower / tenement / shop street / harbor / skyway kit (src/maps/cyber/arch.js, bldglayer.js, kit.js); procedural reload / melee poses (src/actionpose.js); road routing (src/roadroute.js) | procedural geometry / shaders | original | — |
 | r6.2 cast expanded 10 → 17 (`ch_m5–m8`, `ch_f5–f6`, `ch_cop2`): ara3d / MakeHuman presets (CC0 bodies, CMU motion-capture clips, MIT generator), exported by tools/make_cast.sh; textures resized (tools/texcap.py) and all-zero morph-target data removed (tools/stripmorph.cjs) for memory — no change to licence | ara3d (npm `ara3d`) / MakeHuman / CMU MoCap | CC0 / MIT | — |
+
+## r6.3 street pass (map A 索拉纳港)
+- `src/streetkit.js`: smart parking meters, slatted litter bins, steel bollards, cast-iron floor-cover atlas (manhole / tree grate / curb-inlet grate / utility lid, canvas-drawn, invented "索拉纳港 PORT SOLANA" casting) and the street-furniture PBR/grime shader — original procedural work, no external assets.
+- `src/mats.js` SHOPROOM: ray-traced storefront interiors (grocery / pharmacy / electronics / café / boutique / office-bank, people cut-outs) — original procedural shader.

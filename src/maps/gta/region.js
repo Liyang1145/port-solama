@@ -80,15 +80,25 @@ export function buildRegion(ctx, H) {
     }
   }
   // ------------------------------------------------------------------ mainland ground + bay park + seawall ----
-  const ZE = 1500, XW = -2700; const shoreZs = []; for (let z = -ZE; z <= ZE; z += 10) shoreZs.push(z);
+  const ZE = 3000, XW = -2700; const shoreZs = []; for (let z = -ZE; z <= ZE; z += 10) shoreZs.push(z); // r6.3: seawall runs the whole fabric coast (was ±1500)
+  // r6.3 (ground_a) finger canals of the fabric's waterfront cells: notches in the ground polygon (water shows), seawall gaps, bank walls
+  const canals = (H.fab && H.fab.canals) || [];
+  const ccut = canals.map((c) => { const n = [-c.d[1], c.d[0]]; const L0 = Math.hypot(c.B[0] - c.A[0], c.B[1] - c.A[1]);
+    const E = (o) => { const P0 = [c.A[0] + n[0] * o, c.A[1] + n[1] * o]; let t = L0; for (let k = 0; k < 5; k++) { const x = P0[0] + c.d[0] * t, z = P0[1] + c.d[1] * t; t += (shoreX(z) - x) / (c.d[0] || 1); } return { w: P0, s: [P0[0] + c.d[0] * t, P0[1] + c.d[1] * t] }; };
+    const e1 = E(c.hw), e2 = E(-c.hw); return e1.s[1] > e2.s[1] ? { hi: e1, lo: e2 } : { hi: e2, lo: e1 }; });
+  const shoreRun = (z0, z1) => { const out = []; const used = new Set(); for (let z = z0; z >= z1; z -= 10) {
+      const k = ccut.findIndex((q, i) => !used.has(i) && q.hi.s[1] <= z0 && q.lo.s[1] >= z1 && z < q.hi.s[1]);
+      if (k >= 0) { const q = ccut[k]; used.add(k); out.push(q.hi.s, q.hi.w, q.lo.w, q.lo.s); }
+      if (ccut.some((q) => z <= q.hi.s[1] + 0.01 && z >= q.lo.s[1] - 0.01)) continue; out.push([shoreX(z), z]); } return out; };
+  const inMouth = (za, zb) => ccut.some((q) => zb > q.lo.s[1] - 1 && za < q.hi.s[1] + 1);
   {
     const district = [[-1380, -480], [-1380, 480]]; for (let z = 480; z >= -480; z -= 10) district.push([shoreX(z), z]);
     polyCap(W.b('mgroundC', -1100, 0), wind(district), -0.06);
     // vis-sweep: the ground slab used to stop at x=-2700 / z=±1500 -> a hard rectangular map edge in every aerial. It now runs
     // out to the far fade (env.js / water.js fade everything into the horizon haze at 2.3–4 km), the coast following shoreX.
     const XG = -4600, ZG = 4600;
-    const north = [[XG, 480], [XG, ZG]]; for (let z = ZG; z >= 480; z -= 10) north.push([shoreX(z), z]);
-    const south = [[XG, -ZG], [XG, -480]]; for (let z = -480; z >= -ZG; z -= 10) south.push([shoreX(z), z]);
+    const north = [[XG, 480], [XG, ZG], ...shoreRun(ZG, 480)];
+    const south = [[XG, -ZG], [XG, -480], ...shoreRun(-480, -ZG)];
     polyCap(W.b('mgroundG', -1500, 900), wind(north), -0.06); polyCap(W.b('mgroundG', -1500, -900), wind(south), -0.06);
     polyCap(W.b('mgroundG', -2000, 0), wind([[XG, -480], [XG, 480], [-1380, 480], [-1380, -480]]), -0.06);
     // bay park strip: from the outer sidewalk edge of 湾岸大道 to the seawall, raised 0.15, grass + palms
@@ -105,7 +115,7 @@ export function buildRegion(ctx, H) {
     // seawall with coping + railing (gap where the causeway lands)
     const cw = W.b('concrete', -900, 0), m = W.b('metal', -900, 0);
     for (let i = 0; i < shoreZs.length - 1; i++) {
-      const za = shoreZs[i], zb = shoreZs[i + 1]; if (zb > zc - 22 && za < zc + 22) continue;
+      const za = shoreZs[i], zb = shoreZs[i + 1]; if (zb > zc - 22 && za < zc + 22) continue; if (inMouth(za, zb)) continue;
       const a = [shoreX(za), za], b = [shoreX(zb), zb];
       wallQ(cw, a, b, -3.2, 0.0, -3.2, 0.0, 1, 0);
       box(cw, Math.min(a[0], b[0]) - 0.1, 0.0, za, Math.max(a[0], b[0]) + 0.35, 0.3, zb, {}, null);
@@ -113,6 +123,12 @@ export function buildRegion(ctx, H) {
         const cx = (a[0] + b[0]) / 2 - 0.3, cz = (za + zb) / 2; const dx = b[0] - a[0], dz = zb - za, l = Math.hypot(dx, dz); col.addOBB(cx, cz, dx / l, dz / l, l / 2 + 0.2, 0.4, 1.2, 'rail'); }
     }
   }
+  // canal banks: bulkhead walls + coping on both sides and across the head; short seawall stubs to the mouths
+  { const cw = W.b('concrete', -900, 2000);
+    for (const q of ccut) { const mc = [(q.hi.w[0] + q.lo.w[0] + q.hi.s[0] + q.lo.s[0]) / 4, (q.hi.w[1] + q.lo.w[1] + q.hi.s[1] + q.lo.s[1]) / 4];
+      for (const e of [q.hi, q.lo]) { const dx = e.s[0] - e.w[0], dz = e.s[1] - e.w[1]; const l = Math.hypot(dx, dz); const c = [(e.w[0] + e.s[0]) / 2, (e.w[1] + e.s[1]) / 2];
+        wallQ(cw, e.w, e.s, -3.2, 0.12, -3.2, 0.12, mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail'); }
+      wallQ(cw, q.hi.w, q.lo.w, -3.2, 0.12, -3.2, 0.12, 1, 0); } }
   // ------------------------------------------------------------------ causeway: berm, rock revetment, guard rails, bridge ----
   {
     const R = sun; const sEnd = D.sunShoreS + 6; const g = W.b('grass', -400, 0), rk = W.b('vcol', -400, 0), m = W.b('metal', -400, 0), cn = W.b('concrete', -400, 0);
@@ -286,6 +302,7 @@ export function buildRegion(ctx, H) {
       return undefined;
     }
     if (x <= shoreX(z) - 1) { // mainland
+      if (H.inCanal && Math.abs(z) > 1000 && H.inCanal(H.fab, x, z)) return undefined; // r6.3 finger canals
       if (Math.abs(z) > 520 || x < -1420) return 0;
       nearestRoad(x, z, nr); const r = nr.road; if (r) { const ad = nr.dist - r.hw; const h = r.h(nr.s, x); if (ad < 0) return h; if (ad < SW) return h + 0.15; }
       const sh = D.byId.shore; if (x > -975) { sh.path.nearest(x, z, nq); if (nq.dist > sh.hw + SW && x > sh.path.at(nq.s).x && Math.abs(z - 16) > 14) return 0.15; } // bay park

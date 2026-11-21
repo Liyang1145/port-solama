@@ -254,3 +254,8 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - **回归**（tools/regress_fresh.cjs，每项新页面；最终资源再跑一遍）：A `plans/r5_regress.json` 11/11、B `plans/r6_cyber_smoke.json` 7/7，0 PAGEERROR（shots/r62/regress_gta、smoke_cyber）。A：代客泊车付款 + 通缉失败分支、6 武器、四任务、手机含「切换地图」、3 星 4 警车 + 路障 + 直升机、驾驶 79 km/h、r5_drive 到 x≈−1050 车况 56、r5_world 15 车 15 人、rifle aimW=1。B：堤道最高 143 km/h 到 (−1535,−265)，−675 处追尾车况 40（bugs #8 同类，测试司机不避车）；6 武器；四任务；15/16 车在路网、0 落水；3 星在场警车 1（r6.1 为 0）。
 - **截图**（960×540，lowshadow&probe=0 + CAP=canvas，均 read_file 检查）：shots/r62/gta/a_street_day.png、a_aerial.png、a_night.png、car_driver_side.png（司机坐姿双手握方向盘）、car_glass.png（透过车窗看到座椅/仪表/司机）；shots/r62/cyber/b_night_street.png、b_megast_day.png（X 斜撑巨塔、天桥）、b_tenement_day.png（空调外机、笼式阳台、街上电缆束、竖向招牌）。A 图夜景无霓虹（饱和品红/青像素扫描：街景/航拍 0，夜景只有一块彩绘店招的红字，不是灯管）。
 - **未做/遗留**：见 ROADMAP「r6.2 之后」。
+
+## r6.3（2026-11-21 14:3x–15:2x CST）整合 light2 + ground_a + street_a
+- light2：两图光影（AO 黑斑消除、接触硬化软阴影、金色时刻光柱、B 湿路灯光）；ground_a：A 图大陆城市肌理（路网/低层楼/塔楼吸附街区）；street_a：橱窗室内/街具/站姿。三补丁无冲突、build 通过。
+- 回归：B 7/7、A 10/11 + 0 PAGEERROR；missions 项失败是测试写死送货坐标（RNG 序列变化后抽到 x=-1057 的餐厅），已改测试为按 dest 坐标放车，非游戏 bug（未整套重跑）。
+- 截图 shots/r63（A 街景/金色/夜景/航拍/车、B 夜街）已查：A 无霓虹、无全黑。B 其余 3 张未等跑完。model_b2 尚未 READY。

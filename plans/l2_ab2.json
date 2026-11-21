@@ -1,0 +1,22 @@
+{
+ "query": "map=gta&hour=14&mb=0&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "a_day",
+   "js": "__G.setHour(11.0); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"
+  },
+  {
+   "name": "a_golden_s0",
+   "js": "__G.env.tune.shaft=0; __G.setHour(18.45); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"
+  },
+  {
+   "name": "a_golden_s3",
+   "js": "__G.env.tune.shaft=3; __G.setHour(18.45); const g=__G.game; g.tp(280.5,60,Math.PI); g.cam.yaw=0.35; g.cam.pitch=-0.04; __G.step(20); 0"
+  },
+  {
+   "name": "a_golden_back_s3",
+   "js": "__G.env.tune.shaft=3; __G.setHour(18.45); const g=__G.game; g.tp(282,20,Math.PI); __G.step(4); const c=__G.camera; c.position.set(292,2.2,-6); c.lookAt(240,6,10); c.updateMatrixWorld(); 0"
+  }
+ ]
+}

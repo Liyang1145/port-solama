@@ -56,9 +56,15 @@ export class ActionPose {
       twist(B.sp, 0.12 * inn);
     } else if (w && !w.melee && !st.aiming) {
       // low ready: arm a touch out from the hip and forward, so the weapon clears the thigh in the over-the-shoulder view
-      did = true; abduct(B.rA, 0.22, 1); lift(B.rA, w.id === 'rifle' || w.id === 'shotgun' || w.id === 'smg' ? 0.35 : 0.2);
-      if (w.id === 'rifle' || w.id === 'shotgun' || w.id === 'smg') { lift(B.lA, 0.45); twist(B.lA, -0.35); lift(B.lF, 0.9); }
-    } else if (w && w.id === 'bat' && !st.aiming) { did = true; abduct(B.rA, 0.15, 1); }
+      did = true;
+      if (w.id === 'rifle' || w.id === 'shotgun' || w.id === 'smg') { abduct(B.rA, 0.22, 1); lift(B.rA, 0.35); lift(B.lA, 0.45); twist(B.lA, -0.35); lift(B.lF, 0.9); }
+      else { // r6.3 pistol low ready: upper arm hangs close to the body (was abducted 0.22 rad -> arm stuck out sideways),
+        // elbow flexed so the forearm and the pistol point forward-down past the thigh
+        abduct(B.rA, -0.10, 1); lift(B.rA, 0.12); lift(B.rF, 0.42); twist(B.rF, 0.15); abduct(B.lA, -0.27, -1); abduct(B.lF, -0.08, -1); }
+    } else if (w && w.id === 'bat' && !st.aiming) { did = true; abduct(B.rA, 0.15, 1); abduct(B.lA, -0.16, -1); }
+    else if (w && !st.aiming) { // r6.3 relaxed arms (on foot only: w is null in a vehicle): the cast's mocap idle/walk hold the upper arms ~20 deg out from the body (A-pose
+      // residue of the retarget); bring both upper arms in so the hands hang by the thighs
+      did = true; abduct(B.rA, -0.27, 1); abduct(B.lA, -0.27, -1); abduct(B.rF, -0.08, 1); abduct(B.lF, -0.08, -1); }
     if (did && c.weaponMesh) c.poseWeapon();
     return did;
   }
