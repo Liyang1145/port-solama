@@ -7,7 +7,7 @@ import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
 import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
-import { landmarksBase, decoCloseJob } from './landmarks.js';
+import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear } from './landmarks.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -137,6 +137,7 @@ export function buildCity(scene, mats, T) {
     for (let i = 0; i < 50; i++) { const z = rand(-L.islandZ[1] + 25, L.islandZ[1] - 25), x = rand(355, 400); deco.umbrellas.push({ x, z, color: pick(ACCENT), r: rand(0, 6) }); }
     // v3.4: dense umbrella clusters (GTA6 beaches are packed) — rows near the hotels, thinning toward the water
     for (let cz = -L.islandZ[1] + 30; cz < L.islandZ[1] - 30; cz += 26) { const n = randi(18, 30); for (let i = 0; i < n; i++) { const x = 354 + Math.pow(rng(), 1.4) * 34, z = cz + rand(-20, 20); deco.umbrellas.push({ x, z, color: pick([...ACCENT, [0.95, 0.95, 0.92], [0.92, 0.82, 0.2], [0.85, 0.2, 0.25], [0.2, 0.45, 0.85]]), r: rand(0, 6), towelOnly: rng() < 0.35 }); } }
+    keepSandClear(deco.umbrellas); // r6.4 a_landmarks2: clear the wheel's kiosk / queue / deck (positions only, rng untouched)
     // palms along the promenade
     for (let z = -L.islandZ[1] + 8; z < L.islandZ[1] - 8; z += rand(7, 13)) {
       if (Math.abs(z % 150) < 9 || Math.abs((z % 150) + 150) < 9 || Math.abs((z % 150) - 150) < 9) continue;
@@ -163,15 +164,15 @@ export function buildCity(scene, mats, T) {
   // ------------------------------------------- v4.0 district edges + far skyline ----
   districtEdges(bld, deco);
   skyline(bld);
-  marina(bld); landmarks(bld);
+  marina(bld); const lmk = landmarks(bld);
   fab.populate(col); // own RNG stream: the shared rng sequence (island / district layout) is unchanged
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
   const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal });
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); region.fabStats = attachFabric(fab, scene, M); };
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); lmk.attach(scene, M); region.fabStats = attachFabric(fab, scene, M); };
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); lmk.update(cam); updateFabric(fab, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;
@@ -633,7 +634,7 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   }
   if (ctx.ds) { const p = { x0, z0, x1, z1, facing, poly, top, ground, floors, fh, style: dStyle, ww: dWw, wall, accent, R, pylon, small };
     ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('deco', (Wd) => decoHotelDetail(Wd, p)));
-    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, decoCloseJob({ ...p, pylonTop: pylon ? top + ph + 1.2 : 0 })); } // r6.4 a_landmarks
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, decoCloseJob({ ...p, pylonTop: pylon ? top + ph + 1.2 : 0 })); decoUrnColliders(p, ctx.col); } // r6.4 a_landmarks(2)
 }
 
 function midrise(ctx, x0, z0, x1, z1) {
@@ -929,4 +930,4 @@ function marina(ctx) {
 
 // skyline guides: lighthouse at the south jetty head, 「海风之眼」 Ferris wheel at the north end of the beach
 // r6.4 a_landmarks: modelled in ./landmarks.js (resident base + streamed close-up detail; same 16 pick() calls as before)
-function landmarks(ctx) { landmarksBase(ctx, pick, ctx.ds); }
+function landmarks(ctx) { return landmarksBase(ctx, pick, ctx.ds); }

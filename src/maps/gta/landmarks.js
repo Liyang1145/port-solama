@@ -6,7 +6,10 @@
 //   * near detail (STREAMED through the r6.2 detail stream, built within DLOAD m and disposed past DFREE m): job closures
 //     'lighthouse' / 'wheel' / 'deco2', deterministic (local mulb seed), they never touch the city's global rng sequence.
 import * as THREE from 'three';
-import { job, mulb, seedOf, edgesOf, lb, frame, fbox, COL } from './bldgdetail.js';
+import { job, mulb, seedOf, edgesOf, lb, frame, fbox, COL, DLOAD, DFREE } from './bldgdetail.js';
+import { GeoBucket } from '../../geo.js';
+import { prep } from '../../mats.js';
+import { U } from '../../env.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 // put geometry g with Euler rotation (rx, ry, rz), scale, position
@@ -22,6 +25,7 @@ function geos() {
   G.tube = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true); // centred, along Y
   G.ball = new THREE.SphereGeometry(1, 10, 6);
   G.bulb = new THREE.OctahedronGeometry(1, 0);
+  G.bulb2 = new THREE.SphereGeometry(1, 6, 3);           // a2: spoke bulb (rounded glass envelope)
   G.ring = new THREE.TorusGeometry(1, 0.16, 6, 20);       // porthole frame, in the XY plane
   G.disc = new THREE.CircleGeometry(0.86, 16);            // porthole glass, facing +Z
   G.rock = new THREE.DodecahedronGeometry(1, 0);
@@ -54,6 +58,7 @@ const LENS = [1.0, 0.82, 0.5], BULB = [1.0, 0.86, 0.6];
 // ctx: the city build context {W, col}; pick: the city rng's pick (called exactly 16 times, as the v4 landmarks did, so
 // the shared layout rng sequence after this point is unchanged); ds: the r6.2 detail stream.
 export const LH = { x: 528, z: -374 }, WH = { x: 384, z: 352, R: 16 };
+const BR = { x0: 522.2, x1: 525.4, z0: -376.0, z1: -372.0, y: 0.95 }; // lighthouse access bridge (deck top y)
 export function landmarksBase(ctx, pick, ds) {
   const { W, col } = ctx; const g = geos();
   // ---------------------------------------------------------------- lighthouse 「南堤灯塔」 ----
@@ -76,27 +81,70 @@ export function landmarksBase(ctx, pick, ds) {
     rput(v, g.cyl8, x, 28.2, z, BLACK, 0, 0, 0, 0.13, 0.5, 0.13);
     rput(v, g.cyl8, x, 29.2, z, [0.3, 0.3, 0.3], 0, 0, 0, 0.025, 1.6, 0.025);
     col.add(x - 3.9, z - 3.9, x + 3.9, z + 3.9, 30, 'lighthouse');
+    for (const zz of [BR.z0 + 0.12, BR.z1 - 0.12]) col.add(BR.x0, zz - 0.1, BR.x1, zz + 0.1, BR.y + 1.1, 'rail'); // a2: bridge railings are solid
     if (ds) ds.add(x, z, 9, job('lighthouse', (Wd) => lighthouseDetail(Wd)));
   }
   // ---------------------------------------------------------------- Ferris wheel 「海风之眼」 ----
-  { const { x, z, R } = WH; const H = R + 3; const v = W.b('vcol', x, z); const n = W.b('neon', x, z); const m = W.b('metal', x, z);
+  // a2: the wheel turns. Rim / spokes / bulbs live in one rotating mesh (local to the hub, spun about its axle); the 16 cabins
+  // live in one mesh whose vertices are re-translated per frame to their pivot points (they hang level: pure translation,
+  // no rotation). Legs, axle, hub drum and the deck stay in the static city batches.
+  { const { x, z, R } = WH; const H = R + 3; const v = W.b('vcol', x, z); const m = W.b('metal', x, z);
+    const rv = new GeoBucket(), rb = new GeoBucket(), gv = new GeoBucket(); const gr = [], ang = [];
     for (const sz of [-1.2, 1.2]) {
-      rput(v, new THREE.TorusGeometry(R, 0.24, 6, 64), x, H, z + sz, [0.95, 0.95, 0.94]);           // outer chord
-      rput(v, new THREE.TorusGeometry(R - 1.5, 0.13, 5, 48), x, H, z + sz, [0.95, 0.95, 0.94]);     // inner chord (truss)
-      rput(n, new THREE.TorusGeometry(R + 0.33, 0.06, 4, 64), x, H, z + sz, [0.9, 0.74, 0.48]);     // warm bulb ring
-      for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.08, 0.08, R - 1.5, 4); sp.translate(0, (R - 1.5) / 2, 0); sp.rotateZ(a); rput(v, sp, x, H, z + sz, [0.9, 0.9, 0.9]); }
+      rput(rv, new THREE.TorusGeometry(R, 0.24, 6, 64), 0, 0, sz, [0.95, 0.95, 0.94]);           // outer chord
+      rput(rv, new THREE.TorusGeometry(R - 1.5, 0.13, 5, 48), 0, 0, sz, [0.95, 0.95, 0.94]);     // inner chord (truss)
+      for (let k = 0; k < 48; k++) { const a = (k + 0.5) / 48 * Math.PI * 2; rput(rb, g.bulb, Math.cos(a) * (R + 0.36), Math.sin(a) * (R + 0.36), sz, BULB, 0, 0, a, 0.1, 0.13, 0.1); } // rim bulbs
+      for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.08, 0.08, R - 1.5, 4); sp.translate(0, (R - 1.5) / 2, 0); sp.rotateZ(a); rput(rv, sp, 0, 0, sz, [0.9, 0.9, 0.9]); }
       for (const dx of [-1, 1]) { const L = Math.hypot(H, R * 0.55); const leg = new THREE.CylinderGeometry(0.3, 0.48, L, 8); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, L / 2, 0); leg.rotateZ(ang); rput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
     }
     rput(m, g.cyl16, x, H, z - 1.7, null, Math.PI / 2, 0, 0, 1.1, 3.4, 1.1);   // hub drum (along z)
     rput(m, g.cyl8, x, H, z - 2.4, null, Math.PI / 2, 0, 0, 0.32, 4.8, 0.32);  // axle
     const cols = [];
-    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.1; const gx = x + Math.cos(a) * R, gy = H + Math.sin(a) * R; const c = pick([[0.95, 0.4, 0.45], [0.25, 0.65, 0.75], [0.98, 0.8, 0.3], [0.95, 0.95, 0.92]]); cols.push(c);
-      rput(v, g.box, gx, gy - 1.45, z, c, 0, 0, 0, 1.6, 1.6, 1.8); }
+    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.1; const c = pick([[0.95, 0.4, 0.45], [0.25, 0.65, 0.75], [0.98, 0.8, 0.3], [0.95, 0.95, 0.92]]); cols.push(c); ang.push(a);
+      const v0 = gv.vc; rput(gv, g.box, 0, -1.45, 0, c, 0, 0, 0, 1.6, 1.6, 1.8); gr.push([v0, gv.vc]); }
     // boarding deck (top 0.75, matches the cabin floor at the bottom of the turn) on the sloping sand
     rput(v, g.box, x, 0.05, z, [0.85, 0.82, 0.76], 0, 0, 0, 12, 1.4, 6.4);
     col.add(x - R * 0.7, z - 3.2, x + R * 0.7, z + 3.2, 6, 'wheel');
-    if (ds) ds.add(x, z, R + 8, job('wheel', (Wd) => wheelDetail(Wd, cols)));
+    // a2: the ticket kiosk and the drive house are solid too (the queue stanchions already sit inside the 'wheel' box)
+    col.add(KIOSK.x - 1.5, KIOSK.z - 1.3, KIOSK.x + 1.5, KIOSK.z + 1.3, 2.9, 'kiosk');
+    col.add(x - 2.15, z + 3.65, x + 2.15, z + 6.35, 2.2, 'kiosk');
+    if (ds) ds.add(x, z, R + 8, job('wheel', (Wd) => wheelDetail(Wd)));
+    rig = { x, z, H, R, rv, rb, gv, gr, ang, cols, ds, base: null, det: null, th: 0, f: 0 };
   }
+  return { attach: wheelAttach, update: wheelUpdate };
+}
+
+// ======================================================================== turning wheel (a2) =====
+// one revolution every ~8 minutes (rim speed ~0.21 m/s, a gentle seaside wheel); angle from the shared clock U.uTime
+const SPIN = (Math.PI * 2) / 480; let rig = null, WM = null, BM = null, SC = null;
+const KIOSK = { x: WH.x - 11.5, z: WH.z - 6.5 };
+function gondGeo(bk, gr) { const geo = bk.build(); const loc = Float32Array.from(geo.attributes.position.array);
+  geo.attributes.position.setUsage(THREE.DynamicDrawUsage); geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), WH.R + 4); geo.userData.loc = loc; geo.userData.gr = gr; return geo; }
+function gondMove(geo, th) { const p = geo.attributes.position.array, loc = geo.userData.loc, gr = geo.userData.gr;
+  for (let k = 0; k < gr.length; k++) { const a = rig.ang[k] + th, px = Math.cos(a) * rig.R, py = Math.sin(a) * rig.R;
+    for (let i = gr[k][0] * 3, e = gr[k][1] * 3; i < e; i += 3) { p[i] = loc[i] + px; p[i + 1] = loc[i + 1] + py; p[i + 2] = loc[i + 2]; } }
+  geo.attributes.position.needsUpdate = true; }
+function rigMeshes(rv, rb, gv, gr) { const out = [];
+  const add = (geo, mat, gond) => { const ms = new THREE.Mesh(geo, mat); ms.position.set(rig.x, rig.H, rig.z); ms.castShadow = true; ms.receiveShadow = true; ms.userData.gond = gond; ms.name = 'wheelRig'; SC.add(ms); out.push(ms); };
+  if (rv.vc) add(rv.build(), WM, false); if (rb.vc) add(rb.build(), BM, false); if (gv.vc) add(gondGeo(gv, gr), WM, true);
+  return out; }
+function wheelAttach(scene, M) {
+  if (!rig) return; SC = scene;
+  // painted steel (vertex colours, no world-space plaster texture: it would swim over a moving part) + real bulbs:
+  // frosted warm-white glass by day, incandescent glow at night (emissive follows U.uNight in wheelUpdate)
+  WM = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.15 }), 'lmwheel');
+  BM = prep(new THREE.MeshStandardMaterial({ color: 0xf2ede2, roughness: 0.18, metalness: 0.0, emissive: 0xffc27a, emissiveIntensity: 0.0 }), 'lmbulb');
+  rig.base = rigMeshes(rig.rv, rig.rb, rig.gv, rig.gr); rig.rv = rig.rb = rig.gv = null; wheelUpdate({ x: 1e9, z: 1e9 });
+}
+function wheelUpdate(cam) {
+  if (!rig || !rig.base) return;
+  const th = -U.uTime.value * SPIN; const d = Math.hypot(cam.x - rig.x, cam.z - rig.z) - rig.R - 8;
+  if (!rig.det && d < DLOAD) { rig.det = wheelSpinDetail(); if (rig.ds) rig.ds.mark(rig.det); }
+  else if (rig.det && d > DFREE) { for (const ms of rig.det) { SC.remove(ms); ms.geometry.dispose(); } rig.det = null; }
+  BM.emissiveIntensity = 0.02 + U.uNight.value * 4.5;
+  // far away the motion is sub-pixel: re-pose the cabins only every 8th frame there
+  if (d > 600 && (rig.f++ & 7)) return;
+  for (const ms of rig.det ? rig.base.concat(rig.det) : rig.base) { if (ms.userData.gond) gondMove(ms.geometry, th); else ms.rotation.z = th; }
 }
 
 // ======================================================================== lighthouse near detail =====
@@ -140,7 +188,7 @@ function lighthouseDetail(W) {
       for (const sd of [-1, 1]) rput(v, g.box, x + c * rc, 1.15 + h / 2, z + s * rc + sd * w / 2, WHITE, 0, -a + Math.PI / 2, 0, 0.18, h, dep); }
     { const rp = rAt(4.75); rput(v, g.box, x + c * (rp + 0.02), 4.75, z, [0.62, 0.5, 0.26], 0, -a + Math.PI / 2, 0, 0.5, 0.34, 0.04); } // bronze plaque over the door
   }
-  const deckY = 0.95; const bx0 = 522.2, bx1 = 525.4, bz0 = -376.0, bz1 = -372.0;
+  const deckY = BR.y, bx0 = BR.x0, bx1 = BR.x1, bz0 = BR.z0, bz1 = BR.z1;
   fbox(v, frame(0, 0), bx0, bx1, bz0, bz1, -1.2, deckY, [0.46, 0.45, 0.43]);
   for (const zz of [bz0 + 0.12, bz1 - 0.12]) { for (let xx = bx0 + 0.2; xx <= bx1; xx += 1.0) rput(m, g.cyl8, xx, deckY, zz, null, 0, 0, 0, 0.035, 1.05, 0.035);
     for (const y of [deckY + 1.0, deckY + 0.55]) rput(m, g.box, (bx0 + bx1) / 2, y, zz, null, 0, 0, 0, bx1 - bx0, 0.05, 0.05); }
@@ -157,32 +205,41 @@ function lighthouseDetail(W) {
 // ======================================================================== Ferris wheel near detail =====
 // beach sand height inside the Deco stretch (mirrors city.js beachH with beachOff = 0; the wheel sits at z = 352)
 const sandY = (x) => { const t = Math.min(1, Math.max(0, (x - 335) / 145)); return 0.15 - Math.pow(t, 1.6) * 2.9 - t * 0.2; };
-function wheelDetail(W, cols) {
-  const { x, z, R } = WH; const H = R + 3; const g = geos(); const v = W.b('vcol', x, z); const m = W.b('metal', x, z); const n = W.b('neon', x, z);
+// rotating near detail (a2): built into the turning rig meshes, local to the hub (rim truss, cables, spoke bulbs + sockets)
+// and to each cabin's pivot (cabin envelope), so the wheel turns with all of it and the cabins stay level
+function wheelSpinDetail() {
+  const { R } = WH; const g = geos(); const rv = new GeoBucket(), rb = new GeoBucket(), gv = new GeoBucket(); const gr = [];
   const WH1 = [0.95, 0.95, 0.94], Ri = R - 1.5;
-  const P = (a, rr, sz) => [x + Math.cos(a) * rr, H + Math.sin(a) * rr, z + sz];
-  // rim truss: zig-zag diagonals between the outer and inner chords on both faces, cross ties between the two faces
+  const P = (a, rr, sz) => [Math.cos(a) * rr, Math.sin(a) * rr, sz];
+  // rim truss: zig-zag diagonals between the outer and inner chords on both faces
   for (const sz of [-1.2, 1.2]) for (let k = 0; k < 48; k++) { const a0 = k / 48 * Math.PI * 2, a1 = (k + 1) / 48 * Math.PI * 2;
-    const A = P(a0, R, sz), B = P(a1, Ri, sz); if (k % 2) { const t = P(a0, Ri, sz), u = P(a1, R, sz); rod(v, g.tube, ...t, ...u, 0.05, WH1); } else rod(v, g.tube, ...A, ...B, 0.05, WH1); }
+    const A = P(a0, R, sz), B = P(a1, Ri, sz); if (k % 2) { const t = P(a0, Ri, sz), u = P(a1, R, sz); rod(rv, g.tube, ...t, ...u, 0.05, WH1); } else rod(rv, g.tube, ...A, ...B, 0.05, WH1); }
   // (classic two-rim wheel: the only members crossing between the faces are the gondola axles, so cabins swing freely)
   // tension cables: hub flanges to the inner chord, each in its own face plane (nothing crosses the cabin gap)
-  for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2 + 0.065; const sz = k % 2 ? 1.2 : -1.2; rod(v, g.tube, x, H, z + sz * 1.21, ...P(a, Ri, sz), 0.022, [0.75, 0.76, 0.78]); }
+  for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2 + 0.065; const sz = k % 2 ? 1.2 : -1.2; rod(rv, g.tube, 0, 0, sz * 1.21, ...P(a, Ri, sz), 0.022, [0.75, 0.76, 0.78]); }
+  // incandescent bulbs along every spoke, each in a brass socket pointing out of the face — frosted glass by day, lit at night
+  for (const sz of [-1, 1]) for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; for (let j = 1; j <= 6; j++) { const rr = 1.6 + j * (Ri - 1.8) / 6; const [px, py] = P(a, rr, 0);
+    rod(rv, g.tube, px, py, sz * 1.17, px, py, sz * 1.27, 0.04, [0.42, 0.34, 0.2]);
+    rput(rb, g.bulb2, px, py, sz * 1.345, null, 0, 0, 0, 0.075, 0.075, 0.095); } }
+  // gondolas, local to their pivot: pivot pin, hanger yoke, rounded-roof cabin around the base box, windows, floor pan
+  for (let k = 0; k < 16; k++) { const c = rig.cols[k]; const v0 = gv.vc;
+    rput(gv, g.cyl8, 0, 0, -1.25, [0.36, 0.37, 0.39], Math.PI / 2, 0, 0, 0.11, 2.5, 0.11);
+    for (const sd of [-1, 1]) rod(gv, g.tube, 0, 0, sd * 1.0, 0, -0.6, sd * 0.96, 0.05, [0.3, 0.31, 0.33]);
+    const y0 = -2.28, y1 = -0.6; const cy = (y0 + y1) / 2;
+    rput(gv, g.box, 0, y0 + 0.2, 0, [0.24, 0.25, 0.27], 0, 0, 0, 1.78, 0.4, 1.98);                                    // floor pan
+    rput(gv, g.box, 0, y0 + 0.62, 0, c, 0, 0, 0, 1.74, 0.46, 1.94);                                                     // lower body
+    for (const sx of [-1, 1]) rput(gv, g.box, sx * 0.83, cy + 0.32, 0, [0.08, 0.1, 0.12], 0, 0, 0, 0.1, 0.78, 1.7);  // side glass
+    for (const sd of [-1, 1]) rput(gv, g.box, 0, cy + 0.32, sd * 0.93, [0.08, 0.1, 0.12], 0, 0, 0, 1.5, 0.78, 0.1);  // end glass
+    for (const [px, pz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) rput(gv, g.box, px * 0.84, cy + 0.3, pz * 0.94, WH1, 0, 0, 0, 0.1, 0.9, 0.1); // corner posts
+    rput(gv, g.box, 0, y1 + 0.02, 0, WH1, 0, 0, 0, 1.84, 0.12, 2.04);                                                  // roof slab
+    const dm = new THREE.SphereGeometry(1, 10, 3, 0, Math.PI * 2, 0, Math.PI / 2); rput(gv, dm, 0, y1 + 0.08, 0, c, 0, 0, 0, 0.92, 0.28, 1.02); // roof dome
+    gr.push([v0, gv.vc]); }
+  return rigMeshes(rv, rb, gv, gr);
+}
+function wheelDetail(W) {
+  const { x, z, R } = WH; const H = R + 3; const g = geos(); const v = W.b('vcol', x, z); const m = W.b('metal', x, z);
+  const WH1 = [0.95, 0.95, 0.94];
   for (const sz of [-1.21, 1.21]) rput(m, new THREE.CylinderGeometry(1.6, 1.6, 0.12, 20), x, H, z + sz, null, Math.PI / 2);   // hub flanges
-  // warm incandescent bulbs along every spoke (daylight: pale glass; night: warm sparkle) — no coloured tubes on map A
-  for (const sz of [-1.32, 1.32]) for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; for (let j = 1; j <= 6; j++) { const rr = 1.6 + j * (Ri - 1.8) / 6; rput(n, g.bulb, ...P(a, rr, sz), BULB, 0, 0, 0, 0.09, 0.09, 0.09); } }
-  // gondolas: pivot pin on the rim, hanger yoke, rounded-roof cabin around the base box (envelope never cuts it), windows, floor pan
-  for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.1; const gx = x + Math.cos(a) * R, gy = H + Math.sin(a) * R; const c = cols[k];
-    rput(m, g.cyl8, gx, gy, z - 1.25, null, Math.PI / 2, 0, 0, 0.11, 2.5, 0.11);
-    for (const sd of [-1, 1]) rod(v, g.tube, gx, gy, z + sd * 1.0, gx, gy - 0.6, z + sd * 0.96, 0.05, [0.3, 0.31, 0.33]);
-    const y0 = gy - 2.28, y1 = gy - 0.6; const cy = (y0 + y1) / 2;
-    rput(v, g.box, gx, y0 + 0.2, z, [0.24, 0.25, 0.27], 0, 0, 0, 1.78, 0.4, 1.98);                                    // floor pan
-    rput(v, g.box, gx, y0 + 0.62, z, c, 0, 0, 0, 1.74, 0.46, 1.94);                                                     // lower body
-    for (const sx of [-1, 1]) rput(v, g.box, gx + sx * 0.83, cy + 0.32, z, [0.08, 0.1, 0.12], 0, 0, 0, 0.1, 0.78, 1.7);  // side glass
-    for (const sd of [-1, 1]) rput(v, g.box, gx, cy + 0.32, z + sd * 0.93, [0.08, 0.1, 0.12], 0, 0, 0, 1.5, 0.78, 0.1);  // end glass
-    for (const [px, pz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) rput(v, g.box, gx + px * 0.84, cy + 0.3, z + pz * 0.94, WH1, 0, 0, 0, 0.1, 0.9, 0.1); // corner posts
-    rput(v, g.box, gx, y1 + 0.02, z, WH1, 0, 0, 0, 1.84, 0.12, 2.04);                                                  // roof slab
-    const dm = new THREE.SphereGeometry(1, 10, 3, 0, Math.PI * 2, 0, Math.PI / 2); rput(v, dm, gx, y1 + 0.08, z, c, 0, 0, 0, 0.92, 0.28, 1.02); // roof dome
-  }
   // A-frame bracing: horizontal ties and X braces between each leg pair, ties between the front and back frames
   const L = (dx, s, t) => [x - dx * R * 0.55 * (1 - t), H * t, z + s * 1.56];
     for (const sz of [-1.2, 1.2]) { const s = Math.sign(sz); rod(v, g.tube, ...L(-1, s, 0.03), ...L(1, s, 0.15), 0.09, WH1); rod(v, g.tube, ...L(1, s, 0.03), ...L(-1, s, 0.15), 0.09, WH1); rod(v, g.tube, ...L(-1, s, 0.15), ...L(1, s, 0.15), 0.11, WH1); }
@@ -203,7 +260,7 @@ function wheelDetail(W, cols) {
     for (const y of [dy + 1.02, dy + 0.55]) rod(m, g.tube, ax, y, az, bx, y, bz, 0.03, null); }
   for (let k = 0; k < 3; k++) { const top = dy - (k + 1) * 0.25; rput(v, g.box, x0 - 0.18 - k * 0.35, (top - 0.7) / 2, z, [0.8, 0.78, 0.72], 0, 0, 0, 0.36, top + 0.7, 2.8); }
   for (let xx = x0 + 0.5; xx < x1; xx += 0.5) rput(v, g.box, xx, dy + 0.002, z, [0.7, 0.67, 0.6], 0, 0, 0, 0.03, 0.002, 6.3);
-  { const kx = x - 11.5, kz = z - 6.5; const KW = [0.95, 0.92, 0.84], GL = [0.08, 0.1, 0.12]; // ticket kiosk, serving the promenade (west)
+  { const kx = KIOSK.x, kz = KIOSK.z; const KW = [0.95, 0.92, 0.84], GL = [0.08, 0.1, 0.12]; // ticket kiosk, serving the promenade (west)
     rput(v, g.box, kx, -0.1, kz, [0.75, 0.74, 0.7], 0, 0, 0, 3.0, 0.8, 2.6);                       // plinth
     rput(v, g.box, kx, 1.2, kz, KW, 0, 0, 0, 2.2, 2.6, 2.0);                                          // body
     rput(v, g.box, kx, 0.65, kz, [0.25, 0.55, 0.58], 0, 0, 0, 2.24, 0.5, 2.04);                      // teal dado
@@ -221,6 +278,22 @@ function wheelDetail(W, cols) {
 
 // ======================================================================== Deco hotel close-up detail =====
 // p: the same params decoHotel() hands to decoHotelDetail (x0,z0,x1,z1,facing,poly,top,ground,floors,fh,wall,accent,R,pylon,small)
+// a2: colliders for the entrance urns (people and cars stop at them). Same placement maths as decoCloseDetail, no rng.
+export function decoUrnColliders(p, col) {
+  const s = p.facing; const fx = s > 0 ? p.x1 : p.x0; let n = 0;
+  for (const e of edgesOf(p.poly)) { if (!(e.ox * s > 0.9) || e.len < 3) continue;
+    const zc = p.pylon ? p.pylon.z : (p.z0 + p.z1) / 2; const a = (zc - e.p[1]) * e.dz + (fx - e.p[0]) * e.dx;
+    if (a > 4 && a < e.len - 4) for (const sg of [-1, 1]) { const [ux, uz] = e.P(a + sg * 2.45, 0.55); col.add(ux - 0.45, uz - 0.45, ux + 0.45, uz + 0.45, 1.6, 'urn'); n++; } }
+  return n;
+}
+// a2: keep the beach umbrellas (with their loungers / towels) off the wheel's ticket kiosk, queue, deck and drive house.
+// Moves positions only (no rng draws), so the rest of the layout is untouched.
+const SAND_KEEP = { x0: 368.5 - 1.8, x1: 396 + 1.8, z0: 342.5 - 1.8, z1: 359.5 + 1.8 };
+export function keepSandClear(us) { const K = SAND_KEEP; let n = 0;
+  for (const u of us) { if (u.x < K.x0 || u.x > K.x1 || u.z < K.z0 || u.z > K.z1) continue;
+    u.z = u.z - K.z0 < K.z1 - u.z ? K.z0 - (u.z - K.z0) * 0.6 : K.z1 + (K.z1 - u.z) * 0.6; n++; }
+  return n;
+}
 export function decoCloseJob(p) { return job('deco2', (Wd) => decoCloseDetail(Wd, p)); }
 const mixc = (c, k, add = 0) => c.map((q) => Math.min(1, q * k + add));
 function decoCloseDetail(W, p) {
