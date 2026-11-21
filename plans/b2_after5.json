@@ -1,0 +1,24 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "b_megast_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1560,-290,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1548,4,-282); c.lookAt(-1592,55,-300); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "skin_cpu",
+   "noshot": true,
+   "js": "const v=new __G.camera.position.constructor(), w=v.clone(); const res=[]; const anc=(o)=>{ for(let q=o;q;q=q.parent) if(!q.visible) return false; return true; };\n__G.scene.traverse(o=>{ if(!o.isSkinnedMesh) return; o.getWorldPosition(w); let bad=0, ex=null; const pc=o.geometry.attributes.position.count;\n for(let i=0;i<pc;i+=1){ o.getVertexPosition(i,v); v.applyMatrix4(o.matrixWorld); const dd=v.distanceTo(w); if(!(dd<50)){ bad++; if(!ex){ const si=o.geometry.attributes.skinIndex, sw=o.geometry.attributes.skinWeight, p=o.geometry.attributes.position; ex={i, d:dd, raw:[p.getX(i),p.getY(i),p.getZ(i)], si:[si.getX(i),si.getY(i),si.getZ(i),si.getW(i)], sw:[sw.getX(i),sw.getY(i),sw.getZ(i),sw.getW(i)], morphs:o.geometry.morphAttributes.position?o.geometry.morphAttributes.position.length:0, infl:o.morphTargetInfluences?o.morphTargetInfluences.length:0, bmi:Math.max(...o.bindMatrixInverse.elements.map(Math.abs)), binv:[0,1,2,3].map(k=>Math.max(...o.skeleton.boneInverses[si.getComponent(i,k)].elements.map(Math.abs))), bname:[0,1,2,3].map(k=>o.skeleton.bones[si.getComponent(i,k)].name)}; } } }\n if(bad) res.push({n:o.name, bad, pc, vis:anc(o), wp:[w.x,w.y,w.z].map(q=>+q.toFixed(1)), geoIsLod: !o.geometry.morphAttributes.position, ex}); });\nJSON.stringify(res.slice(0,8))"
+  },
+  {
+   "name": "hide_skinned",
+   "noshot": true,
+   "js": "__G.scene.traverse(o=>{ if(o.isSkinnedMesh) o.visible=false; }); __G.game.player.root.visible=false; 'hidden'"
+  },
+  {
+   "name": "b_megast_day_noskin",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1560,-290,0); __G.step(3); __G.game.player.root.visible=false; __G.scene.traverse(o=>{ if(o.isSkinnedMesh) o.visible=false; }); const c=__G.camera; c.position.set(-1548,4,-282); c.lookAt(-1592,55,-300); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  }
+ ]
+}

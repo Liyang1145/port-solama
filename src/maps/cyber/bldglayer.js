@@ -10,6 +10,25 @@ import * as THREE from 'three';
 import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cableBundle, NEONC, DARK, STEEL } from './kit.js';
+import { U } from '../../env.js';
+import { laundryLine } from './dress.js';
+import { shopStreet } from './arch.js';
+
+// r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
+// vertex colour = light colour; night only (uNight)
+let CONE_MAT = null, CONE_G = null;
+function coneMat() {
+  if (CONE_MAT) return CONE_MAT;
+  CONE_MAT = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ vC = color; vT = uv.y; vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
+    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
+  return CONE_MAT;
+}
+// cone from the lamp at (x, y, z) down to the ground, radius r at the bottom (unit geometry: apex at y=0 top, base at y=-1)
+function cone(b, x, y, z, h, r, col) {
+  if (!CONE_G) { CONE_G = new THREE.CylinderGeometry(0.06, 1, 1, 14, 1, true); CONE_G.translate(0, -0.5, 0); }
+  put(b, CONE_G, x, y, z, r, h, r, col);
+}
 
 const CH = 160, DETAIL_R = 230;
 const ATTRS = { building: { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 }, road: { aRd: 4 } };
@@ -20,11 +39,18 @@ const inParcel = (p, x, z, pad = 0) => { const c = Math.cos(p.ang), s = Math.sin
 
 export class BldgLayer {
   constructor(scene, mats, city) {
-    this.mats = mats; this.stream = city.stream; if (mats && mats.vcol && !mats.vcolD) mats.vcolD = mats.vcol; /* LOD alias (kit.js) */ this.group = new THREE.Group(); this.group.name = 'bldglayer'; scene.add(this.group);
+    this.mats = mats; this.stream = city.stream; if (mats && mats.vcol && !mats.vcolD) mats.vcolD = mats.vcol; /* LOD alias (kit.js) */
+    this.lmats = Object.assign(Object.create(mats), { cone: coneMat() }); this.group = new THREE.Group(); this.group.name = 'bldglayer'; scene.add(this.group);
     this.items = new Map(); this.built = new Map(); this.counts = { port: 0, walk: 0, bridge: 0, cables: 0 };
     const add = (k, it) => { let l = this.items.get(k); if (!l) this.items.set(k, l = []); l.push(it); };
     const P = city.parcels.filter((p) => !p.far);
     for (const p of P) if (p.style === 'port') { add(keyOf(p.x, p.z), { kind: 'port', p }); this.counts.port++; }
+    // r6.3 side streets: a parcel side that faces a road (block corners) gets its own shop row + sidewalk dressing — the generators
+    // only dress the front, so streets running past building sides were bare (b_night_street)
+    this.counts.side = 0;
+    for (const p of P) { if (!(p.style === 'mid' || p.style === 'deco' || p.style === 'downtown')) continue; const c = Math.cos(p.ang), sn = Math.sin(p.ang);
+      for (const sd of [1, -1]) { const lz = sd * (p.w / 2 + 4.5); const x = p.x - sn * lz, z = p.z + c * lz; const n = city.graph.index.near(x, z);
+        if (n && n.d < n.e.hw + n.e.sw + 0.5 && n.e.sw > 0) { add(keyOf(p.x, p.z), { kind: 'side', p, sd }); this.counts.side++; } } }
     // facing pairs across a street
     const front = (p) => { const fx = Math.cos(p.ang), fz = Math.sin(p.ang); return { x: p.x + fx * p.d / 2, z: p.z + fz * p.d / 2, fx, fz }; };
     const cand = P.filter((p) => p.style === 'mid' || p.style === 'downtown' || p.style === 'deco');
@@ -68,16 +94,20 @@ export class BldgLayer {
     for (const it of list) {
       if (it.kind === 'port') { const lw = mkWorld(); const wh = withSeed(it.p.seed, () => rng() < 0.45); withSeed((it.p.seed ^ 0x9e37) >>> 0, () => portExtras(lw, it.p, wh));
         const m = parcelMatrix(it.p); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, it.p.x, it.p.z).append(b, m); }
+      else if (it.kind === 'side') { const lw = mkWorld(); const p = it.p; const dt = p.style === 'downtown'; const ins = dt ? 1 : 0; const ctx = { W: lw };
+        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6 }));
+        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m); }
       else withSeed(it.seed, () => (it.kind === 'walk' ? skyway(W, it) : it.kind === 'bridge' ? skyBridge(W, it) : streetCables(W, it)));
     }
-    return W.build(this.group, this.mats, { neon: { cast: false }, glassRail: { cast: false } });
+    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false } });
   }
   sync() {
     const st = this.stream; if (!st) return;
     // detail LOD: small clutter meshes ('vcolD') only within DETAIL_R of the camera (chunk centre distance)
     const cam = globalThis.__G && globalThis.__G.camera; if (cam) { const p = cam.position; let n = 0;
       for (const c of st.chunks.values()) { if (!c.near) continue; const on = Math.hypot(c.cx - p.x, c.cz - p.z) < DETAIL_R + Math.max(0, p.y - 40) * 0.5;
-        for (const m of c.near) if (m.name.startsWith('vcolD|')) { m.visible = on; n += on; } }
+        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|')) { m.visible = on; n += on; } }
+      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
       this.detailOn = n; }
     for (const [k, list] of this.items) {
       const c = st.chunks.get(k); const on = !!(c && c.near); const b = this.built.get(k);
@@ -144,6 +174,14 @@ function portExtras(W, p, warehouse) {
   for (const x of [xL - 0.8, xR + 0.8]) for (const s of [-1, 1]) put(nb, G.ball, x, Hc + 2.0, zc + s * 2.2, 0.22, 0.22, 0.22, [1, 0.08, 0.05]);
   for (const s of [-1, 1]) put(nb, G.box, tx + s * 1.81, Hc + 2.8, zc, 0.02, 0.35, 5.2, [0.55, 0.6, 0.62]);
   for (const x of [xL, xR]) for (const s of [-1, 1]) put(nb, G.ball, x, 1.35, zc + s * 5.6, 0.14, 0.14, 0.14, [1, 0.55, 0.05]);
+  // r6.3: the crane read as a dark goalpost at night -> lamp housings with light cones under both girders, lit girder edge strips,
+  // flashing-red beacons on the girder ends + leg tops, flood cones from the yard masts
+  const cb = W.b('cone', 0, 0); const sod = [0.95, 0.66, 0.32], wh = [0.75, 0.8, 0.85];
+  for (const s of [-1, 1]) for (let x = xL + 3; x < xR - 2; x += 9) { box(v, x - 0.5, Hc - 0.45, zc + s * 2.2 - 0.35, x + 0.5, Hc, zc + s * 2.2 + 0.35, {}, DARK); put(nb, G.box, x, Hc - 0.48, zc + s * 2.2, 0.8, 0.04, 0.5, sod.map((q) => q * 1.6)); cone(cb, x, Hc - 0.5, zc + s * 2.2, Hc - 0.6, rand(3.2, 4.2), sod); }
+  for (const s of [-1, 1]) for (const side of [-1, 1]) put(nb, G.box, (xL + xR) / 2, Hc + 0.9, zc + s * 2.2 + side * 0.82, xR - xL + 1.4, 0.06, 0.02, [0.3, 0.32, 0.36]);
+  for (const x of [xL, xR]) for (const s of [-1, 1]) put(nb, G.ball, x, Hc - 2, zc + s * 2.2 + s * 0.5, 0.18, 0.18, 0.18, [1, 0.08, 0.05]);
+  cone(cb, tx, Hc - 2.9, zc + 4.2, Hc - 3, 3, wh);
+  for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) cone(cb, x, 21.8, z, 21.7, 7, [0.6, 0.58, 0.5]);
 }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 function _ry(b, g, x, y, z, sx, sy, sz, col) { _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2); _s.set(sx, sy, sz); _p.set(x, y, z); _m.compose(_p, _q, _s); b.geom(g, _m, {}, col); }
@@ -166,8 +204,26 @@ function skyway(W, it) {
   beam(nb, P(0.5, 0, y + H - 0.05), P(L - 0.5, 0, y + H - 0.05), 0.35, [0.5, 0.55, 0.6], 0.04); // ceiling light strip
   // portal frames on both facades + a tube sign hung under the deck
   for (const t of [0, L]) { beam(v, P(t, -hw - 0.5, y - 0.6), P(t, -hw - 0.5, y + H + 0.4), 0.45, DARK); beam(v, P(t, hw + 0.5, y - 0.6), P(t, hw + 0.5, y + H + 0.4), 0.45, DARK); beam(v, P(t, -hw - 0.5, y + H + 0.4), P(t, hw + 0.5, y + H + 0.4), 0.45, DARK); }
+  // r6.3 street connection: columns under the deck at the kerb line + a stair tower down to the pavement at one or both ends
+  const ys = 0.15; const kerb = Math.min(3.2, L * 0.18);
+  for (const t of [kerb, L - kerb]) for (const s of [-hw + 0.25, hw - 0.25]) { beam(v, P(t, s, ys), P(t, s, y - 0.4), 0.42, st); put(v, kg().box, ...P(t, s, ys + 0.2), 0.7, 0.4, 0.7, [0.4, 0.4, 0.41]); }
+  for (const [t, dir] of [[0, 1], [L, -1]]) if (t === 0 || rng() < 0.5) skyStair(v, g, P, t + dir * 0.9, (rng() < 0.5 ? -1 : 1), hw, y, ys, st);
   if (L > 14 && it.dt) { const c = P(L / 2, 0, y - 0.6); const pr = [ux, 0, uz]; for (const o of [-1.2, 1.2]) beam(v, [c[0] + ux * o, y - 0.8, c[2] + uz * o], [c[0] + ux * o, y - 1.25, c[2] + uz * o], 0.04, DARK);
     for (const s of [-1, 1]) beam(nb, [c[0] + sx * s * 0.08 - ux * 1.6, y - 1.25, c[2] + sz * s * 0.08 - uz * 1.6], [c[0] + sx * s * 0.08 + ux * 1.6, y - 1.25, c[2] + sz * s * 0.08 + uz * 1.6], 0.06, pick(NEONC)); void pr; }
+}
+// straight stair run alongside the facade (perpendicular to the skyway) from the deck end down to the pavement: stringers, treads,
+// a landing at the deck, glass balustrade with a handrail, a column under the mid-span
+function skyStair(v, g, P, t, side, hw, y, ys, st) {
+  const rise = y - ys; const run = rise * 1.45; const sw = 1.5; const tc = t; // stair centre line at skyway coordinate t
+  const s0 = side * (hw + 0.2), s1 = side * (hw + 0.2 + run); // lateral start (deck edge) -> end (ground)
+  const Q = (s, dt, yy) => P(tc + dt, s, yy);
+  beam(v, Q(side * (hw - 0.8), 0, y - 0.2), Q(s0 + side * 0.6, 0, y - 0.2), sw + 0.4, [0.4, 0.4, 0.41], 0.35); // landing
+  for (const dt of [-sw / 2, sw / 2]) { beam(v, Q(s0, dt, y - 0.3), Q(s1, dt, ys + 0.05), 0.1, st, 0.32); beam(v, Q(s0, dt, y + 0.9), Q(s1, dt, ys + 1.0), 0.05, [0.7, 0.72, 0.74]); }
+  const nt = Math.round(rise / 0.18); for (let i = 1; i < nt; i++) { const k = i / nt; const s = s0 + (s1 - s0) * k, yy = y - 0.2 - rise * k; beam(v, Q(s, -sw / 2, yy), Q(s, sw / 2, yy), 0.3, [0.35, 0.36, 0.37], 0.05); }
+  for (const dt of [-sw / 2 - 0.02, sw / 2 + 0.02]) { const a = Q(s0, dt, 0), b = Q(s1, dt, 0), n = 6; for (let i = 0; i < n; i++) { const k0 = i / n, k1 = (i + 1) / n;
+    const p0 = [a[0] + (b[0] - a[0]) * k0, a[2] + (b[2] - a[2]) * k0], p1 = [a[0] + (b[0] - a[0]) * k1, a[2] + (b[2] - a[2]) * k1]; const y0 = y - 0.2 - rise * k0, y1 = y - 0.2 - rise * k1;
+    g.quad(new THREE.Vector3(p0[0], y0, p0[1]), new THREE.Vector3(p1[0], y1, p1[1]), new THREE.Vector3(p1[0], y1 + 0.95, p1[1]), new THREE.Vector3(p0[0], y0 + 0.95, p0[1]), [0, 0, 1, 0, 1, 1, 0, 1], {}); } }
+  const sm = (s0 + s1) / 2; beam(v, Q(sm, 0, ys), Q(sm, 0, (y + ys) / 2 - 0.35), 0.35, st);
 }
 // ---------------------------------------------------------------- sky bridge ----
 function skyBridge(W, it) {
@@ -194,6 +250,7 @@ function streetCables(W, it) {
     const a = [A.x + sx * off - ux * 0.2, ya, A.z + sz * off - uz * 0.2], b = [B.x + sx * off + ux * 0.2, yb, B.z + sz * off + uz * 0.2];
     cableBundle(v, a, b, rand(0.8, 2.0) + L * 0.03);
     for (const [q, d] of [[a, 1], [b, -1]]) beam(v, [q[0] - ux * d * 0.2, q[1] + 0.05, q[2] - uz * d * 0.2], [q[0] + ux * d * 0.35, q[1] + 0.05, q[2] + uz * d * 0.35], 0.1, DARK); }
+  if (rng() < 0.55) { const off = rand(-5, 5); const ya = rand(4.5, Math.min(hmin - 1, 8)); laundryLine(W, [A.x + sx * off, ya, A.z + sz * off], [B.x + sx * off, ya + rand(-0.6, 0.6), B.z + sz * off], 0.6 + L * 0.03); }
   if (rng() < 0.35) { // hanging tube sign mid-street
     const t = rand(0.35, 0.65); const ya = rand(6, Math.min(hmin - 1, 9)); const c = [A.x + (B.x - A.x) * t, ya, A.z + (B.z - A.z) * t]; const nb = W.b('neon', c[0], c[2]);
     tube(v, [A.x, ya + 1.5, A.z], [B.x, ya + 1.5, B.z], 0.025, DARK, kg().tube4);

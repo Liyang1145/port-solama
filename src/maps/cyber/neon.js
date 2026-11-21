@@ -68,7 +68,7 @@ export function buildNeon(scene, city) {
   const items = [];
   const cand = city.parcels.filter((p) => !p.far && (p.style === 'downtown' && p.h > 45 || p.style === 'condo' || (p.style === 'mid' || p.style === 'deco') && p.h > 12));
   for (const p of cand) {
-    const big = p.style === 'downtown' || p.style === 'condo'; if (R() > (big ? 0.75 : 0.3)) continue;
+    const big = p.style === 'downtown' || p.style === 'condo'; if (R() > (big ? 0.85 : 0.45)) continue; // r6.3 denser (was 0.75 / 0.3)
     const fx = Math.cos(p.ang), fz = Math.sin(p.ang); const vert = R() < (big ? 0.55 : 0.75);
     const w = vert ? Math.min(p.w * 0.3, big ? 10 : 3.4) : Math.min(p.w * 0.8, big ? 32 : 9); const h = vert ? w * 4 : w * 0.5;
     const yC = big ? Math.min(p.h - h / 2 - 3, (0.35 + R() * 0.4) * p.h) : Math.min(p.h - h / 2 - 1, 5 + h / 2 + R() * 3); if (yC - h / 2 < 4.2) continue;
@@ -79,6 +79,20 @@ export function buildNeon(scene, city) {
     const ci = vert ? Math.floor(R() * 8) : Math.floor(R() * 16);
     const cell = vert ? [ci * 0.125, 0.5, 0.125, 0.5] : [(ci % 4) * 0.25, (3 - Math.floor(ci / 4)) * 0.125, 0.25, 0.125];
     items.push({ x, y: yC, z, ry, w, h, cell, seed: [R(), R() * 0.8] });
+  }
+  // r6.3 street-level holo layer: small blade banners and landscape screens on the shop band of mid-rise / hotel / downtown podium
+  // fronts (3.5–9 m up), so the pavement reads dense with ads at night instead of only the tower tops
+  const R2 = mulberry(4547);
+  for (const p of city.parcels) {
+    if (p.far || !(p.style === 'mid' || p.style === 'deco' || p.style === 'downtown')) continue;
+    const fx = Math.cos(p.ang), fz = Math.sin(p.ang), sx = -fz, sz = fx; const n = p.style === 'downtown' ? 3 : 2;
+    for (let k = 0; k < n; k++) { if (R2() > 0.55) continue; const vert = R2() < 0.6;
+      const w = vert ? 0.9 + R2() * 0.7 : 2.4 + R2() * 2.6, h = vert ? w * (2.6 + R2() * 1.4) : w * 0.5; const yC = 5.6 + h / 2 + R2() * 2.5;
+      const along = (R2() - 0.5) * (p.w - Math.max(w, 2) - 2); let x = p.x + fx * (p.d / 2) + sx * along, z = p.z + fz * (p.d / 2) + sz * along, ry = Math.atan2(fx, fz);
+      if (vert) { x += fx * (w * 0.5 + 0.5); z += fz * (w * 0.5 + 0.5); ry += Math.PI / 2; } else { x += fx * 0.35; z += fz * 0.35; }
+      const ci = vert ? Math.floor(R2() * 8) : Math.floor(R2() * 16);
+      const cell = vert ? [ci * 0.125, 0.5, 0.125, 0.5] : [(ci % 4) * 0.25, (3 - Math.floor(ci / 4)) * 0.125, 0.25, 0.125];
+      items.push({ x, y: yC, z, ry, w, h, cell, seed: [R2(), R2() * 0.6] }); }
   }
   const g = new THREE.PlaneGeometry(1, 1); const im = new THREE.InstancedMesh(g, mat, Math.max(1, items.length));
   const aCell = new Float32Array(items.length * 4), aSeed = new Float32Array(items.length * 2); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pv = new THREE.Vector3();

@@ -1,0 +1,14 @@
+{
+ "query": "hour=22&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "mapA_night",
+   "js": "__G.setHour(22.0); const g=__G.game; __G.step(3); JSON.stringify(__G.stats())"
+  },
+  {
+   "name": "mapA_day",
+   "js": "__G.setHour(13.0); __G.step(3); JSON.stringify(__G.stats())"
+  }
+ ]
+}

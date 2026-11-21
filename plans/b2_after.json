@@ -1,0 +1,51 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "b_night_street",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "b_megast_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1560,-290,0); __G.step(3); const c=__G.camera; c.position.set(-1548,4,-282); c.lookAt(-1592,55,-300); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "b_tenement_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); const c=__G.camera; c.position.set(-1604,3.5,-805); c.lookAt(-1586,10,-776); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "b_tenement_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); const c=__G.camera; c.position.set(-1604,3.5,-805); c.lookAt(-1586,10,-776); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "shop_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); const c=__G.camera; c.position.set(-1600,1.8,-794); c.lookAt(-1589,3.2,-780); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "harbor_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1240,-870,0); __G.step(3); const c=__G.camera; c.position.set(-1240,16,-872); c.lookAt(-1310,7,-856); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "walkway_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1546,440,0); __G.step(3); const c=__G.camera; c.position.set(-1546,2.2,455); c.lookAt(-1546,8,487); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "megamid_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1540,-320,0); __G.step(3); const c=__G.camera; c.position.set(-1490,75,-345); c.lookAt(-1597,125,-301); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "megamid_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1540,-320,0); __G.step(3); const c=__G.camera; c.position.set(-1490,75,-345); c.lookAt(-1597,125,-301); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "rf2",
+   "js": "__G.setHour(10.5); const g=__G.game; g.tp(-2600,2950,0); __G.step(3); const c=__G.camera; const y=__G.city.groundH(-2600,2950); c.position.set(-2600,y+1.7,2950); c.lookAt(-2660,y+5,3010); c.updateMatrixWorld(); __G.nature.update(c.position,true); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "rf2_pick",
+   "noshot": true,
+   "js": "JSON.stringify([__G.pick(300,300,960,540,4), __G.pick(480,250,960,540,3), JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))])"
+  }
+ ]
+}

@@ -143,6 +143,10 @@ function tube(pts, r0, r1, sides, segs) {
   const P = g.attributes.position, N = g.attributes.normal;
   for (let i = 0; i < P.count; i++) { const ring = Math.floor(i / RS); const t = ring / segs; const c = curve.getPointAt(Math.min(1, t)); const rad = r0 + (r1 - r0) * t;
     P.setXYZ(i, c.x + N.getX(i) * rad, c.y + N.getY(i) * rad, c.z + N.getZ(i) * rad); }
+  // r6.3 bark uv in metres-ish: the whole trunk used to map one bark tile (a 35 m trunk stretched one texel row over metres ->
+  // close-ups showed a smeared near-black crevice). Tile ~3 m along, ~1.6 m around.
+  const UV = g.attributes.uv; const ku = Math.max(1, Math.round(curve.getLength() / 3)), kv = Math.max(1, Math.round((Math.PI * (r0 + r1)) / 1.6));
+  for (let i = 0; i < UV.count; i++) UV.setXY(i, UV.getX(i) * ku, UV.getY(i) * kv);
   return g;
 }
 // leaf-card clump (same card style as veg.js trees; tropical colours)

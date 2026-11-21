@@ -1,0 +1,57 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "b_night_street",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,-Math.PI/2); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "ns_pick",
+   "noshot": true,
+   "js": "JSON.stringify([__G.pick(150,300,960,540,2),__G.pick(300,430,960,540,2),__G.pick(820,420,960,540,2),__G.pick(600,300,960,540,2)])"
+  },
+  {
+   "name": "b_megast_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1560,-290,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1548,4,-282); c.lookAt(-1592,55,-300); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "ms_pick",
+   "noshot": true,
+   "js": "JSON.stringify([__G.pick(335,150,960,540,2),__G.pick(320,230,960,540,2),__G.pick(370,60,960,540,2)])"
+  },
+  {
+   "name": "skin_diag",
+   "noshot": true,
+   "js": "const out=[]; const v=new __G.camera.position.constructor(); __G.scene.traverse(o=>{ if(!o.isSkinnedMesh) return; const bm=o.skeleton.boneMatrices; let mx=0,nan=0; for(let i=0;i<bm.length;i++){ const a=Math.abs(bm[i]); if(a!==a) nan++; else if(a>mx) mx=a; } const bones=o.skeleton.bones.length; const si=o.geometry.attributes.skinIndex; let smax=0; if(si) for(let i=0;i<si.array.length;i++) if(si.array[i]>smax) smax=si.array[i]; if(mx>200||nan||smax>=bones){ let r=o; while(r.parent&&r.parent.type!=='Scene') r=r.parent; let rr=o; const chain=[]; while(rr){chain.push(rr.name||rr.type); rr=rr.parent;} o.getWorldPosition(v); out.push({n:o.name,mx,nan,bones,smax,vis:o.visible,chain:chain.slice(0,8).join('<'),wp:[v.x,v.y,v.z].map(q=>+q.toFixed(1)),vc:o.geometry.attributes.position.count,ix:o.geometry.index?o.geometry.index.count:0, bsr:o.geometry.boundingSphere&&o.geometry.boundingSphere.radius, bt:o.skeleton.boneTexture?1:0, bindMode:o.bindMode}); } }); JSON.stringify(out.slice(0,6))"
+  },
+  {
+   "name": "b_tenement_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1604,3.5,-805); c.lookAt(-1586,10,-776); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "shop_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1600,1.8,-794); c.lookAt(-1589,3.2,-780); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "harbor_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1240,-870,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1240,16,-872); c.lookAt(-1310,7,-856); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "b_tenement_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1604,3.5,-805); c.lookAt(-1586,10,-776); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "trunk_close",
+   "js": "__G.setHour(10.5); const g=__G.game; g.tp(-2600,2950,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-2600,10,2950); __G.nature.update(c.position,true);\nlet best=null, bd=1e9; const m4=new __G.camera.matrix.constructor(); const v=new __G.camera.position.constructor();\n__G.scene.traverse(im=>{ if(!im.isInstancedMesh||!im.material||!im.material.customProgramCacheKey||im.material.customProgramCacheKey()!=='jbark') return; for(let i=0;i<im.count;i++){ im.getMatrixAt(i,m4); v.setFromMatrixPosition(m4); const s=m4.elements[5]; if(s<0.8) continue; const d=Math.hypot(v.x+2600,v.z-2950); if(d<bd){bd=d;best=[v.x,v.y,v.z,s,im.geometry.attributes.position.count];} } });\nif(best){ c.position.set(best[0]+3.2,best[1]+1.6,best[2]+2.0); c.lookAt(best[0],best[1]+2.6,best[2]); c.updateMatrixWorld(); __G.nature.update(c.position,true);} JSON.stringify(best)"
+  },
+  {
+   "name": "sign_close_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1604,3.5,-805); c.updateMatrixWorld(); __G.streamSync(); let best=null,bd=1e9; __G.scene.traverse(o=>{ if(!o.isMesh||!o.material||!o.material.customProgramCacheKey||o.material.customProgramCacheKey()!=='signface') return; const p=o.geometry.attributes.position; for(let i=0;i<p.count;i+=8){ const x=p.getX(i),y=p.getY(i),z=p.getZ(i); const dd=Math.hypot(x+1604,z+805); if(dd<bd){bd=dd;best=[x,y,z];} } }); if(best){ c.position.set(best[0]+2.2,best[1]-0.6,best[2]+2.2); c.lookAt(best[0],best[1],best[2]); c.updateMatrixWorld(); } __G.neon.update(__G.U.uNight.value, 0); JSON.stringify({best,bd})"
+  },
+  {
+   "name": "sign_close_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1604,3.5,-805); c.updateMatrixWorld(); __G.streamSync(); let best=null,bd=1e9; __G.scene.traverse(o=>{ if(!o.isMesh||!o.material||!o.material.customProgramCacheKey||o.material.customProgramCacheKey()!=='signface') return; const p=o.geometry.attributes.position; for(let i=0;i<p.count;i+=8){ const x=p.getX(i),y=p.getY(i),z=p.getZ(i); const dd=Math.hypot(x+1604,z+805); if(dd<bd){bd=dd;best=[x,y,z];} } }); if(best){ c.position.set(best[0]+2.2,best[1]-0.6,best[2]+2.2); c.lookAt(best[0],best[1],best[2]); c.updateMatrixWorld(); } __G.neon.update(__G.U.uNight.value, 0); JSON.stringify({best,bd})"
+  }
+ ]
+}

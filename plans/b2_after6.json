@@ -1,0 +1,15 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "b_megast_day6",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1560,-290,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1548,4,-282); c.lookAt(-1592,55,-300); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0}))"
+  },
+  {
+   "name": "head_diag",
+   "noshot": true,
+   "js": "let mesh=null; __G.scene.traverse(o=>{ if(!mesh && o.isSkinnedMesh && /Photographer_1$/.test(o.name)) mesh=o; }); if(!mesh) 'none'; else {\nconst sk=mesh.skeleton; const f=(b)=>b?{n:b.name,q:b.quaternion.toArray().map(x=>+x.toPrecision(4)), s:b.scale.toArray().map(x=>+x.toPrecision(4)), p:b.position.toArray().map(x=>+x.toPrecision(4)), mw:+Math.max(...b.matrixWorld.elements.map(Math.abs)).toPrecision(4)}:null;\nconst hb=sk.bones.find(b=>b.name==='Head'); const ch=[]; for(let b=hb;b&&b.isBone;b=b.parent) ch.push(f(b)); const kids=hb?hb.children.map(f):[];\nlet grp=mesh; while(grp.parent && grp.parent.type!=='Scene') grp=grp.parent;\nJSON.stringify({grpVis:grp.visible, modelVis:grp.children[0].visible, pos:grp.position.toArray(), ud:Object.keys(grp.userData), chain:ch.slice(0,4), kids:kids.slice(0,3), g:(()=>{ const g=__G.game; return Object.keys(g).filter(k=>Array.isArray(g[k])).map(k=>k+':'+g[k].length).join(',') })()}); }"
+  }
+ ]
+}

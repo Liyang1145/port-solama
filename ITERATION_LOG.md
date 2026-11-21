@@ -259,3 +259,9 @@ Each round: build → headless SwiftShader screenshots (`node shot.cjs plans/rou
 - light2：两图光影（AO 黑斑消除、接触硬化软阴影、金色时刻光柱、B 湿路灯光）；ground_a：A 图大陆城市肌理（路网/低层楼/塔楼吸附街区）；street_a：橱窗室内/街具/站姿。三补丁无冲突、build 通过。
 - 回归：B 7/7、A 10/11 + 0 PAGEERROR；missions 项失败是测试写死送货坐标（RNG 序列变化后抽到 x=-1057 的餐厅），已改测试为按 dest 坐标放车，非游戏 bug（未整套重跑）。
 - 截图 shots/r63（A 街景/金色/夜景/航拍/车、B 夜街）已查：A 无霓虹、无全黑。B 其余 3 张未等跑完。model_b2 尚未 READY。
+
+## 15:4x–16:2x CST 整合 model_b2（进行中，未发布）
+- 副本 /workspace/work/int3（real/ r6.3 + model_b2.patch，build 通过）。回归：B 7/7、A 10/11（missions 为已知测试坐标问题）、0 PAGEERROR。
+- 沙盒浏览器被重置：已重装 chromium + install-deps。shot.cjs 截图在 960×540 下读回卡住（需 CAP=canvas 与 &lowshadow&probe=0，且先看 tools 里 r6.3 用的方式）。截图未过 → 未写回 real/、未发布。model_b2.READY 仍待整合；r6.3 也尚未发布。
+- 下一轮：在 int3 用 CAP=canvas 截 A 街景/夜景 + B 夜街/巨塔，通过后 cp 回 real/、single.cjs、发布 r6.3（含 b2）。
+- **r6.3 已整合发布（含 model_b2）**：截图查过 A 日/夜（无霓虹、无全黑）、B 夜街（街边店面/招牌/杂物）；shots/r63/a_night2.png、b_night_street2.png。单文件 38.9MB。model_b2 → .MERGED。

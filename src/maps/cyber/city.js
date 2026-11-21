@@ -9,6 +9,8 @@ import { genParcels } from './parcels.js';
 import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
 import { megatower, tenement, shopStreet } from './arch.js';
+import { signFaceMat } from './dress.js';
+import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
 // r6.2: streamed parcels are built with a stub collider (stream.js nullCol); the hand-built Deco core uses the real grid
 const streamed = (ctx) => !(ctx.col instanceof ColliderGrid);
@@ -45,6 +47,17 @@ const NEON = [[1.0, 0.18, 0.55], [0.15, 0.85, 1.0], [0.6, 0.25, 1.0], [1.0, 0.45
 export const HOTEL_NAMES = ['CORALINE', 'SANDPIPER', 'LA PALOMA', 'SEAGRAPE', 'BRISA MAR', 'ALBATROSS', 'STARLIGHT', 'MARIGOLD', 'THE HALCYON', 'SOLANA', 'BLUE HERON', 'CASA LUNA'];
 
 export function buildCity(scene, mats, T) {
+  // r6.3 (model_b2): materials used by streamed dressing — 'vcolD' (small clutter, LOD-hidden) and 'puddle' (glossy wet pavement)
+  if (mats.vcol && !mats.vcolD) mats.vcolD = mats.vcol;
+  // puddles: glossy wet sheen at night (neon reflections), but by day a mirror-smooth puddle threw the sun / sky back as a white
+  // blob -> roughness and a cap on the outgoing light follow uNight (day: dull dark wet asphalt, night: glossy)
+  if (!mats.puddle) { mats.puddle = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.14, metalness: 0.0, envMapIntensity: 0.4, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+    mats.puddle.onBeforeCompile = (s) => { s.uniforms.uNight = U.uNight;
+      s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.6, 0.14, uNight);')
+        .replace('#include <opaque_fragment>', 'outgoingLight = min(outgoingLight, vec3(mix(0.09, 3.0, uNight)));\n#include <opaque_fragment>'); };
+    mats.puddle.customProgramCacheKey = () => 'puddleN'; }
+  if (!mats.signface) mats.signface = signFaceMat();
   const W = new World(250);
   W.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 };
   W.attrs.road = { aRd: 4 };
@@ -683,6 +696,7 @@ export function downtownBlock(ctx, b, palms, trees, forceTall) {
     if (streamed(ctx) && tall >= 90 && pw > 24 && pd > 24) { megatower(ctx, x0, z0, x1, z1, tall, { volume, rooftop }); continue; } // r6.2 archetype: megatower
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     volume(ctx, rect(x0 + 1, z0 + 1, x1 - 1, z1 - 1), 0.15, podH, { style: rng() < 0.5 ? 0 : 2, fh: 4.0, ww: 3.5, wall: [0.78, 0.77, 0.74], glass: pick(GLASS), store: true });
+    if (streamed(ctx)) shopStreet(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 4.6, 4.5, { grit: 0.3 }); // r6.3: downtown podiums get the street-level shop row too
     const tw = Math.min(pw - 8, rand(26, 44)), td = Math.min(pd - 8, rand(26, 44));
     const tx0 = cx - tw / 2, tx1 = cx + tw / 2, tz0 = cz - td / 2, tz1 = cz + td / 2;
     rooftop(ctx, x0 + 1, z0 + 1, x1 - 1, z1 - 1, podH, 'pod', [[tx0 - 2, tz0 - 2, tx1 + 2, tz1 + 2]]);
@@ -860,7 +874,14 @@ function yard(ctx, b, kind) {
   { const gx0 = ix0 + 3, gx1 = ix1 - 3, gz = kind === 'depot' ? iz1 - 8 : iz0 + 2; const Y = [0.9, 0.62, 0.1];
     for (const x of [gx0, gx1]) for (const dz of [-3, 3]) { box(v, x - 0.5, 0.16, gz + dz - 0.5, x + 0.5, 22, gz + dz + 0.5, {}, Y); col.add(x - 0.5, gz + dz - 0.5, x + 0.5, gz + dz + 0.5, 22, 'crane'); }
     box(v, gx0 - 6, 22, gz - 3.6, gx1 + 6, 24, gz - 2.4, {}, Y); box(v, gx0 - 6, 22, gz + 2.4, gx1 + 6, 24, gz + 3.6, {}, Y);
-    box(v, (gx0 + gx1) / 2 - 2, 20.5, gz - 2.4, (gx0 + gx1) / 2 + 2, 22, gz + 2.4, {}, [0.25, 0.25, 0.27]); }
+    box(v, (gx0 + gx1) / 2 - 2, 20.5, gz - 2.4, (gx0 + gx1) / 2 + 2, 22, gz + 2.4, {}, [0.25, 0.25, 0.27]);
+    // r6.3 night read: sodium work-light boxes under both girders, red obstruction lights on the ends, a lit cab, amber leg strobes
+    const nl = W.b('neon', cx, cz);
+    for (const zz of [gz - 3, gz + 3]) { for (let x = gx0 - 4; x <= gx1 + 4; x += 5) box(nl, x - 0.5, 21.85, zz - 0.25, x + 0.5, 22, zz + 0.25, {}, [0.95, 0.7, 0.36]);
+      for (const x of [gx0 - 6, gx1 + 6]) box(nl, x - 0.2, 24, zz - 0.2, x + 0.2, 24.4, zz + 0.2, {}, [1, 0.08, 0.05]);
+      box(nl, gx0 - 6, 23.1, zz + (zz > gz ? 0.6 : -0.62), gx1 + 6, 23.2, zz + (zz > gz ? 0.62 : -0.6), {}, [0.25, 0.3, 0.34]); }
+    box(nl, (gx0 + gx1) / 2 - 1.6, 20.8, gz - 2.42, (gx0 + gx1) / 2 + 1.6, 21.6, gz - 2.4, {}, [0.4, 0.42, 0.38]);
+    for (const x of [gx0, gx1]) for (const dz of [-3, 3]) box(nl, x - 0.15, 2.2, gz + dz - 0.62, x + 0.15, 2.5, gz + dz - 0.5, {}, [1, 0.55, 0.05]); }
   // chain-link fence posts along the street sides (gap = gate)
   const m = W.b('metal', cx, cz);
   for (let x = ix0; x <= ix1; x += 3) for (const z of [iz0 - 0.2, iz1 + 0.2]) if (Math.abs(x - cx) > 5) box(m, x - 0.04, 0.16, z - 0.04, x + 0.04, 2.2, z + 0.04);

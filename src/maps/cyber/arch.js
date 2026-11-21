@@ -10,7 +10,8 @@
 import * as THREE from 'three';
 import { box, polyCap, prismWalls, rect } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
-import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL } from './kit.js';
+import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL, RUST } from './kit.js';
+import { grime, sidewalk, hangingSign, laundryLine, streak } from './dress.js';
 
 // --------------------------------------------------------------- shop street ----
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
@@ -27,6 +28,10 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     if (opts.signs !== false && rng() < 0.75) signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9));
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) vending(W, F, a0 + 0.6 + j * 1.0, y0); }
   }
+  // r6.3: hanging light-box signs on wall arms over the pavement (every couple of bays) + sidewalk dressing (bins, trash, crates,
+  // food stalls, umbrella tables, puddles, ground pipes) weighted by how gritty the street is
+  for (let i = 0; i < n; i++) if (rng() < (opts.hang ?? 0.45)) hangingSign(W, F, i * cw + rand(0.4, 0.9), y0 + ground + rand(0.2, 1.4));
+  if (opts.dress !== false) sidewalk(W, F, y0, opts.grit ?? 0.5);
   // blade sign at one end of the frontage
   if (opts.blade !== false && rng() < 0.85) {
     const a = rng() < 0.5 ? 0.6 : F.len - 0.6; const h = rand(2.4, 4.2), w = rand(0.8, 1.2); const yc = y0 + ground + 0.6 + h / 2;
@@ -45,21 +50,26 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
   const RIB = [[0.2, 0.21, 0.23], [0.5, 0.38, 0.24], [0.42, 0.08, 0.08], [0.82, 0.84, 0.86]][fam];
   const style = [0, 2, 5, 0][fam]; const fh = 3.9; const ww = style === 0 ? rand(1.5, 2.0) : rand(2.0, 2.6);
   const glow = pick(NEONC);
+  const ALT = [[5, 2], [0, 5], [0, 2], [5, 2]];
   // r6.2b variety: X mega-braces on ~half the towers (always on the steel-exo family 0); the rest get vertical mullion fins
   const xb = fam === 0 || rng() < 0.4;
   // podium with the shop street on the front
   const podH = 0.15 + rand(10, 15);
   volume(ctx, rect(x0 + 1, z0 + 1, x1 - 1, z1 - 1), 0.15, podH, { style: 2, fh: 4.6, ww: 3.6, wall: [0.36, 0.36, 0.38], glass: GL, store: true, ground: 5.0, storeW: 4.6, canopy: false });
-  shopStreet(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 5.0, 4.6);
+  shopStreet(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 5.0, 4.6, { grit: 0.25 });
   // tiers
   const nT = tall > 150 ? 4 : 3; const FR = nT === 4 ? [0.42, 0.68, 0.88, 1.0] : [0.5, 0.8, 1.0];
   let tx = Math.min(pw - 7, 46) / 2, tz = Math.min(pd - 7, 46) / 2; let y = podH; const tiers = [];
   rooftop(ctx, x0 + 1, z0 + 1, x1 - 1, z1 - 1, podH, 'pod', [[cx - tx - 2, cz - tz - 2, cx + tx + 2, cz + tz + 2]]);
   for (let k = 0; k < nT; k++) {
     const yT = podH + tall * FR[k]; const X0 = cx - tx, X1 = cx + tx, Z0 = cz - tz, Z1 = cz + tz;
-    volume(ctx, rect(X0, Z0, X1, Z1), y, yT, { style, fh, ww, wall: WALL, glass: GL, collide: false, lite: true });
+    // r6.3 per-tier facade variation: alternate panel type / bay width / glass tint so one tower no longer repeats a single pattern
+    const tSt = k > 0 && rng() < 0.5 ? pick(ALT[fam]) : style; const tWw = tSt === style ? ww * rand(0.85, 1.2) : (tSt === 0 ? rand(1.4, 1.9) : rand(2.0, 2.8));
+    const tGl = GL.map((q) => Math.max(0, q + rand(-0.03, 0.05))); const tWall = WALL.map((q) => q * rand(0.9, 1.08));
+    volume(ctx, rect(X0, Z0, X1, Z1), y, yT, { style: tSt, fh, ww: tWw, wall: tWall, glass: tGl, collide: false, lite: true });
     tiers.push({ X0, X1, Z0, Z1, y0: y, y1: yT });
     const v = W.b('vcol', cx, cz), nb = W.b('neon', cx, cz);
+    towerSkin(W, v, nb, X0, Z0, X1, Z1, y, yT, fh, tWw, RIB, tWall, k, fam, ctx, deps);
     // exoskeleton: corner columns (L-section read as 1.3 m square), edge ribs every ~8 m
     for (const [px, pz] of [[X0, Z0], [X1, Z0], [X1, Z1], [X0, Z1]]) box(v, px - 0.65, y, pz - 0.65, px + 0.65, yT + 0.6, pz + 0.65, {}, RIB);
     const ribs = (ax, a0, a1, c, s) => { const L = a1 - a0; const nr = Math.max(1, Math.round(L / 8)); const pts = [];
@@ -103,7 +113,75 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
   }
   // antennas / aviation lights on the tier corners
   for (const t of tiers) put(nb, G.ball, t.X1, t.y1 + 0.8, t.Z1, 0.18, 0.18, 0.18, [1, 0.12, 0.08]);
+  // r6.3 building-maintenance unit on the top tier: roof rail ring, slewing jib, cables down to a cradle on one face
+  if (rng() < 0.6) bmu(v, nb, T, H);
   return tiers;
+}
+// r6.3 tower skin pieces for one tier [X0..X1]x[Z0..Z1], y..yT:
+//  * spandrel / panel bands every few floors (opaque, protruding) in rib or darker wall colour
+//  * lit window clusters (emissive panes over whole office floors: warm / cool / teal) and dark vacant clusters
+//  * a renovation patch: scaffold grid + netting with work lamps (some towers)
+//  * a cantilevered sky-lobby pod on the street face (some towers)
+//  * terrace clutter on the setback below (HVAC units, cooling towers)
+const LITC = [[0.17, 0.13, 0.08], [0.15, 0.12, 0.09], [0.09, 0.12, 0.15], [0.05, 0.14, 0.13], [0.14, 0.14, 0.13]];
+function towerSkin(W, v, nb, X0, Z0, X1, Z1, y, yT, fh, ww, RIB, WALL, k, fam, ctx, deps) {
+  const G = kg(); const H = yT - y; const faces = [
+    { F: edge([X1, Z1], [X1, Z0]) }, { F: edge([X0, Z0], [X0, Z1]) }, { F: edge([X1, Z0], [X0, Z0]) }, { F: edge([X0, Z1], [X1, Z1]) }];
+  // spandrel bands
+  if (rng() < 0.65) { const every = randi(5, 10), bh = rand(0.5, 1.1), dep = rand(0.18, 0.35); const bc = rng() < 0.5 ? RIB : WALL.map((q) => q * 0.7);
+    for (let yy = y + every * fh; yy < yT - 4; yy += every * fh) { box(v, X0 - dep, yy, Z0 - dep, X1 + dep, yy + bh, Z0, {}, bc); box(v, X0 - dep, yy, Z1, X1 + dep, yy + bh, Z1 + dep, {}, bc);
+      box(v, X0 - dep, yy, Z0, X0, yy + bh, Z1, {}, bc); box(v, X1, yy, Z0, X1 + dep, yy + bh, Z1, {}, bc); } }
+  // window clusters
+  for (const { F } of faces) {
+    const n = Math.max(1, Math.round(F.len / ww)), bw = F.len / n; const nf = Math.floor((H - 3.2) / fh); if (nf < 3) continue;
+    const nc = randi(1, 3) + (k === 0 ? 1 : 0);
+    for (let i = 0; i < nc; i++) {
+      const f0 = randi(0, Math.max(0, nf - 3)), f1 = Math.min(nf, f0 + randi(2, 7)), c0 = randi(0, Math.max(0, n - 3)), c1 = Math.min(n, c0 + randi(3, 10));
+      const lit = rng() < 0.72; const base = pick(LITC); const b = lit ? nb : v;
+      for (let f = f0; f < f1; f++) for (let c = c0; c < c1; c++) { if (rng() < 0.12) continue; const yy = y + f * fh + fh * 0.15, a0 = c * bw + bw * 0.12, a1 = (c + 1) * bw - bw * 0.12;
+        const kk = lit ? rand(0.65, 1.25) : 1; const col = lit ? base.map((q) => q * kk) : [0.035, 0.038, 0.042];
+        const A = F.P(a0, 0.06), B = F.P(a1, 0.06); b.quad(new THREE.Vector3(A[0], yy, A[1]), new THREE.Vector3(B[0], yy, B[1]), new THREE.Vector3(B[0], yy + fh * 0.66, B[1]), new THREE.Vector3(A[0], yy + fh * 0.66, A[1]), [0, 0, 1, 0, 1, 1, 0, 1], {}, col); }
+    }
+  }
+  // renovation patch with scaffold + netting on one face
+  if (k < 2 && rng() < 0.3) { const F = pick(faces).F; const n = Math.max(1, Math.round(F.len / ww)), bw = F.len / n; const nf = Math.floor((H - 3) / fh);
+    if (nf > 6) { const f0 = randi(1, nf - 6), f1 = f0 + randi(4, 6), a0 = randi(0, Math.max(0, n - 6)) * bw, a1 = Math.min(F.len, a0 + randi(4, 7) * bw); const y0 = y + f0 * fh, y1 = y + f1 * fh; const d = 1.1, sc = [0.55, 0.56, 0.58];
+      const net = [0.24, 0.33, 0.3]; const P = (a, dd, yy) => { const q = F.P(a, dd); return new THREE.Vector3(q[0], yy, q[1]); };
+      v.quad(P(a0, d + 0.05, y0), P(a1, d + 0.05, y0), P(a1, d + 0.05, y1 + 1), P(a0, d + 0.05, y1 + 1), [0, 0, 1, 0, 1, 1, 0, 1], {}, net);
+      for (let a = a0; a <= a1 + 0.01; a += 2.0) { const q = F.P(a, d), q2 = F.P(a, 0.3); beam(v, [q[0], y0 - 0.2, q[1]], [q[0], y1 + 1.2, q[1]], 0.06, sc, null, G.tube6); beam(v, [q2[0], y0 - 0.2, q2[1]], [q2[0], y1 + 1.2, q2[1]], 0.06, sc, null, G.tube6); }
+      for (let yy = y0; yy <= y1 + 0.5; yy += 2.0) { const q = F.P(a0, d + 0.12), q2 = F.P(a1, d + 0.12); beam(v, [q[0], yy, q[1]], [q2[0], yy, q2[1]], 0.06, sc, null, G.tube6);
+        const p0 = F.P(a0, 0.3), p1 = F.P(a1, 0.3); beam(v, [p0[0], yy - 0.1, p0[1]], [p1[0], yy - 0.1, p1[1]], 0.6, [0.5, 0.42, 0.3], 0.05); } // boards
+      for (let i = 0; i < 4; i++) { const q = F.P(rand(a0, a1), d + 0.2); put(nb, G.box, q[0], rand(y0, y1), q[1], 0.25, 0.18, 0.12, [0.6, 0.6, 0.55]); } } }
+  // sky-lobby pod cantilevered off the street face
+  if (k < 2 && rng() < 0.3 && H > 30) { const ph = fh * randi(3, 5), py = y + rand(0.3, 0.7) * (H - ph); const pz = (Z0 + Z1) / 2 + rand(-0.2, 0.2) * (Z1 - Z0), pw = Math.min(Z1 - Z0 - 4, rand(10, 18)); const out = rand(2.5, 4.5);
+    deps.volume(ctx, rect(X1, pz - pw / 2, X1 + out, pz + pw / 2), py, py + ph, { style: fam === 0 ? 2 : 0, fh, ww: rand(1.6, 2.2), wall: RIB.map((q) => q * 1.1 + 0.05), glass: [0.08, 0.14, 0.18], collide: false, lite: true, relief: false });
+    box(v, X1, py - 0.6, pz - pw / 2 - 0.2, X1 + out + 0.2, py, pz + pw / 2 + 0.2, {}, RIB, false);
+    for (const s of [-1, 1]) beam(v, [X1, py - fh * 2, pz + s * (pw / 2 - 0.5)], [X1 + out, py - 0.6, pz + s * (pw / 2 - 0.5)], 0.35, RIB);
+    box(nb, X1 + 0.2, py - 0.68, pz - pw / 2, X1 + out, py - 0.62, pz + pw / 2, {}, pick(NEONC)); }
+  // clutter on the terrace this tier stands on (k > 0: setback of the tier below)
+  if (k > 0) { const n = randi(3, 8); for (let i = 0; i < n; i++) { const side = randi(0, 3); const t = rand(0.1, 0.9); const o = rand(1.2, 2.4);
+    const x = side === 0 ? X1 + o : side === 1 ? X0 - o : X0 + (X1 - X0) * t, z = side === 2 ? Z0 - o : side === 3 ? Z1 + o : Z0 + (Z1 - Z0) * t;
+    if (rng() < 0.6) { box(v, x - 0.7, y, z - 0.6, x + 0.7, y + 1.1, z + 0.6, {}, [0.6, 0.62, 0.64]); put(v, G.disc6, x, y + 1.12, z, 0.45, 0.04, 0.45, DARK); }
+    else { put(v, G.cyl12, x, y + 1.2, z, 1.0, 2.4, 1.0, [0.7, 0.71, 0.7]); put(v, G.cyl12, x, y + 2.45, z, 0.85, 0.1, 0.85, DARK); } } }
+}
+// building-maintenance unit: rail ring inset from the roof edge, a slewing carriage with a jib over one face, hoist cables and a cradle
+function bmu(v, nb, T, H) {
+  const G = kg(); const ins = 1.6; const x0 = T.X0 + ins, x1 = T.X1 - ins, z0 = T.Z0 + ins, z1 = T.Z1 - ins; const rc = [0.45, 0.46, 0.48]; const y = H + 0.15;
+  for (const [a, b] of [[[x0, z0], [x1, z0]], [[x1, z0], [x1, z1]], [[x1, z1], [x0, z1]], [[x0, z1], [x0, z0]]]) beam(v, [a[0], y + 0.15, a[1]], [b[0], y + 0.15, b[1]], 0.25, rc, 0.3);
+  const face = randi(0, 3); const t = rand(0.25, 0.75);
+  const P = [[x1, z0 + (z1 - z0) * t, 1, 0], [x0, z0 + (z1 - z0) * t, -1, 0], [x0 + (x1 - x0) * t, z0, 0, -1], [x0 + (x1 - x0) * t, z1, 0, 1]][face];
+  const [cx, cz, ox, oz] = P; const yc = y + 0.3; const bc = pick([[0.85, 0.85, 0.82], [0.9, 0.62, 0.1], [0.2, 0.22, 0.25]]);
+  put(v, G.box, cx - ox * 1.6, yc + 1.0, cz - oz * 1.6, oz ? 2.4 : 4.2, 2.0, oz ? 4.2 : 2.4, bc); // carriage + counterweight
+  put(v, G.box, cx - ox * 3.4, yc + 0.8, cz - oz * 3.4, oz ? 1.8 : 1.2, 1.4, oz ? 1.2 : 1.8, [0.3, 0.3, 0.32]);
+  const mast = [cx - ox * 0.8, yc + 5.5, cz - oz * 0.8]; beam(v, [mast[0], yc + 2, mast[2]], mast, 0.5, bc);
+  const tip = [cx + ox * (ins + 2.2), yc + 5.2, cz + oz * (ins + 2.2)]; beam(v, [cx - ox * 3.2, yc + 5.6, cz - oz * 3.2], tip, 0.45, bc, 0.6);
+  beam(v, [cx - ox * 3.2, yc + 2.2, cz - oz * 3.2], mast, 0.12, bc); // backstay
+  put(nb, G.ball, tip[0], tip[1] + 0.4, tip[2], 0.15, 0.15, 0.15, [1, 0.5, 0.05]);
+  const drop = rand(18, Math.min(90, H * 0.6)); const cy = H - drop; const sx = oz, sz = -ox; const fx = tip[0], fz = tip[2];
+  for (const s of [-1.6, 1.6]) tube(v, [fx + sx * s * 0.3, tip[1] - 0.2, fz + sz * s * 0.3], [fx + sx * s, cy + 1.2, fz + sz * s], 0.02, DARK, G.tube4);
+  put(v, G.box, fx, cy, fz, sx ? 4.0 : 0.8, 0.15, sz ? 4.0 : 0.8, [0.6, 0.6, 0.62]); // cradle floor
+  for (const yy of [cy + 0.55, cy + 1.1]) { put(v, G.box, fx + ox * 0.4, yy, fz + oz * 0.4, sx ? 4.0 : 0.05, 0.05, sz ? 4.0 : 0.05, bc); put(v, G.box, fx - ox * 0.4, yy, fz - oz * 0.4, sx ? 4.0 : 0.05, 0.05, sz ? 4.0 : 0.05, bc); }
+  put(nb, G.box, fx + ox * 0.45, cy + 1.3, fz + oz * 0.45, 0.2, 0.12, 0.2, [0.9, 0.85, 0.6]);
 }
 function dronePad(W, x, y, z, r, nb, v) {
   const G = kg(); put(v, G.cyl12, x, y - 0.6, z, r, 1.2, r, [0.28, 0.29, 0.3]);
@@ -152,24 +230,31 @@ export function tenement(ctx, x0, z0, x1, z1, deps) {
   const wall = pick([[0.62, 0.58, 0.52], [0.55, 0.6, 0.58], [0.7, 0.62, 0.55], [0.5, 0.52, 0.56], [0.66, 0.5, 0.46], [0.74, 0.72, 0.66], [0.45, 0.5, 0.42]]);
   const ww = rand(2.6, 3.2); const sw = rand(3.6, 4.6);
   volume(ctx, rect(x0, z0, x1, z1), 0.15, top, { style: 2, fh, ww, wall, glass: [0.1, 0.12, 0.13], store: true, storeW: sw, ground, canopy: false });
-  shopStreet(ctx, x1, z0, z1, 0.15, ground, sw);
+  shopStreet(ctx, x1, z0, z1, 0.15, ground, sw, { grit: 0.9, hang: 0.6 });
   // facades: front (x1, full dressing) + both sides (lighter); window bays line up with the facade shader (n = round(len / ww))
   const yF0 = 0.15 + ground; const poly = rect(x0, z0, x1, z1);
   const faces = [{ F: edge(poly[1], poly[2]), main: true }, { F: edge(poly[0], poly[1]), main: false }, { F: edge(poly[2], poly[3]), main: false }];
   const fe = rng() < 0.55 ? 0 : (rng() < 0.5 ? 1 : 2); // fire escape on the front or a side
   for (let fi = 0; fi < faces.length; fi++) {
     const { F, main } = faces[fi]; if (F.len < 6) continue; const n = Math.max(1, Math.round(F.len / ww)); const cw = F.len / n;
-    let skip0 = -1, skip1 = -1;
+    let skip0 = -1, skip1 = -1; const br = []; // r6.3 bracket points -> drip / rust streaks below them
     if (fi === fe && floors > 2) { const nb = Math.max(1, Math.round(3.6 / cw)); const c0 = Math.max(0, Math.floor(n / 2 - nb / 2) + (rng() < 0.5 ? -1 : 1) * randi(0, Math.max(0, Math.floor(n / 2) - nb)));
-      skip0 = c0; skip1 = c0 + nb; fireEscape(W, F, (c0 + nb / 2) * cw, yF0 + fh * 0.0 + 0.05, top - 0.5, fh, nb * cw - 0.3); }
+      skip0 = c0; skip1 = c0 + nb; fireEscape(W, F, (c0 + nb / 2) * cw, yF0 + fh * 0.0 + 0.05, top - 0.5, fh, nb * cw - 0.3);
+      for (let y = yF0; y < top - 1; y += fh) for (const s of [-1, 1]) br.push({ a: (c0 + nb / 2) * cw + s * (nb * cw / 2 - 0.3), y: y - 0.5, rust: 0.9, p: 0.8 }); }
     for (let k = 0; k < floors - 1; k++) {
       const yf = yF0 + k * fh;
       for (let c = 0; c < n; c++) {
         if (c >= skip0 && c < skip1) continue; const ac = (c + 0.5) * cw; const r = rng();
-        if (r < (main ? 0.14 : 0.04)) cageBalcony(W, F, ac, yf + 0.02, Math.min(cw * 0.95, 3.2), fh);
-        else if (r < (main ? 0.5 : 0.24)) acUnit(W, F, ac + (rng() < 0.5 ? 0 : (rng() < 0.5 ? -1 : 1) * cw * 0.3), yf + fh * 0.04 + 0.05);
+        if (r < (main ? 0.14 : 0.04)) { cageBalcony(W, F, ac, yf + 0.02, Math.min(cw * 0.95, 3.2), fh); br.push({ a: ac - cw * 0.4, y: yf - 0.12, rust: 0.6 }, { a: ac + cw * 0.4, y: yf - 0.12, rust: 0.6 }); }
+        else if (r < (main ? 0.5 : 0.24)) { const aa = ac + (rng() < 0.5 ? 0 : (rng() < 0.5 ? -1 : 1) * cw * 0.3); acUnit(W, F, aa, yf + fh * 0.04 + 0.05); br.push({ a: aa, y: yf + fh * 0.04 - 0.25, rust: 0.25 }); }
       }
     }
+    grime(W, F, yF0, top, wall, br, { k: main ? 1.2 : 1, cw });
+    // laundry strung along the front between window brackets on a few floors
+    if (main && floors > 3) for (let i = 0; i < randi(1, 3); i++) { const k = randi(0, floors - 3); const yl = yF0 + k * fh + rand(1.9, 2.3); const c0 = randi(0, Math.max(0, n - 3)); const c1 = Math.min(n, c0 + randi(2, 3));
+      const A = F.P(c0 * cw + 0.3, rand(0.55, 0.8)), B = F.P(c1 * cw - 0.3, rand(0.55, 0.8));
+      for (const [q, aa] of [[A, c0 * cw + 0.3], [B, c1 * cw - 0.3]]) beam(W.b('vcolD', q[0], q[1]), [F.P(aa, 0)[0], yl, F.P(aa, 0)[1]], [q[0], yl, q[1]], 0.025, RUST);
+      laundryLine(W, [A[0], yl, A[1]], [B[0], yl, B[1]], rand(0.12, 0.3)); }
     // conduits + cable bundles sagging along the facade between brackets
     const v = W.b('vcolD', F.P(0, 0)[0], F.P(0, 0)[1]);
     if (main || rng() < 0.5) {
@@ -193,6 +278,11 @@ export function tenement(ctx, x0, z0, x1, z1, deps) {
     v.quad(Vt(sx + 4.8, top + 2.33, sz - 0.3), Vt(sx + 4.8, top + 2.33, sz + 3.8), Vt(sx - 0.3, top + 2.78, sz + 3.8), Vt(sx - 0.3, top + 2.78, sz - 0.3), [0, 0, 1, 0, 1, 1, 0, 1], {}, [0.2, 0.18, 0.16]); }
   for (let i = 0; i < randi(1, 4); i++) { const ax = rand(x0 + 1, x1 - 1), az = rand(z0 + 1, z1 - 1), ah = rand(3, 7); put(v, G.cyl8, ax, top + ah / 2, az, 0.04, ah, 0.04, STEEL);
     for (let k = 0; k < 3; k++) put(v, G.box, ax, top + ah * (0.55 + k * 0.15), az, rand(0.8, 1.6), 0.03, 0.03, STEEL, rand(0, 3)); }
+  for (let i = 0; i < randi(0, 3); i++) { // r6.3 solar water heaters: tilted collector + horizontal tank on a steel frame
+    const sx = rand(x0 + 1.5, x1 - 3), sz = rand(z0 + 1.5, z1 - 2.5); const Vt = (x, y, z) => new THREE.Vector3(x, y, z);
+    v.quad(Vt(sx, top + 0.3, sz), Vt(sx, top + 0.3, sz + 2), Vt(sx + 1.4, top + 1.3, sz + 2), Vt(sx + 1.4, top + 1.3, sz), [0, 0, 1, 0, 1, 1, 0, 1], {}, [0.1, 0.12, 0.16]);
+    v.geom(G.cyl8, new THREE.Matrix4().makeTranslation(sx + 1.6, top + 1.55, sz + 1).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)).multiply(new THREE.Matrix4().makeScale(0.28, 2.2, 0.28)), {}, [0.8, 0.8, 0.78]);
+    for (const zz of [sz + 0.2, sz + 1.8]) { beam(v, [sx + 1.4, top, zz], [sx + 1.4, top + 1.3, zz], 0.05, STEEL); beam(v, [sx + 1.6, top, zz], [sx + 1.6, top + 1.4, zz], 0.05, STEEL); } }
   if (rng() < 0.45) { // rooftop billboard frame facing the street with a tube-neon face
     const zc = (z0 + z1) / 2, bw = Math.min(z1 - z0 - 2, rand(7, 11)), bh = bw * 0.38, by = top + 2.2;
     for (const zz of [zc - bw * 0.4, zc + bw * 0.4]) { beam(v, [x1 - 1.2, top, zz], [x1 - 1.2, by + bh, zz], 0.18, DARK); beam(v, [x1 - 3.2, top, zz], [x1 - 1.2, by + bh * 0.6, zz], 0.12, DARK); }
