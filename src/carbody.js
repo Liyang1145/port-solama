@@ -158,7 +158,7 @@ export function buildBody(kind) {
     const hx = HW * (S.hl === 'round' ? 0.66 : 0.68); const z0 = endZ(hx, yHl, true); const yaw = s * -0.35;
     const rx = S.hl === 'slim' ? 0.2 : 0.2, ry = S.hl === 'round' ? 0.075 : S.hl === 'slim' ? 0.045 : 0.058, rz = 0.1;
     const lz = z0 - 0.035; // lens centre a little behind the surface so ~6 cm of the dome stands proud
-    const hous = new THREE.SphereGeometry(1, 16, 10); hous.scale(rx * 0.97, ry * 0.95, rz * 0.9); put(parts.lampIn, hous, s * hx, yHl, lz - 0.006, 0.1, yaw, 0);
+    const hous = new THREE.SphereGeometry(1, 16, 10, Math.PI, Math.PI); hous.scale(rx * 0.97, ry * 0.95, rz * 0.9); put(parts.lampIn, hous, s * hx, yHl, lz - 0.006, 0.1, yaw, 0);
     const lens = new THREE.SphereGeometry(1, 18, 10); lens.scale(rx, ry, rz); put(parts.lens, lens, s * hx, yHl, lz, 0.1, yaw, 0);
     const hg = new THREE.SphereGeometry(1, 14, 8); hg.scale(rx * 0.9, ry * 0.85, rz * 0.8); put(parts.hglow, hg, s * hx, yHl, lz - 0.004, 0.1, yaw, 0); // night: lit lens glow (additive)
     const cos = Math.cos(yaw), sin = Math.sin(yaw); const at = (dx, dz) => [s * hx + dx * cos + dz * sin, lz - dx * sin + dz * cos];
@@ -176,7 +176,7 @@ export function buildBody(kind) {
   const tailUnit = (s) => {
     const yTl = low ? top(0.02) - 0.08 : 1.0 + lift; const tx = HW * 0.72; const z0 = endZ(tx, yTl, false); const yaw = s * 0.45;
     const rx = S.twoDoor ? 0.3 : 0.26, ry = S.hl === 'round' ? 0.06 : 0.07, rz = 0.1; const lz = z0 + 0.035;
-    const cav = new THREE.SphereGeometry(1, 14, 8); cav.scale(rx * 0.97, ry * 0.93, rz * 0.9); put(parts.lampIn, cav, s * tx, yTl, lz + 0.006, 0, yaw, 0);
+    const cav = new THREE.SphereGeometry(1, 14, 8, 0, Math.PI); cav.scale(rx * 0.97, ry * 0.93, rz * 0.9); put(parts.lampIn, cav, s * tx, yTl, lz + 0.006, 0, yaw, 0);
     const lens = new THREE.SphereGeometry(1, 16, 8); lens.scale(rx, ry, rz); put(parts.tlens, lens, s * tx, yTl, lz, 0, yaw, 0);
     const tg = new THREE.SphereGeometry(1, 12, 6); tg.scale(rx * 0.9, ry * 0.8, rz * 0.8); put(parts.tglow, tg, s * tx, yTl, lz + 0.004, 0, yaw, 0);
     const cos = Math.cos(yaw), sin = Math.sin(yaw); const at = (dx, dz) => [s * tx + dx * cos + dz * sin, lz - dx * sin + dz * cos];
