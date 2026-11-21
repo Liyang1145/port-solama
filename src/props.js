@@ -7,7 +7,28 @@ import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
 import { CYBER } from './mapsel.js';
-import { furnMat, PB } from './streetkit.js';
+import { furnMat, PB, stampAO, signalMastA, signalMastFarA, pedPoleA, hydrantA, bikeRackA, recycleBinA } from './streetkit.js';
+
+// a_props (map 索拉纳港): fine-detail parts (bolts, chains, buttons, cables, louvres) go into 160 m chunk meshes that are only
+// drawn within ~120 m of the camera; coarse parts merge into one always-on mesh per prop family.
+const FINE = new Map(), FINE_MESHES = [];
+function fineB(x, z) { const ix = Math.floor(x / 160), iz = Math.floor(z / 160), k = ix + ',' + iz; let e = FINE.get(k);
+  if (!e) FINE.set(k, e = { b: new GeoBucket({ aPbr: 3 }), x0: ix * 160, z0: iz * 160 }); return e.b; }
+// masts additionally: full model in 320 m 'mid' chunks drawn within ~260 m, a ~120-triangle far model in the same chunks otherwise
+const MIDF = new Map();
+function midB(x, z) { const ix = Math.floor(x / 320), iz = Math.floor(z / 320), k = ix + ',' + iz; let e = MIDF.get(k);
+  if (!e) MIDF.set(k, e = { b: new GeoBucket({ aPbr: 3 }), f: new GeoBucket({ aPbr: 3 }), x0: ix * 320, z0: iz * 320 }); return e; }
+function flushFine(scene) {
+  for (const e of FINE.values()) if (e.b.vc) { const m = new THREE.Mesh(e.b.build(), furnMat()); m.receiveShadow = true; m.visible = false; scene.add(m); FINE_MESHES.push({ m, x0: e.x0, z0: e.z0, s: 160, r: 120 }); }
+  FINE.clear();
+  for (const e of MIDF.values()) if (e.b.vc) { const m = new THREE.Mesh(e.b.build(), furnMat()); m.castShadow = true; m.receiveShadow = true; m.visible = false; scene.add(m);
+    const f = new THREE.Mesh(e.f.build(), furnMat()); f.castShadow = true; scene.add(f); FINE_MESHES.push({ m, far: f, x0: e.x0, z0: e.z0, s: 320, r: 260 }); }
+  MIDF.clear();
+}
+function stampMast(parts, far, m, y0) { const e = new THREE.Vector3().setFromMatrixPosition(m); const c = midB(e.x, e.z); stampAO(c.b, parts, m, y0, 0); stampAO(c.f, far, m, y0, 0); stampAO(fineB(e.x, e.z), parts, m, y0, 1); }
+// stamp a part list: lod-0 parts into the coarse bucket, lod-1 parts into the chunk bucket at (x, z); AO baked against ground y0
+function stampLod(coarse, parts, m, y0) { const e = new THREE.Vector3().setFromMatrixPosition(m); stampAO(coarse, parts, m, y0, 0); stampAO(fineB(e.x, e.z), parts, m, y0, 1); }
+
 
 function streetLightGeo() {
   const b = new GeoBucket();
@@ -287,10 +308,21 @@ export function buildProps(scene, city, T) {
   {
     const g = new GeoBucket(); const heads = [];
     const RH = 7;
+    const gA = CYBER ? null : new GeoBucket({ aPbr: 3 }); // a_props: map A signal assemblies (PBR furniture material, baked AO)
+    const near = (x, z, d) => city.palms.some((p) => Math.abs(p.x - x) < d && Math.abs(p.z - z) < d) || city.lamps.some((l) => Math.abs(l.x - x) < d && Math.abs(l.z - z) < d) || city.trees.some((t) => Math.abs(t.x - x) < d && Math.abs(t.z - z) < d);
     for (const it of city.inters) {
+      if (gA) { // a_props: pedestrian-signal poles on the two corners without a mast arm
+        for (const [sx, sz] of [[1, -1], [-1, 1]]) { const px = it.x + sx * (RH + 1.0), pz = it.z + sz * (RH + 1.0);
+          if (city.groundH(px, pz) < 0.1 || near(px, pz, 1.0)) continue;
+          stampLod(gA, pedPoleA(sx, sz), new THREE.Matrix4().makeTranslation(px, 0.15, pz), 0.15); city.col.add(px - 0.1, pz - 0.1, px + 0.1, pz + 0.1, 3.4, 'pole'); }
+      }
       for (const [sx, sz] of [[1, 1], [-1, -1]]) {
         const px = it.x + sx * (RH + 1.2), pz = it.z + sz * (RH + 1.2);
         const m = new THREE.Matrix4().makeTranslation(px, 0.15, pz);
+        if (gA) { // a_props: detailed mast arm (same pole / head positions as before)
+          { const pc = it.x > 170 ? [0.06, 0.09, 0.075] : null; stampMast(signalMastA(sx, sz, pc), signalMastFarA(sx, sz, pc), m, 0.15); }
+          for (const d of [3, 6.5]) heads.push({ x: px - sx * d, y: 5.7 + 0.15, z: pz, face: sz, axis: 'z' });
+          city.col.add(px - 0.2, pz - 0.2, px + 0.2, pz + 0.2, 6, 'pole'); continue; }
         const pole = new THREE.CylinderGeometry(0.13, 0.16, 6.5, 8); pole.translate(0, 3.25, 0); g.geom(pole, m, {}, [0.75, 0.75, 0.72]);
         const arm = new THREE.CylinderGeometry(0.07, 0.09, 8.5, 6); arm.rotateZ(Math.PI / 2); arm.translate(-sx * 4.25, 6.3, 0); g.geom(arm, m, {}, [0.75, 0.75, 0.72]);
         for (const d of [3, 6.5]) { const h = new THREE.BoxGeometry(0.34, 1.04, 0.3); h.translate(-sx * d, 5.7, 0); g.geom(h, m, {}, [0.12, 0.12, 0.1]);
@@ -301,7 +333,8 @@ export function buildProps(scene, city, T) {
         city.col.add(px - 0.2, pz - 0.2, px + 0.2, pz + 0.2, 6, 'pole');
       }
     }
-    const mm = new THREE.Mesh(g.build(), M.vcol); mm.castShadow = true; mm.receiveShadow = true; scene.add(mm);
+    if (gA) { const ma = new THREE.Mesh(gA.build(), furnMat()); ma.castShadow = true; ma.receiveShadow = true; scene.add(ma); flushFine(scene); }
+    else { const mm = new THREE.Mesh(g.build(), M.vcol); mm.castShadow = true; mm.receiveShadow = true; scene.add(mm); }
     // signal lamps: small emissive quads; colour updated from the traffic phase
     const lg = new THREE.PlaneGeometry(0.22, 0.22);
     const red = new THREE.MeshBasicMaterial({ color: 0xff2a1a }), green = new THREE.MeshBasicMaterial({ color: 0x2aff8a });
@@ -321,6 +354,8 @@ export function buildProps(scene, city, T) {
 
 export function updateProps(P, cam, night, phase) {
   const n = night;
+  if (FINE_MESHES.length) { const cx = cam.position.x, cz = cam.position.z; // a_props: fine-detail chunks within ~120 m
+    for (const f of FINE_MESHES) { const dx = Math.max(f.x0 - cx, 0, cx - f.x0 - f.s), dz = Math.max(f.z0 - cz, 0, cz - f.z0 - f.s); const v = dx * dx + dz * dz < f.r * f.r; f.m.visible = v; if (f.far) f.far.visible = !v; } }
   { const L = P.lampCull, cx = cam.position.x, cz = cam.position.z; if (L && Math.hypot(cx - L.lx, cz - L.lz) > 25) { L.lx = cx; L.lz = cz; let k = 0;
     for (const [a, b, x, z, ci] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); L.cones.setMatrixAt(k, a); L.cones.setColorAt(k, ci); k++; }
     for (const m of [L.im, L.glow, L.pools, L.cones]) { m.count = k; m.instanceMatrix.needsUpdate = true; } L.cones.instanceColor.needsUpdate = true; } }
@@ -364,6 +399,8 @@ export function buildFurniture(scene, city, G = {}) {
   const PH = { hyd: [], bin: [], cafe: [] };
   const g = new GeoBucket(); const r = mulberry(4242);
   const add = (geo, m, c) => g.geom(geo, m, {}, c); const fb = new GeoBucket({ aPbr: 3 });
+  const fA = CYBER ? null : new GeoBucket({ aPbr: 3 }); // a_props: map A corner kit (hydrants, recycling bins, bike racks)
+  const occ = (x, z, d) => city.palms.some((p) => Math.abs(p.x - x) < d && Math.abs(p.z - z) < d) || city.lamps.some((l) => Math.abs(l.x - x) < d && Math.abs(l.z - z) < d) || city.trees.some((t) => Math.abs(t.x - x) < d && Math.abs(t.z - z) < d);
   const T = (x, y, z, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1));
   const umbCols = [[0.95, 0.95, 0.92], [0.9, 0.35, 0.4], [0.2, 0.55, 0.6], [0.95, 0.75, 0.45], [0.3, 0.3, 0.32]];
   const parking = [];
@@ -395,10 +432,28 @@ export function buildFurniture(scene, city, G = {}) {
     if (it.x < -160) continue;
     const hx = it.x + 7 + 1.0, hz = it.z + 7 + 2.5; // hydrant on one corner
     const bx = it.x - 7 - 1.0, bz = it.z - 7 - 3.0;
-    if (G.ph_hydrant) { PH.hyd.push(TR(hx, 0.15, hz, r() * 6.28, 1.05)); PH.bin.push(TR(bx, 0.15, bz, r() * 6.28)); } else {
+    if (fA && G.ph_hydrant) { const ry = r() * 6.28; stampLod(fA, hydrantA(), TR(hx, 0.15, hz, ry), 0.15); PH.bin.push(TR(bx, 0.15, bz, r() * 6.28)); // a_props: procedural Florida hydrant (same rng draws)
+      city.col.add(hx - 0.18, hz - 0.18, hx + 0.18, hz + 0.18, 0.8, 'hyd');
+      const rx = it.x + 7 + 1.2, rz = it.z - 7 - 3.2 - 0.85; // recycling bin beside street.js' corner litter bin (same occupancy rule it uses)
+      if (it.x > -200 && !occ(rx, rz + 0.85, 1.0) && !occ(rx, rz, 1.0)) { stampLod(fA, recycleBinA(), TR(rx, 0.15, rz, Math.PI / 2), 0.15); city.col.add(rx - 0.25, rz - 0.28, rx + 0.25, rz + 0.28, 1.0, 'rbin'); }
+    } else if (G.ph_hydrant) { PH.hyd.push(TR(hx, 0.15, hz, r() * 6.28, 1.05)); PH.bin.push(TR(bx, 0.15, bz, r() * 6.28)); } else {
     const h = new THREE.CylinderGeometry(0.13, 0.16, 0.65, 8); add(h, T(hx, 0.47, hz), [0.85, 0.75, 0.15]);
     const cap = new THREE.SphereGeometry(0.14, 8, 6); add(cap, T(hx, 0.82, hz), [0.85, 0.75, 0.15]);
     const bin = new THREE.CylinderGeometry(0.3, 0.27, 1.0, 10); add(bin, T(bx, 0.65, bz), [0.2, 0.22, 0.24]); }
+  }
+  if (fA) { // a_props: bike racks mid-block on the island streets (own rng stream; kerb furniture zone, clear of lamps / palms / trees / colliders)
+    const rb = mulberry(5150); const box = [];
+    for (const s of city.segs) {
+      if (s.bridge || s.a1 - s.a0 < 44) continue; const isl = s.axis === 'z' ? s.c > -160 : s.a0 > -160; if (!isl) continue;
+      const a = (s.a0 + s.a1) / 2 + (rb() - 0.5) * 12, side = rb() < 0.5 ? -1 : 1, keep = rb() < 0.6, n = 2 + Math.floor(rb() * 3);
+      if (!keep || (s.axis === 'z' && s.c === 290 && side > 0)) continue;
+      const off = side * (7 + 1.75); const x = s.axis === 'z' ? s.c + off : a, z = s.axis === 'z' ? a : s.c + off; const hl = (n - 1) * 0.45 + 0.4;
+      if (city.groundH(x, z) < 0.1 || occ(x, z, 0.6 + hl)) continue;
+      const ex = s.axis === 'z' ? 0.45 : hl, ez = s.axis === 'z' ? hl : 0.45;
+      if (city.col.query(x, z, hl + 1, box).some((b) => b.maxX > x - ex && b.minX < x + ex && b.maxZ > z - ez && b.minZ < z + ez)) continue;
+      stampLod(fA, bikeRackA(n), TR(x, 0.15, z, s.axis === 'z' ? 0 : Math.PI / 2), 0.15); city.col.add(x - ex + 0.3, z - ez + 0.3, x + ex - 0.3, z + ez - 0.3, 0.9, 'bike');
+    }
+    const fm = new THREE.Mesh(fA.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); flushFine(scene);
   }
   const mesh = new THREE.Mesh(g.build(), M.vcolCloth); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
   if (fb.vc) { const fm = new THREE.Mesh(fb.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); }
