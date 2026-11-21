@@ -283,7 +283,7 @@ export function decoUrnColliders(p, col) {
   const s = p.facing; const fx = s > 0 ? p.x1 : p.x0; let n = 0;
   for (const e of edgesOf(p.poly)) { if (!(e.ox * s > 0.9) || e.len < 3) continue;
     const zc = p.pylon ? p.pylon.z : (p.z0 + p.z1) / 2; const a = (zc - e.p[1]) * e.dz + (fx - e.p[0]) * e.dx;
-    if (a > 4 && a < e.len - 4) for (const sg of [-1, 1]) { const [ux, uz] = e.P(a + sg * 2.45, 0.55); col.add(ux - 0.45, uz - 0.45, ux + 0.45, uz + 0.45, 1.6, 'urn'); n++; } }
+    if (a > 4 && a < e.len - 4) for (const sg of [-1, 1]) { const [ux, uz] = e.P(a + sg * 2.45, 0.55); const b = col.add(ux - 0.45, uz - 0.45, ux + 0.45, uz + 0.45, 1.6, 'urn'); b.out = [e.ox, e.oz]; n++; } }
   return n;
 }
 // a2: keep the beach umbrellas (with their loungers / towels) off the wheel's ticket kiosk, queue, deck and drive house.
