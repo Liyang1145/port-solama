@@ -107,6 +107,7 @@ function addBody(fab, cx, cz, y0, w, d, h, ang, colr, kind, col, collide = true)
 }
 const addRoof = (fab, cx, cz, y0, w, d, h, ang, colr) => chunkOf(fab, cx, cz).I.roof.push([cx, y0, cz, w, h, d, ang, colr[0], colr[1], colr[2]]);
 const addTree = (fab, x, z, r, h, colr) => chunkOf(fab, x, z).I.tree.push([x, z, r, h, colr[0], colr[1], colr[2], fab.R() * 6.28]);
+export const addPalmRaw = (fab, x, z, h, rot, lx, lz) => chunkOf(fab, x, z).I.palm.push([x, z, h, rot, lx, lz]);
 const addPalm = (fab, x, z, h) => chunkOf(fab, x, z).I.palm.push([x, z, h, fab.R() * 6.28, (fab.R() - 0.5) * 0.16, (fab.R() - 0.5) * 0.16]);
 const addCar = (fab, x, z, ang, colr) => chunkOf(fab, x, z).I.car.push([x, z, ang, colr[0], colr[1], colr[2]]);
 const addPool = (fab, x, z, w, d, ang) => chunkOf(fab, x, z).I.pool.push([x, z, w, d, ang]);
@@ -310,9 +311,17 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   const two = R() < (canal ? 0.5 : 0.28); const h = two ? rr(5.9, 6.6) : rr(3.2, 3.7);
   const wall = pickR(fab, WALLS); addBody(fab, p[0], p[1], 0, hw, hd, h, ang, wall, 0, col);
   const flat = R() < (canal ? 0.3 : 0.07);
-  if (!flat) addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, Math.min(hw, hd) * rr(0.22, 0.3), ang, pickR(fab, ROOFS));
+  // marina_a: canal-front lots are recorded for the streamed waterfront detail (marina.js). No extra fab.R() calls anywhere in
+  // here, so the fabric layout (and the city's rng sequence) is unchanged. Flat-roofed canal houses become white modern villas.
+  let wf = null;
+  if (canal) { const bodyRec = chunkOf(fab, p[0], p[1]).I.body; const rec = bodyRec[bodyRec.length - 1];
+    if (flat) { const wv = 0.93 + ((rec[11] * 97) % 1) * 0.05; rec[7] = wv; rec[8] = wv; rec[9] = wv * 0.985; }
+    const ua = [Math.cos(ang), -Math.sin(ang)]; const q = F.P(ac, bc + s); const ub = norm2(sub(q, p));
+    wf = { x: p[0], z: p[1], ua, ub, hw, hd, h, two, flat, wall: [rec[7], rec[8], rec[9]], u0: a0 - ac, u1: a1 - ac, vf: -(setback + hd / 2), seed: Math.floor(rec[11] * 1e9) };
+    (fab.wf = fab.wf || []).push(wf); }
+  if (!flat) { const rh = Math.min(hw, hd) * rr(0.22, 0.3), rc = pickR(fab, ROOFS); addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, rh, ang, rc); if (wf) { wf.roofH = rh; wf.roofC = rc; } }
   // driveway (verge part + yard part, skipping the sidewalk) on one side, car on it half the time
-  const ds = R() < 0.5 ? -1 : 1; const ad = ac + ds * (hw / 2 - 1.8);
+  const ds = R() < 0.5 ? -1 : 1; const ad = ac + ds * (hw / 2 - 1.8); if (wf) wf.drive = ad - ac;
   const yardA = f0, yardB = f0 + s * setback; const pv = F.P(ad, (f0 - s * (LSW + LVG * 0.5)));
   addFlat(fab, ...F.P(ad, f0 - s * (LSW + LVG / 2) + 0), 3.2, LVG + 0.2, ang, [0.66, 0.65, 0.62]); void pv;
   const pm = F.P(ad, (yardA + yardB) / 2); addFlat(fab, pm[0], pm[1], 3.4, setback + 0.2, ang, [0.70, 0.69, 0.66]);
@@ -320,12 +329,15 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   // back yard: pool + deck, trees, hedge on the back line
   const back0 = f0 + s * (setback + hd), yd = depth - setback - hd;
   if (yd > 8 && R() < (canal ? 0.75 : 0.42)) { const pb = back0 + s * (yd * 0.5); const pp = F.P(ac + rr(-2, 2), pb); const pw = rr(7, 10), pd = Math.min(yd - 4, rr(3.6, 5));
-    addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); addPool(fab, pp[0], pp[1], pw, pd, ang); }
+    addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); addPool(fab, pp[0], pp[1], pw, pd, ang);
+    if (wf) wf.pool = { u: (pp[0] - p[0]) * wf.ua[0] + (pp[1] - p[1]) * wf.ua[1], v: (pp[0] - p[0]) * wf.ub[0] + (pp[1] - p[1]) * wf.ub[1], w: pw, d: pd }; }
   if (R() < 0.6) { const t = F.P(a0 + rr(2, fw - 2), back0 + s * rr(2, yd - 1)); if (R() < 0.3) addPalm(fab, t[0], t[1], rr(7, 11)); else addTree(fab, t[0], t[1], rr(2.6, 4.6), rr(2.5, 4), pickR(fab, LEAF)); }
   if (R() < 0.35) { const t = F.P(a0 + rr(2, fw - 2), f0 + s * rr(2, setback - 1.5)); if (R() < 0.4) addPalm(fab, t[0], t[1], rr(6, 10)); else addTree(fab, t[0], t[1], rr(2, 3.4), rr(2, 3), pickR(fab, LEAF)); }
   if (!canal && R() < 0.5) { const hb = F.P(ac, f0 + s * (depth - 0.4)); addBody(fab, hb[0], hb[1], 0, fw - 0.4, 0.7, rr(1.4, 2.0), ang, [0.22, 0.32, 0.16], 6, null, false); }
-  if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); addFlat(fab, dk[0], dk[1], Math.min(10, fw - 4), 2.4, ang, [0.52, 0.42, 0.30], 0.35);
-    if (R() < 0.45) { const bt = F.P(ac + rr(-2, 2), f0 + s * (depth + 4.2)); addBody(fab, bt[0], bt[1], -0.8, rr(7, 11), 2.6, 1.6, ang, [0.95, 0.95, 0.94], 8, null, false); } }
+  if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); const dw = Math.min(10, fw - 4); addFlat(fab, dk[0], dk[1], dw, 2.4, ang, [0.52, 0.42, 0.30], 0.35);
+    wf.vb = depth - setback - hd / 2; wf.dockW = dw;
+    // marina_a: the white box "boat" is replaced by a real moored boat (marina.js); same R() calls (addBody drew one for its seed)
+    if (R() < 0.45) { const bu = rr(-2, 2); const bl = rr(7, 11); R(); wf.boat = { u: bu, len: bl }; } }
 }
 // strip-mall band facing the arterial at b = bEdge (dir +1 into the cell from b=0, -1 from b=Lb)
 function stripBand(fab, F, bEdge, dir, La, col) {
