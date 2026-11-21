@@ -5,6 +5,7 @@ import { U } from './env.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
 import { buildFloraA, floraExtras } from './maps/gta/flora.js';
+import { buildPalmsA, pickVariantA } from './maps/gta/palms.js';
 
 function trunkTexture() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 512; const g = c.getContext('2d');
@@ -199,12 +200,12 @@ export function addFrond(F, top, az, L, up, droop, S, tint, opts = {}) {
   }
 }
 // costapalmate fan leaf on a petiole
-function addFan(F, top, az, L, up, R, S, tint) {
+export function addFan(F, top, az, L, up, R, S, tint, NA = 14) {
   const dir = new THREE.Vector3(Math.cos(az), 0, Math.sin(az)); const side = new THREE.Vector3(-dir.z, 0, dir.x);
   const c = top.clone().addScaledVector(dir, L).add(new THREE.Vector3(0, L * up, 0));
   const fdir = dir.clone().add(new THREE.Vector3(0, up * 0.6 + 0.35, 0)).normalize(); // fan "forward" (radial axis)
   const fnrm = new THREE.Vector3().crossVectors(side, fdir).normalize(); if (fnrm.y < 0) fnrm.negate();
-  const base = F.p.length / 3; const NA = 14, NR = S;
+  const base = F.p.length / 3; const NR = S;
   for (let ir = 0; ir <= NR; ir++) for (let ia = 0; ia <= NA; ia++) {
     const rr = ir / NR; const a = (ia / NA - 0.5) * Math.PI * 0.88;
     const fold = (ia % 2 ? 1 : -1) * 0.07 * R * rr; const sag = -rr * rr * R * (0.35 + Math.abs(a) * 0.5); // costapalmate curl + droop
@@ -362,27 +363,37 @@ export function buildVegetation(scene, city, T) {
   const frondTex = pinnateTex(), fanT = fanTex();
   const mkFrondMat = (map) => prep(new THREE.MeshStandardMaterial({ map, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, vertexColors: true, color: new THREE.Color().setRGB(1.25, 1.22, 1.05) }), A ? 'frondA' : 'frond', (s) => foliagePatch(s, 0.35, 1, A ? 2.3 : 1));
   const frondMat = mkFrondMat(frondTex), fanMat = mkFrondMat(fanT);
+  const depthFor = (mat) => A ? swayDepth(mat, mat === leafMat ? 1.4 : 2.3, mat === leafMat ? 'leaf' : 'frond') : new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mat.map, alphaTest: 0.42, side: THREE.DoubleSide });
+  // A map: trunks/crowns sway too (aSway > 0 near the top) -> their shadows follow (opaque depth, no alpha map)
+  const trunkDepth = A ? swayDepth({ map: null, alphaTest: 0 }, 1, 'trunk') : null;
+  const XT = A ? floraExtras(city) : { palms: [], trees: [] }; // hammock palms / trees on the natural island ends (not added to city.*)
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+  const out = []; const lodSets = [];
+  const palmList = A ? city.palms.concat(XT.palms) : city.palms;
+  let palmsA = null;
+  if (A) { // r6.5 a_palms: 7 height/species variants, dead-frond skirt, coconut clusters, tree pits, 3 LODs (src/maps/gta/palms.js)
+    for (const p of palmList) {
+      const hsh = Math.abs(Math.sin(p.x * 12.9 + p.z * 78.2)) * 1000 % 1; const hsh2 = Math.abs(Math.sin(p.x * 3.3 + p.z * 9.1)) * 1000 % 1;
+      const beach = p.x > 300 || p.lean > 0.04 || p.lean < -0.04 && !p.street;
+      const sp = beach ? 0 : p.street ? (hsh < 0.55 ? 1 : hsh < 0.85 ? 2 : 0) : Math.floor(hsh * 5) % 5 < 2 ? 0 : Math.floor(hsh * 5) % 5 < 4 ? 1 : 2;
+      p.vi = pickVariantA(sp, p.h, hsh2); p.hA = p.h * (sp === 1 ? 1.3 : 1);
+    }
+    palmsA = buildPalmsA(scene, city, palmList, { depthFor, trunkDepth, out });
+  } else {
   const barks = { coco: barkTextures('coco'), royal: barkTextures('royal'), sabal: barkTextures('sabal') };
   const trunkMats = {}; for (const k in barks) trunkMats[k] = prep(new THREE.MeshStandardMaterial({ map: barks[k].map, normalMap: barks[k].normalMap, normalScale: new THREE.Vector2(1, 1), roughness: 0.92, color: 0xffffff }), 'ptrunk', (s) => foliagePatch(s, 0.0));
   const crownMats = { coco: prep(new THREE.MeshStandardMaterial({ color: 0x6f6236, roughness: 0.75 }), 'pcrown', (s) => foliagePatch(s, 0.0)),
     royal: prep(new THREE.MeshStandardMaterial({ color: 0x5f8a3a, roughness: 0.35 }), 'pcrown', (s) => foliagePatch(s, 0.0)),
     sabal: prep(new THREE.MeshStandardMaterial({ color: 0x5a4c34, roughness: 0.9 }), 'pcrown', (s) => foliagePatch(s, 0.0)) };
-  const depthFor = (mat) => A ? swayDepth(mat, mat === leafMat ? 1.4 : 2.3, mat === leafMat ? 'leaf' : 'frond') : new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mat.map, alphaTest: 0.42, side: THREE.DoubleSide });
-  // A map: trunks/crowns sway too (aSway > 0 near the top) -> their shadows follow (opaque depth, no alpha map)
-  const trunkDepth = A ? swayDepth({ map: null, alphaTest: 0 }, 1, 'trunk') : null;
-  const XT = A ? floraExtras(city) : { palms: [], trees: [] }; // hammock palms / trees on the natural island ends (not added to city.*)
   const kinds = [['coco', 11], ['coco', 23], ['royal', 37], ['royal', 41], ['sabal', 53]];
   const variants = kinds.map(([k, sd]) => ({ k, near: palmGeometry(k, sd, false), far: palmGeometry(k, sd, true) }));
   const groups = variants.map(() => []);
-  const palmList = A ? city.palms.concat(XT.palms) : city.palms;
   for (const p of palmList) {
     const hsh = Math.abs(Math.sin(p.x * 12.9 + p.z * 78.2)) * 1000 % 1;
     const beach = p.x > 300 || p.lean > 0.04 || p.lean < -0.04 && !p.street;
     let vi; if (beach) vi = hsh < 0.5 ? 0 : 1; else if (p.street) vi = hsh < 0.55 ? (hsh < 0.27 ? 2 : 3) : hsh < 0.85 ? 4 : 1; else vi = Math.floor(hsh * 5) % 5;
     groups[vi].push(p);
   }
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-  const out = []; const lodSets = [];
   variants.forEach((v, vi) => {
     const list = groups[vi]; if (!list.length) return;
     const fm = v.k === 'sabal' ? fanMat : frondMat;
@@ -395,6 +406,7 @@ export function buildVegetation(scene, city, T) {
     });
     lodSets.push(set);
   });
+  }
   // distribute instances to near/far meshes around the camera (cheap: a few thousand matrix copies, every ~0.4 s)
   const NEAR2 = 75 * 75, FAR2 = CYBER ? 900 * 900 : Infinity; // r6.0: far cull only on map 霓港 (thousands of palms) let lastX = 1e9, lastZ = 1e9;
   const updateLod = (cx, cz, force) => {
@@ -410,7 +422,8 @@ export function buildVegetation(scene, city, T) {
     }
   };
   updateLod(280, 30, true);
-  out.update = (camPos) => updateLod(camPos.x, camPos.z, false);
+  out.update = palmsA ? (camPos) => { updateLod(camPos.x, camPos.z, false); palmsA.update(camPos.x, camPos.z, false); } : (camPos) => updateLod(camPos.x, camPos.z, false);
+  if (palmsA) out.palmsA = palmsA;
   // trees
   const seeds = [[5, 'oak'], [9, 'grape'], [13, 'oak'], [21, 'grape']];
   const tv = seeds.map(([sd, k]) => ({ near: treeGeometry(sd, k, false), far: treeGeometry(sd, k, true) }));

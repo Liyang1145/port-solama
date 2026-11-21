@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { prep, M } from '../../mats.js';
 import { U } from '../../env.js';
 import { foliagePatch, swayDepth, canvasTex } from '../../veg.js';
-import { mulberry, westCoast, beachOff, ISLE } from './mapgeo.js';
+import { mulberry, westCoast, beachOff, ISLE, smooth } from './mapgeo.js';
 
 const TAU = Math.PI * 2;
 // ---------------------------------------------------------------- deterministic value noise (placement masks) ----
@@ -205,6 +205,87 @@ export function floraExtras(city) {
   XCACHE = { palms, trees }; return XCACHE;
 }
 
+
+// ---------------------------------------------------------------- r6.5 a_palms: foredune ridges + crossover boardwalks ----
+// The natural island ends get a continuous, wind-shaped foredune ridge along the upper beach (crest height / position vary,
+// blowouts cut through it) and a vegetated apron mesh over the whole dune band: vertex colours carry sea-oat / dune-grass
+// cover patches, straw-dry patches and bare sand, so the band reads from the 190 m aerial. Wooden crossover boardwalks
+// (posts, handrails, a ramp down to the beach) cross the dunes every ~120-190 m. Static, chunked meshes (frustum culled).
+const NAT = (z) => Math.abs(z) > 400 && Math.abs(z) < ISLE.tip - 70;
+const DECO = (z) => Math.abs(z) < 372;
+const bandW = (z) => DECO(z) ? 11 : 16 + 9 * vn(z * 0.01, 3.3);
+let WALKZ = null;
+function walkZs() { if (WALKZ) return WALKZ; const rw = mulberry(7301); WALKZ = []; for (const sg of [1, -1]) for (let a = 470 + rw() * 40; a < ISLE.tip - 130; a += 120 + rw() * 70) WALKZ.push(sg * a); return WALKZ; }
+const walkDip = (z) => { let d = 1; for (const wz of walkZs()) d = Math.min(d, 1 - 0.7 * Math.exp(-(((z - wz) / 5) ** 2))); return d; };
+function ridgeHc(z) { if (!NAT(z)) return 0; const a = Math.abs(z); const ramp = Math.max(0, Math.min(1, (a - 400) / 60, (ISLE.tip - 70 - a) / 80));
+  return ramp * (0.4 + 0.65 * fbm(z * 0.017, 7.7)) * (1 - 0.8 * smooth(0.68, 0.8, vn(z * 0.028, 2.2))) * walkDip(z); }
+// dune height above the beach surface (0 outside the natural ends)
+export function duneH(x, z) {
+  const hc = ridgeHc(z); if (!hc) return 0; const x0 = 335 + beachOff(z); const b = bandW(z); const u = (x - x0) / b; if (u <= 0 || u >= 1.25) return 0;
+  const c = 0.42 + 0.22 * (vn(z * 0.021, 1.1) - 0.5); const d = (u - c) / 0.3;
+  let h = Math.exp(-d * d * (d > 0 ? 1.7 : 1.0)) + 0.4 * Math.exp(-(((u - c - 0.42) / 0.16) ** 2)) * vn(z * 0.05, 9.1); // crest + seaward hummocks
+  h *= hc * (1 + 0.3 * (vn(x * 0.22, z * 0.11) - 0.5)); return h * smooth(0, 0.14, u) * smooth(1.25, 1.02, u);
+}
+// vegetation cover 0..1 on the dune band (shared by the apron colours and the grass clump placement)
+function duneCover(x, z, h) { const x0 = 335 + beachOff(z); const u = (x - x0) / bandW(z);
+  return smooth(0.42, 0.64, fbm(x * 0.06, z * 0.035) + h * 0.16 + (u < 0.5 ? 0.08 : -0.04)) * smooth(1.2, 0.9, u); }
+function duneApron(city, sg) {
+  const gH = (x, z) => city.groundH(x, z); const chunks = []; const NX = 20, DZ = 2.0;
+  const a0 = 404, a1 = ISLE.tip - 72; const rows = Math.floor((a1 - a0) / DZ);
+  for (let c0 = 0; c0 < rows; c0 += 30) {
+    const p = [], col = [], uv = [], idx = []; const nr = Math.min(30, rows - c0);
+    for (let rI = 0; rI <= nr; rI++) { const z = sg * (a0 + (c0 + rI) * DZ); const x0 = 335 + beachOff(z), b = bandW(z);
+      for (let i = 0; i <= NX; i++) { const u = 0.02 + 1.2 * i / NX; const x = x0 + u * b; const h = duneH(x, z); const edge = i === 0 || i === NX;
+        const y = gH(x, z) + (edge ? -0.14 : 0.035 + h); p.push(x, y, z); uv.push(x, z);
+        const cv = duneCover(x, z, h); const dry = smooth(0.55, 0.75, vn(x * 0.045 + 3.0, z * 0.02)); const t = 0.85 + 0.25 * vn(x * 0.3, z * 0.3);
+        const veg = [0.50 * t, 0.60 * t, 0.33 * t], straw = [0.90, 0.82, 0.60]; const vc = veg.map((v, j) => v + (straw[j] - v) * dry * 0.7);
+        const bare = 1 - 0.06 * smooth(0.3, 0.9, h); col.push(...vc.map((v) => bare + (v - bare) * cv)); } }
+    for (let rI = 0; rI < nr; rI++) for (let i = 0; i < NX; i++) { const a = rI * (NX + 1) + i, b = a + NX + 1; if (sg < 0) idx.push(a, a + 1, b, b, a + 1, b + 1); else idx.push(a, b, a + 1, b, b + 1, a + 1); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); g.computeBoundingSphere(); chunks.push(g);
+  }
+  return chunks;
+}
+// plank texture: one board per v-repeat (weathered grey-brown, dark gap), u = across the walkway
+function plankTex() { const r = mulberry(5151); return canvasTex(128, 32, (g) => { g.fillStyle = '#8a7a66'; g.fillRect(0, 0, 128, 32);
+  for (let i = 0; i < 400; i++) { const v = (r() - 0.5) * 50; g.fillStyle = `rgba(${150 + v},${134 + v},${112 + v},0.35)`; g.fillRect(r() * 128, r() * 27, 4 + r() * 30, 1); }
+  for (let k = 0; k < 6; k++) { g.fillStyle = 'rgba(60,50,40,0.6)'; g.beginPath(); g.arc(r() * 128, 4 + r() * 20, 0.8, 0, TAU); g.fill(); } // nail heads
+  g.fillStyle = '#2b2520'; g.fillRect(0, 27, 128, 5); }); }
+function boardwalks(city) {
+  const G = GA(); const gH = (x, z) => city.groundH(x, z); const WOOD = [0.78, 0.72, 0.64];
+  const quad = (a, b, c, d, n, uvs, col = WOOD) => { const st = G.p.length / 3; for (const q of [a, b, c, d]) { G.p.push(...q); G.n.push(...n); G.c.push(...col); G.s.push(0); }
+    G.uv.push(...uvs); G.i.push(st, st + 1, st + 2, st, st + 2, st + 3); };
+  // oriented box from p0 to p1 (centre line), width w (horizontal), height h (vertical extent below the line)
+  const beam = (p0, p1, w, h) => { const dx = p1[0] - p0[0], dz = p1[2] - p0[2]; const L = Math.hypot(dx, dz) || 1; const sx = -dz / L * w / 2, sz = dx / L * w / 2;
+    const A = (p, s, dy) => [p[0] + sx * s, p[1] + dy, p[2] + sz * s]; const U = [0.1, 0.4, 0.9, 0.4, 0.9, 0.6, 0.1, 0.6];
+    quad(A(p0, -1, 0), A(p0, 1, 0), A(p1, 1, 0), A(p1, -1, 0), [0, 1, 0], U); quad(A(p0, 1, 0), A(p0, 1, -h), A(p1, 1, -h), A(p1, 1, 0), [sx, 0, sz], U); quad(A(p0, -1, -h), A(p0, -1, 0), A(p1, -1, 0), A(p1, -1, -h), [-sx, 0, -sz], U); };
+  const post = (x, y0, y1, z, w) => { const h = w / 2; const U = [0.2, 0.4, 0.3, 0.4, 0.3, 0.6, 0.2, 0.6];
+    quad([x - h, y0, z + h], [x + h, y0, z + h], [x + h, y1, z + h], [x - h, y1, z + h], [0, 0, 1], U); quad([x + h, y0, z - h], [x - h, y0, z - h], [x - h, y1, z - h], [x + h, y1, z - h], [0, 0, -1], U);
+    quad([x + h, y0, z + h], [x + h, y0, z - h], [x + h, y1, z - h], [x + h, y1, z + h], [1, 0, 0], U); quad([x - h, y0, z - h], [x - h, y0, z + h], [x - h, y1, z + h], [x - h, y1, z - h], [-1, 0, 0], U);
+    quad([x - h, y1, z + h], [x + h, y1, z + h], [x + h, y1, z - h], [x - h, y1, z - h], [0, 1, 0], U); };
+  const spans = [];
+  for (const wz of walkZs()) {
+    const x0 = 335 + beachOff(wz), b = bandW(wz); const xe = x0 + b * 1.12 + 2; let xs = x0 - 12;
+    for (let x = x0 + 2; x > x0 - 12; x -= 1.5) if (!freeAt(city, x, wz, 1.2) || !freeAt(city, x, wz - 1.1, 0.6) || !freeAt(city, x, wz + 1.1, 0.6)) { xs = x + 1.5; break; }
+    if (xe - xs < 10) continue; const n = Math.ceil(xe - xs); const xsArr = [], gr = [];
+    for (let i = 0; i <= n; i++) { const x = xs + (xe - xs) * i / n; xsArr.push(x); gr.push(Math.max(gH(x, wz), gH(x, wz - 1), gH(x, wz + 1)) + Math.max(duneH(x, wz - 1), duneH(x, wz), duneH(x, wz + 1))); }
+    const dk = gr.map((_, i) => { let m = -1e9; for (let j = Math.max(0, i - 3); j <= Math.min(n, i + 3); j++) m = Math.max(m, gr[j]); return m + 0.45; });
+    for (let i = 0; i <= n; i++) { const fa = Math.min(1, i / 3), fb = Math.min(1, (n - i) / 4); dk[i] = gr[i] + 0.12 + (dk[i] - gr[i] - 0.12) * Math.min(fa, fb); }
+    spans.push([wz, xs, xe]); const W = 1.9, hw = W / 2;
+    for (let i = 0; i < n; i++) { const xa = xsArr[i], xb = xsArr[i + 1], ya = dk[i], yb = dk[i + 1]; const sa = i * (xe - xs) / n, sb = (i + 1) * (xe - xs) / n;
+      quad([xa, ya, wz + hw], [xb, yb, wz + hw], [xb, yb, wz - hw], [xa, ya, wz - hw], [0, 1, 0], [0, sa / 0.16, 0, sb / 0.16, 1, sb / 0.16, 1, sa / 0.16]);
+      for (const s of [1, -1]) quad([xa, ya - 0.22, wz + s * hw], [xb, yb - 0.22, wz + s * hw], [xb, yb, wz + s * hw], [xa, ya, wz + s * hw], [0, 0, s], [0.1, 0.4, 0.9, 0.4, 0.9, 0.6, 0.1, 0.6]); }
+    // posts every ~2.4 m (support + handrail), rails between them; no rails on the ramp ends
+    const step = Math.max(1, Math.round(2.4 / ((xe - xs) / n)));
+    let prev = null;
+    for (let i = 0; i <= n; i += step) { const x = xsArr[i], y = dk[i], ramp = i < 3 || i > n - 4;
+      for (const s of [1, -1]) post(x, gr[i] - 0.4, y + (ramp ? -0.05 : 0.95), wz + s * (hw - 0.06), 0.12);
+      if (prev && !ramp && !prev.ramp) for (const s of [1, -1]) for (const dy of [0.95, 0.5]) beam([prev.x, prev.y + dy, wz + s * (hw - 0.06)], [x, y + dy, wz + s * (hw - 0.06)], 0.09, 0.07);
+      prev = { x, y, ramp }; }
+  }
+  return { geo: G.p.length ? gaBuild(G) : null, spans };
+}
+
 // ---------------------------------------------------------------- build ----
 export function buildFloraA(scene, city, ctx) {
   const { T, leafMat, fanMat } = ctx; const out = []; const fields = []; const stats = {};
@@ -246,23 +327,40 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
   const oats = [grassClump(11, { n: 30, H: 1.35, segs: 4, R0: 0.42, base: [0.22, 0.32, 0.10], tip: [0.66, 0.60, 0.30], heads: 0.45, lean: 0.45, wid: 0.05 }),
     grassClump(13, { n: 34, H: 1.1, segs: 4, R0: 0.5, base: [0.20, 0.30, 0.09], tip: [0.60, 0.58, 0.28], heads: 0.3, lean: 0.55, wid: 0.052 })];
   const oatsFar = grassClump(17, { n: 10, H: 1.25, segs: 2, R0: 0.4, base: [0.24, 0.32, 0.12], tip: [0.58, 0.54, 0.30], heads: 0, lean: 0.4, wid: 0.11 });
+  const oatsTuft = grassClump(18, { n: 4, H: 1.2, segs: 1, R0: 0.35, base: [0.26, 0.33, 0.13], tip: [0.55, 0.52, 0.30], heads: 0, lean: 0.35, wid: 0.24 }); // a_palms: 3rd tier for the aerials
   const duneLow = grassClump(19, { n: 34, H: 0.5, segs: 3, R0: 0.75, base: [0.16, 0.28, 0.08], tip: [0.42, 0.52, 0.20], lean: 0.8, wid: 0.06 });
   const duneLowFar = grassClump(23, { n: 10, H: 0.5, segs: 1, R0: 0.7, base: [0.18, 0.28, 0.10], tip: [0.40, 0.48, 0.22], lean: 0.6, wid: 0.13 });
+  const duneLowTuft = grassClump(24, { n: 4, H: 0.45, segs: 1, R0: 0.7, base: [0.20, 0.30, 0.11], tip: [0.40, 0.47, 0.22], lean: 0.6, wid: 0.32 });
   const mounds = [moundGeo(3, 3.2, 0.7), moundGeo(5, 4.5, 1.05), moundGeo(7, 2.4, 0.5)];
   const rd = mulberry(7001); const stairs = stairZs(city);
   const oatI = [[], []], lowI = [], mI = [[], [], []];
   const dist = (zz) => Math.abs(zz) < 372; // Deco district: narrower strip, umbrellas start at x≈354
+  const BW = boardwalks(city); const onWalk = (x, z) => BW.spans.some(([wz, xs, xe]) => Math.abs(z - wz) < 1.7 && x > xs - 1 && x < xe + 1);
   for (let z = -ISLE.tip + 60; z < ISLE.tip - 60; z += 1.6) {
     const x0 = 335 + beachOff(z); const band = dist(z) ? 11 : 16 + 9 * vn(z * 0.01, 3.3); // iter2: wider foredune on the natural ends (read from the air)
     if (stairs.some((s) => Math.abs(z - s) < 4.5)) continue; // keep the beach stairs / showers clear
-    for (let k = 0; k < 6; k++) {
-      const x = x0 + 1.2 + rd() * band, zz = z + (rd() - 0.5) * 1.6; const m = fbm(x * 0.09, zz * 0.05); const edge = (x - x0) / band;
-      if (m < 0.30 + edge * 0.30) continue; if (!freeAt(city, x, zz, 0.8)) continue;
-      const y = gH(x, zz); const rot = rd() * TAU; const s = 0.75 + rd() * 0.55;
-      if (rd() < 0.62) oatI[rd() < 0.5 ? 0 : 1].push({ x, z: zz, m: mat4(x, y - 0.04, zz, rot, s, s * (0.8 + m * 0.5), s) });
+    const nat = NAT(z); // a_palms: natural ends follow the vegetated foredune ridge (denser, patchy, on top of the dune surface)
+    for (let k = 0; k < (nat ? 10 : 6); k++) {
+      const x = x0 + 1.2 + rd() * band * (nat ? 1.12 : 1), zz = z + (rd() - 0.5) * 1.6; const m = fbm(x * 0.09, zz * 0.05); const edge = (x - x0) / band;
+      const dh = nat ? duneH(x, zz) : 0;
+      if (nat ? duneCover(x, zz, dh) < 0.25 + rd() * 0.5 : m < 0.30 + edge * 0.30) continue; if (onWalk(x, zz) || !freeAt(city, x, zz, 0.8)) continue;
+      const y = gH(x, zz) + dh; const rot = rd() * TAU; const s = 0.75 + rd() * 0.55;
+      if (rd() < (nat ? 0.55 + 0.3 * smooth(0.2, 1.0, dh) : 0.62)) oatI[rd() < 0.5 ? 0 : 1].push({ x, z: zz, m: mat4(x, y - 0.04, zz, rot, s, s * (0.8 + m * 0.5), s) });
       else lowI.push({ x, z: zz, m: mat4(x, y - 0.03, zz, rot, s * 1.3, s, s * 1.3) });
     }
-    if (rd() < (dist(z) ? 0.1 : 0.22)) { const x = x0 + 2.5 + rd() * (band - 4); if (freeAt(city, x, z, 3)) { const mi = Math.floor(rd() * 3); mI[mi].push({ x, z, m: mat4(x, gH(x, z) - 0.02, z, rd() * 0.5 - 0.25 + Math.PI / 2 * 0, 0.9 + rd() * 0.3, 0.8 + rd() * 0.5, 0.9 + rd() * 0.3) }); } }
+    if (!nat && rd() < (dist(z) ? 0.1 : 0.22)) { const x = x0 + 2.5 + rd() * (band - 4); if (freeAt(city, x, z, 3)) { const mi = Math.floor(rd() * 3); mI[mi].push({ x, z, m: mat4(x, gH(x, z) - 0.02, z, rd() * 0.5 - 0.25 + Math.PI / 2 * 0, 0.9 + rd() * 0.3, 0.8 + rd() * 0.5, 0.9 + rd() * 0.3) }); } }
+  }
+  { // a_palms: dune apron meshes (sand material + vertex-colour cover patches) and the crossover boardwalks
+    const sm = M.sand; const duneMat = prep(new THREE.MeshStandardMaterial({ map: sm.map, normalMap: sm.normalMap, roughnessMap: sm.roughnessMap, color: sm.color.clone(), roughness: 1, vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), 'flDune', (s) => {
+      s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vDW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvDW = (modelMatrix * vec4(position, 1.0)).xz;');
+      s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vDW;\nfloat dh2(vec2 p){ p = fract(p * vec2(0.1031, 0.1030)); p += dot(p, p.yx + 33.33); return fract((p.x + p.y) * p.x); }')
+        .replace('#include <color_fragment>', `{ vec2 cI = floor(vDW * 3.0); float n = dh2(cI) * 0.5 + dh2(floor(vDW * 0.9)) * 0.5; // clumpy cover: tint breaks into tufts up close
+  float fw = length(fwidth(vDW)); float k = mix(clamp(0.35 + n * 1.1, 0.0, 1.0), 1.0, smoothstep(0.15, 0.8, fw));
+  diffuseColor.rgb *= mix(vec3(1.0), vColor, k); }`);
+    });
+    for (const sg of [1, -1]) for (const g of duneApron(city, sg)) { const me = new THREE.Mesh(g, duneMat); me.receiveShadow = true; me.castShadow = true; me.userData.flora = 'duneApron'; scene.add(me); out.push(me); stats.duneApron = (stats.duneApron || 0) + g.index.count / 3; }
+    if (BW.geo) { const bwMat = prep(new THREE.MeshStandardMaterial({ map: plankTex(), vertexColors: true, roughness: 0.85, side: THREE.DoubleSide }), 'flBoardwalk');
+      const me = new THREE.Mesh(BW.geo, bwMat); me.castShadow = true; me.receiveShadow = true; me.userData.flora = 'boardwalk'; scene.add(me); out.push(me); stats.boardwalk = BW.spans.length; stats.boardwalkTris = BW.geo.index.count / 3; }
   }
   // ---------- 2. island ends: coastal hammock understory, bay-edge sea grape (north) / mangroves + marsh (south) ----
   const sgNear = [seagrapeGeo(31, false), seagrapeGeo(37, false)], sgFar = [seagrapeGeo(31, true), seagrapeGeo(37, true)];
@@ -322,9 +420,9 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
 
   // ---------- fields ----------
   const F = (name, tiers, items) => { if (!items.length) return; const f = new Field(scene, out, name, tiers, items); fields.push(f); stats[name] = items.length; };
-  F('oats0', [{ parts: [[oats[0], grassMat, grassDepth, true]], d: 70 }, { parts: [[oatsFar, grassMat, null, false]], d: 380 }], oatI[0]);
-  F('oats1', [{ parts: [[oats[1], grassMat, grassDepth, true]], d: 70 }, { parts: [[oatsFar, grassMat, null, false]], d: 380 }], oatI[1]);
-  F('duneLow', [{ parts: [[duneLow, grassMat, null, false]], d: 60 }, { parts: [[duneLowFar, grassMat, null, false]], d: 260 }], lowI);
+  F('oats0', [{ parts: [[oats[0], grassMat, grassDepth, true]], d: 70 }, { parts: [[oatsFar, grassMat, null, false]], d: 240 }, { parts: [[oatsTuft, grassMat, null, false]], d: 650 }], oatI[0]);
+  F('oats1', [{ parts: [[oats[1], grassMat, grassDepth, true]], d: 70 }, { parts: [[oatsFar, grassMat, null, false]], d: 240 }, { parts: [[oatsTuft, grassMat, null, false]], d: 650 }], oatI[1]);
+  F('duneLow', [{ parts: [[duneLow, grassMat, null, false]], d: 60 }, { parts: [[duneLowFar, grassMat, null, false]], d: 200 }, { parts: [[duneLowTuft, grassMat, null, false]], d: 520 }], lowI);
   mounds.forEach((g, i) => F('mound' + i, [{ parts: [[g, sandMat, null, false]], d: 1600 }], mI[i]));
   sgNear.forEach((g, i) => F('seagrape' + i, [{ parts: [[g.wood, woodMat, null, true], [g.leaves, sgMat, sgDepth, true]], d: 90 }, { parts: [[sgFar[i].leaves, sgMat, null, false]], d: 1200 }], sgI[i]));
   pmNear.forEach((g, i) => F('palmetto' + i, [{ parts: [[g, palmettoMat, palmettoDepth, true]], d: 60 }, { parts: [[pmFar, palmettoMat, null, false]], d: 420 }], pmI[i]));
