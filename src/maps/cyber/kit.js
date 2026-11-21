@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { box, prismWalls, polyCap } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
+import { tubeCircuit, roundPath, haloQuad, reflQuad } from './neontube.js';
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _d = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0); const _X = new THREE.Vector3(), _Y = new THREE.Vector3(), _Z = new THREE.Vector3();
@@ -71,12 +72,12 @@ export const GLYPHS = [
   [[[0.08, 0.55], [0.92, 0.55], [0.78, 0.15], [0.22, 0.15], [0.08, 0.55]], [[0.35, 0.95], [0.55, 0.58]], [[0.55, 0.98], [0.72, 0.6]]], // noodle bowl + chopsticks
   [[[0.08, 0.5], [0.22, 0.75], [0.36, 0.5], [0.5, 0.25], [0.64, 0.5], [0.78, 0.75], [0.92, 0.5]]], // wave
 ];
-// tubes for one glyph in a sign plane: origin o (bottom-left of the cell), e1 = right, e2 = up (unit 3-vectors), size s
-function glyph(nb, gl, o, e1, e2, s, r, col, g) {
-  for (const line of gl) for (let i = 0; i < line.length - 1; i++) {
-    const P = (q) => [o[0] + (e1[0] * q[0] + e2[0] * q[1]) * s, o[1] + (e1[1] * q[0] + e2[1] * q[1]) * s, o[2] + (e1[2] * q[0] + e2[2] * q[1]) * s];
-    tube(nb, P(line[i]), P(line[i + 1]), r, col, g);
-  }
+// one glyph in a sign plane: origin o (bottom-left of the cell), e1 = right, e2 = up (unit 3-vectors), size s.
+// b_neon_sign: a real tube circuit (neontube.js) — bent glass, black-out jumpers, electrodes, supports; n = face normal, back =
+// tube axis → backer distance; dk = bucket for the unlit / hardware parts
+function glyph(nb, dk, gl, o, e1, e2, s, r, col, n, back) {
+  const P = (q) => [o[0] + (e1[0] * q[0] + e2[0] * q[1]) * s, o[1] + (e1[1] * q[0] + e2[1] * q[1]) * s, o[2] + (e1[2] * q[0] + e2[2] * q[1]) * s];
+  tubeCircuit(nb, dk, gl.map((line) => line.map(P)), r, col, n, back);
 }
 // A neon sign: backing box (dark, centred at c, w wide along e1, h tall, t thick along n), glass-tube glyphs on the face(s),
 // a tube border, and mounting hardware. blade=true: sign stands out from the wall (n = along the wall), with two arms + a strut
@@ -99,17 +100,26 @@ export function neonSign(W, c, e1, w, h, opts = {}) {
   // glyph tubes
   const glyphs = opts.glyphs || [pick(GLYPHS)]; const vert = h > w * 1.3; const k = glyphs.length; const r = opts.r ?? 0.035;
   const cell = vert ? Math.min(w * 0.82, (h * 0.88) / k) : Math.min(h * 0.8, (w * 0.9) / k);
+  const dk = W.b('vcolD', c[0], c[2]), gb = W.b('nglow', c[0], c[2]); const back = Math.max(0.07, r * 1.9);
   for (const s of blade ? [1, -1] : [1]) {
-    const d = s * (t / 2 + 0.07); const f1 = s > 0 ? e1 : e1.map((q) => -q); // the back face reads mirrored -> flip e1
+    const d = s * (t / 2 + back); const f1 = s > 0 ? e1 : e1.map((q) => -q); // the back face reads mirrored -> flip e1
+    const nf = n.map((q) => q * s);
     for (let i = 0; i < k; i++) {
       let a0, b0;
       if (vert) { a0 = -cell / 2; b0 = h / 2 - (h - cell * k) / 2 - cell * (i + 1); } else { a0 = -cell * k / 2 + cell * i; b0 = -cell / 2; }
       const o = at(s > 0 ? a0 : a0 + cell, b0, d);
-      glyph(nb, glyphs[i], o, f1, e2, cell, r, i % 2 && opts.alt ? col2 : col, opts.g);
+      glyph(nb, dk, glyphs[i], o, f1, e2, cell, r, i % 2 && opts.alt ? col2 : col, nf, back);
     }
-    // border tube inset from the edge
-    const bi = 0.12; const P = [at(-w / 2 + bi, -h / 2 + bi, d), at(w / 2 - bi, -h / 2 + bi, d), at(w / 2 - bi, h / 2 - bi, d), at(-w / 2 + bi, h / 2 - bi, d)];
-    for (let i = 0; i < 4; i++) tube(nb, P[i], P[(i + 1) % 4], r * 0.8, col2, opts.g);
+    // border tube inset from the edge: one open loop with its electrodes in a gap at the bottom middle (real signs do this)
+    const bi = 0.12, gp = Math.min(0.12, w * 0.08); const ax = s > 0 ? 1 : -1;
+    const B = [at(ax * gp, -h / 2 + bi, d), at(ax * (w / 2 - bi), -h / 2 + bi, d), at(ax * (w / 2 - bi), h / 2 - bi, d), at(-ax * (w / 2 - bi), h / 2 - bi, d), at(-ax * (w / 2 - bi), -h / 2 + bi, d), at(-ax * gp, -h / 2 + bi, d)];
+    tubeCircuit(nb, dk, [B], r * 0.8, col2, nf, back, { dead: -1 });
+    // near-range halo on the face (additive, night only, LOD-hidden)
+    haloQuad(gb, at(0, 0, s * (t / 2 + 0.012)), f1, e2, nf, w / 2, h / 2, col.map((q, j) => (q + col2[j]) * 0.5));
+    // wet-pavement reflection under the sign when the ground height is known (shop-front signs)
+    if (opts.gy != null && c[1] - opts.gy < 14) { const rbk = W.b('nrefl', c[0], c[2]); const L = Math.min(10, 3 + (c[1] - opts.gy) * 0.9);
+      const f = blade ? [c[0], opts.gy + 0.03, c[2]] : [c[0] + n[0] * (t / 2 + 0.1), opts.gy + 0.03, c[2] + n[2] * (t / 2 + 0.1)];
+      reflQuad(rbk, f, nf, f1, w / 2 + 0.5, L, col); }
   }
   // hardware
   const met = [0.22, 0.23, 0.25];
@@ -222,9 +232,9 @@ export function awning(W, F, a0, a1, y, out = 1.6, col) {
   for (const a of [a0 + 0.1, a1 - 0.1]) beam(v, [Vt(a, 0.2, yl - 0.3).x, yl - 0.3, Vt(a, 0.2, yl - 0.3).z], [Vt(a, out - 0.05, yl).x, yl, Vt(a, out - 0.05, yl).z], 0.03, [0.25, 0.25, 0.27]);
 }
 // shop signboard: dark box across the bay at y with a lit face (neon panel) and a tube glyph line
-export function signboard(W, F, a0, a1, y, h = 0.75) {
+export function signboard(W, F, a0, a1, y, h = 0.75, gy) {
   const w = a1 - a0; const c = V3(F, (a0 + a1) / 2, 0.42, y + h / 2); const e1 = [F.dx, 0, F.dz];
-  if (rng() < 0.55) neonSign(W, c, e1, w, h, { glyphs: randGlyphs(Math.max(1, Math.min(4, Math.floor(w / (h * 1.2))))), gap: 0.2, t: 0.2, r: 0.03, g: kg().tube4 });
+  if (rng() < 0.55) neonSign(W, c, e1, w, h, { glyphs: randGlyphs(Math.max(1, Math.min(4, Math.floor(w / (h * 1.2))))), gap: 0.2, t: 0.2, r: 0.03, g: kg().tube4, gy });
   else { // light-box sign: emissive panel face (dimmed so bloom stays sane) in a metal frame
     const v = W.b('vcol', c[0], c[2]), nb = W.b('neon', c[0], c[2]); const lc = pick(NEONC).map((q) => q * 0.22 + 0.04);
     const q = [F.P(a0, 0.5), F.P(a1, 0.5), F.P(a1, 0.18), F.P(a0, 0.18)]; prismWalls(v, q, y, y + h, null, [0.12, 0.12, 0.13]); polyCap(v, q, y + h, {}, [0.12, 0.12, 0.13]);

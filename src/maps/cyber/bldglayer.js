@@ -102,7 +102,7 @@ export class BldgLayer {
         const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m); }
       else withSeed(it.seed, () => (it.kind === 'walk' ? skyway(W, it) : it.kind === 'bridge' ? skyBridge(W, it) : streetCables(W, it)));
     }
-    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false }, steam: { cast: false, receive: false }, cnsign: { cast: false } });
+    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } });
   }
   sync() {
     const st = this.stream; if (!st) return;
@@ -110,8 +110,8 @@ export class BldgLayer {
     // detail LOD: small clutter meshes ('vcolD') only within DETAIL_R of the camera (chunk centre distance)
     const cam = globalThis.__G && globalThis.__G.camera; if (cam) { const p = cam.position; let n = 0;
       for (const c of st.chunks.values()) { if (!c.near) continue; const on = Math.hypot(c.cx - p.x, c.cz - p.z) < DETAIL_R + Math.max(0, p.y - 40) * 0.5;
-        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|') || m.name.startsWith('steam|')) { m.visible = on; n += on; } }
-      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|') || m.name.startsWith('steam|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
+        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|') || m.name.startsWith('steam|') || m.name.startsWith('nglow|') || m.name.startsWith('nrefl|')) { m.visible = on; n += on; } }
+      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|') || m.name.startsWith('steam|') || m.name.startsWith('nglow|') || m.name.startsWith('nrefl|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
       this.detailOn = n; }
     for (const [k, list] of this.items) {
       const c = st.chunks.get(k); const on = !!(c && c.near); const b = this.built.get(k);

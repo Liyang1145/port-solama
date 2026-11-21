@@ -7,18 +7,26 @@ import * as THREE from 'three';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
 import { BldgLayer } from './bldglayer.js';
+import { cnText, cnReady, cnWhenReady } from './cnglyph.js';
 
 const WORDS_V = [['霓', '港'], ['鲸', '歌', '电', '子'], ['夜', '航'], ['零', '点', '茶'], ['海', '妖', '酒', '吧'], ['蓝', '晶', '诊', '所'], ['极', '光'], ['数', '字', '海']];
 const WORDS_H = [['SOLA//NET', '索拉纳网络'], ['潮汐 VR', 'DIVE DEEP'], ['白鲸 AI', '24H ONLINE'], ['双月光学', 'TWIN MOON'], ['回声电台', '101.7 FM'], ['拉面 24H', 'RAMEN'], ['珊瑚银行', 'CORAL BANK'], ['Ψ-ARC', '义体工坊'],
   ['极光能量', 'AURORA'], ['NEON TIDE', '霓潮'], ['夜猫市场', 'NIGHT MKT'], ['HYDRA-7', '量子快递'], ['星砂赌场', 'STAR SAND'], ['云端公寓', 'SKYHOME'], ['蓝鲸物流', 'BLUEWHALE'], ['零号区', 'ZONE 0']];
 const PAL = ['#ff2bd6', '#19f0ff', '#8a5cff', '#ff4d6d', '#38ff9c', '#ffd23f', '#3d7bff', '#ff8a2b'];
 
+// b_neon_sign: CJK from the offline glyph atlas (cnglyph.js) instead of the system font; repainted once if it arrives late
 function atlas() {
-  const c = document.createElement('canvas'); c.width = 2048; c.height = 2048; const g = c.getContext('2d'); const r = mulberry(4545);
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 2048;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true;
+  paintAtlas(c.getContext('2d')); if (!cnReady()) cnWhenReady(() => { paintAtlas(c.getContext('2d')); t.needsUpdate = true; });
+  return t;
+}
+function paintAtlas(g) {
+  const r = mulberry(4545);
   g.fillStyle = '#000'; g.fillRect(0, 0, 2048, 2048);
   const font = (px, bold = true) => `${bold ? '900' : '500'} ${px}px "Anton", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif`;
-  const glowText = (t, x, y, px, col, align = 'center') => { g.font = font(px); g.textAlign = align; g.textBaseline = 'middle';
-    for (const [b, a] of [[28, 0.55], [12, 0.8], [0, 1]]) { g.shadowColor = col; g.shadowBlur = b; g.fillStyle = a < 1 ? col : '#ffffff'; g.globalAlpha = a; g.fillText(t, x, y); }
+  const glowText = (t, x, y, px, col, align = 'center') => { void font;
+    for (const [b, a] of [[28, 0.55], [12, 0.8], [0, 1]]) { g.shadowColor = col; g.shadowBlur = b; g.fillStyle = a < 1 ? col : '#ffffff'; g.globalAlpha = a; cnText(g, t, x, y, px, align, '"Anton", Impact, sans-serif'); }
     g.globalAlpha = 1; g.shadowBlur = 0; };
   // 8 vertical banners (256 x 1024) in the top half
   for (let i = 0; i < 8; i++) {
@@ -42,7 +50,6 @@ function atlas() {
     g.shadowBlur = 0;
     const [a, b] = WORDS_H[i]; glowText(a, x0 + 300, y0 + 105, a.length > 6 ? 62 : 76, col); glowText(b, x0 + 300, y0 + 190, 40, col2);
   }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true; return t;
 }
 
 const HOLO_VS = `attribute vec4 aCell; attribute vec2 aSeed; varying vec2 vUv; varying vec2 vSeed; varying vec3 vWP;

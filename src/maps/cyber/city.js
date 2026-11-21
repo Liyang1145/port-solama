@@ -11,6 +11,7 @@ import { wildField } from './nature.js';
 import { megatower, tenement, shopStreet } from './arch.js';
 import { signFaceMat } from './dress.js';
 import { cnSignMat, steamMat } from './street2.js';
+import { neonGlowMat, neonReflMat } from './neontube.js';
 import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
@@ -62,6 +63,8 @@ export function buildCity(scene, mats, T) {
   if (!mats.signface) mats.signface = signFaceMat();
   if (!mats.cnsign) mats.cnsign = cnSignMat(); // r6.4 b_street2: Chinese light-box signs / paper stickers (text atlas)
   if (!mats.steam) mats.steam = steamMat(); // r6.4 b_street2: stall steam / grill smoke
+  if (!mats.nglow) mats.nglow = neonGlowMat(); // b_neon_sign: near-range neon halo
+  if (!mats.nrefl) mats.nrefl = neonReflMat(); // b_neon_sign: neon streaks on the wet pavement
   const W = new World(250);
   W.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 };
   W.attrs.road = { aRd: 4 };

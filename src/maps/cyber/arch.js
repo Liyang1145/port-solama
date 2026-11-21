@@ -27,7 +27,7 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     else if (r < 0.75) { storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, 0.92); } // open shop: shutter rolled up into the housing
     else storefront(W, F, a0, a1, y0, yt);
     // r6.4 b_street2: about half the shop boards are Chinese light boxes (invented names); stickers / condensers / wiring per bay
-    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); else signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9)); }
+    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); else signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); }
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) vending(W, F, a0 + 0.6 + j * 1.0, y0); }
   }
@@ -38,7 +38,7 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
   // blade sign at one end of the frontage
   if (opts.blade !== false && rng() < 0.85) {
     const a = rng() < 0.5 ? 0.6 : F.len - 0.6; const h = rand(2.4, 4.2), w = rand(0.8, 1.2); const yc = y0 + ground + 0.6 + h / 2;
-    const q = F.P(a, 0.35 + w / 2); neonSign(W, [q[0], yc, q[1]], [F.ox, 0, F.oz], w, h, { blade: true, glyphs: randGlyphs(Math.max(2, Math.min(4, Math.floor(h / (w * 0.95))))), alt: rng() < 0.5 });
+    const q = F.P(a, 0.35 + w / 2); neonSign(W, [q[0], yc, q[1]], [F.ox, 0, F.oz], w, h, { blade: true, glyphs: randGlyphs(Math.max(2, Math.min(4, Math.floor(h / (w * 0.95))))), alt: rng() < 0.5, gy: y0 });
   }
 }
 

@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
+import { cnText, cnMeasure, cnReady, cnWhenReady } from './cnglyph.js';
 
 // ------------------------------------------------------------------ text atlas ----
 // 1024²: rows 0-5 = 24 shop sign cells (256×128), rows 6-7 = 16 sticker cells (128×128)
@@ -25,19 +26,25 @@ const STK = [['开锁', '换锁芯'], ['管道疏通', ''], ['招租', '临街�
 const FONT = '"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Zen Hei",sans-serif';
 const SIGN_STY = [['#c8161d', '#ffe14a'], ['#f4f1e6', '#c41a1a'], ['#0b3f8c', '#ffffff'], ['#101012', '#38f0ff'], ['#0e5a35', '#fff4c8'], ['#ffd21f', '#1a1a1a'],
   ['#101012', '#ff3aa8'], ['#e8e8ea', '#0b3f8c'], ['#6a1690', '#ffe6ff'], ['#ff6a00', '#ffffff'], ['#101012', '#ffcf3a'], ['#1d8f86', '#ffffff']];
+// b_neon_sign: text comes from the offline glyph atlas (cnglyph.js), not the system font; repainted once if it arrives late
 function textAtlas() {
-  const N = 1024; const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d');
+  const N = 1024; const c = document.createElement('canvas'); c.width = c.height = N;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true;
+  paintAtlas(c.getContext('2d'), N); if (!cnReady()) cnWhenReady(() => { paintAtlas(c.getContext('2d'), N); t.needsUpdate = true; });
+  return t;
+}
+function paintAtlas(g, N) {
   g.fillStyle = '#777'; g.fillRect(0, 0, N, N);
   // shop signs
   for (let i = 0; i < 24; i++) {
     const x0 = (i % 4) * 256, y0 = Math.floor(i / 4) * 128; const [bg, fg] = SIGN_STY[(i * 7) % SIGN_STY.length];
     g.fillStyle = bg; g.fillRect(x0, y0, 256, 128);
     g.strokeStyle = fg; g.globalAlpha = 0.85; g.lineWidth = 3; g.strokeRect(x0 + 6, y0 + 6, 244, 116); g.globalAlpha = 1;
-    const t = SIGN_TXT[i]; let fs = Math.min(76, 220 / t.length); g.font = `bold ${fs}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    const w = g.measureText(t).width; if (w > 228) { fs *= 228 / w; g.font = `bold ${fs}px ${FONT}`; }
+    const t = SIGN_TXT[i]; let fs = Math.min(76, 220 / t.length);
+    const w = cnMeasure(g, t, fs); if (w > 228) fs *= 228 / w;
     if (bg === '#101012') { g.shadowColor = fg; g.shadowBlur = 10; }
-    g.fillStyle = fg; g.fillText(t, x0 + 128, y0 + 54); g.shadowBlur = 0;
-    g.font = `bold 17px ${FONT}`; g.globalAlpha = 0.9; g.fillText(SUB[i % SUB.length], x0 + 128, y0 + 104); g.globalAlpha = 1;
+    g.fillStyle = fg; cnText(g, t, x0 + 128, y0 + 54, fs); g.shadowBlur = 0;
+    g.globalAlpha = 0.9; cnText(g, SUB[i % SUB.length], x0 + 128, y0 + 104, 17); g.globalAlpha = 1;
   }
   // stickers / small paper ads
   const r = (() => { let s = 911; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
@@ -47,13 +54,12 @@ function textAtlas() {
     g.fillStyle = bg; g.fillRect(x0 + 6, y0 + 6, 116, 116);
     for (let k = 0; k < 40; k++) { g.fillStyle = `rgba(80,70,50,${r() * 0.12})`; g.fillRect(x0 + 6 + r() * 110, y0 + 6 + r() * 110, 2 + r() * 10, 2 + r() * 6); } // paper wear
     const [t1, t2] = STK[i]; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillStyle = i % 3 === 0 ? '#c4141a' : '#111'; g.font = `bold ${Math.min(40, 100 / t1.length)}px ${FONT}`; g.fillText(t1, x0 + 64, y0 + 34);
-    g.fillStyle = '#222'; if (t2) { g.font = `bold 19px ${FONT}`; g.fillText(t2, x0 + 64, y0 + 66); }
+    g.fillStyle = i % 3 === 0 ? '#c4141a' : '#111'; cnText(g, t1, x0 + 64, y0 + 34, Math.min(40, 100 / t1.length));
+    g.fillStyle = '#222'; if (t2) cnText(g, t2, x0 + 64, y0 + 66, 19);
     let num = '1'; for (let k = 0; k < 10; k++) num += Math.floor(r() * 10); g.font = `bold 15px ${FONT}`; g.fillStyle = '#c4141a'; g.fillText(num.slice(0, 3) + '-' + num.slice(3, 7) + '-' + num.slice(7), x0 + 64, y0 + 94);
     if (i % 4 === 1) { g.fillStyle = '#111'; for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) if (r() < 0.5) g.fillRect(x0 + 94 + a * 4, y0 + 96 + b * 4, 4, 4); } // tiny QR-ish block
     if (i % 5 === 2) { g.strokeStyle = '#111'; g.setLineDash([3, 3]); g.beginPath(); for (let k = 0; k < 7; k++) { g.moveTo(x0 + 10 + k * 16, y0 + 106); g.lineTo(x0 + 10 + k * 16, y0 + 122); } g.stroke(); g.setLineDash([]); } // tear-off strips
   }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true; return t;
 }
 let CN_MAT = null;
 // face material: albedo = atlas; emissive = atlas × vertex colour .r (1 = lit light box, 0 = paper sticker), strong at night

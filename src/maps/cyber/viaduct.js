@@ -20,7 +20,10 @@ import { cnFace, SG, STALLS } from './street2.js';
 import { U } from '../../env.js';
 
 export const VIA = { soffit: 10.2, floor: 10.75, top: 11.95, hw: 4.9, colOff: 7.75, colR: 0.56, track: 2.0, gauge: 0.72, wire: 15.9 };
-const NEAR_R = 330, FREE_R = 460, DETAIL_R = 230;
+// b_neon_sign: near build radius 330 → 250 m (≈ −40 % near-layer triangles in view); free radius 460 → 380 m. What reads from far
+// away at night (LED edge strips) and from far away by day (light coping on the parapets) moved into the always-on base so the
+// line does not change silhouette / lose its light strips when spans come and go at 250 m.
+const NEAR_R = 250, FREE_R = 380, DETAIL_R = 230;
 
 // ----------------------------------------------------------------------- planning ----
 function polyLen(P) { let L = 0; for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); return L; }
@@ -163,8 +166,8 @@ export class Viaduct {
     for (const m of [gi, ci, xi]) { m.castShadow = true; m.receiveShadow = true; m.computeBoundingSphere(); this.group.add(m); this.base.push(m); }
     this.counts = { chords: ch.length, legs: nl, piers: R.piers.length, len: Math.round(R.L) };
     // parked train + end buffers (merged, built once)
-    const W = new World(1e7); withSeed(4711, () => { train(W, R, 330, 1); ends(W, R); });
-    for (const m of W.build(this.group, mats, { neon: { cast: false }, cnsign: { cast: false } })) this.base.push(m);
+    const W = new World(1e7); withSeed(4711, () => { train(W, R, 330, 1); ends(W, R); edges(W, R); });
+    for (const m of W.build(this.group, mats, { neon: { cast: false }, cnsign: { cast: false }, cone: { cast: false, receive: false } })) this.base.push(m);
     // spans for the near detail
     this.spans = []; for (let i = 0; i < R.piers.length - 1; i++) { const a = R.piers[i].s, b = R.piers[i + 1].s; const m = R.at((a + b) / 2); this.spans.push({ i, s0: a, s1: b, x: m.x, z: m.z, p0: R.piers[i], p1: R.piers[i + 1] }); }
   }
@@ -181,6 +184,22 @@ export class Viaduct {
   tris() { let n = 0; for (const m of this.base) n += (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3 * (m.isInstancedMesh ? m.count : 1); for (const b of this.built.values()) for (const m of b) n += m.geometry.index.count / 3; return Math.round(n); }
 }
 
+// b_neon_sign: LED edge strips + parapet coping along the whole line (base layer; ~6 k tris, colour alternates per span as before)
+function edges(W, R) {
+  const P = R.piers.map((p) => p.s);
+  for (let i = 0; i < P.length - 1; i++) {
+    const s0 = P[i], s1 = P[i + 1]; const m = R.at((s0 + s1) / 2); const nb = W.b('neon', m.x, m.z), v = W.b('vcol', m.x, m.z);
+    const ledC = i % 2 ? [0.12, 0.9, 1.0] : [1.0, 0.16, 0.62]; const nseg = Math.max(1, Math.round((s1 - s0) / 6)); const ds = (s1 - s0) / nseg;
+    for (let k = 0; k < nseg; k++) { const a = s0 + k * ds, b = a + ds + 0.02;
+      for (const sg of [-1, 1]) {
+        beam(nb, WP(R, a, sg * (VIA.hw + 0.03), VIA.soffit + 0.78), WP(R, b, sg * (VIA.hw + 0.03), VIA.soffit + 0.78), 0.05, ledC.map((q) => q * 0.5), 0.07);
+        beam(v, WP(R, a, sg * (VIA.hw - 0.16), VIA.top + 0.03), WP(R, b, sg * (VIA.hw - 0.16), VIA.top + 0.03), 0.36, [0.62, 0.62, 0.6], 0.06); } }
+    // soffit lamps at mid-span (housing + lens), night light cones down onto the street
+    { const s = (s0 + s1) / 2; const p = R.at(s); const yaw = Math.atan2(-p.tz, p.tx); const cb = W.b('cone', m.x, m.z); const G = kg();
+      for (const sg of [-1, 1]) { const q = WP(R, s, sg * 2.6, VIA.soffit - 0.12); put(v, G.box, q[0], q[1], q[2], 0.9, 0.22, 0.4, [0.2, 0.2, 0.22], yaw); put(nb, G.box, q[0], q[1] - 0.12, q[2], 0.78, 0.02, 0.3, [0.55, 0.5, 0.42], yaw);
+        cone(cb, q[0], q[1] - 0.14, q[2], VIA.soffit - 0.3, 4.2, [1.0, 0.85, 0.65]); } }
+  }
+}
 // ----------------------------------------------------------------------- near detail ----
 let CONE_G = null;
 function cone(b, x, y, z, h, r, col) { if (!CONE_G) { CONE_G = new THREE.CylinderGeometry(0.06, 1, 1, 14, 1, true); CONE_G.translate(0, -0.5, 0); } put(b, CONE_G, x, y, z, r, h, r, col); }
@@ -198,8 +217,7 @@ function spanDetail(W, R, sp, city) {
       for (const r of [-1, 1]) { beam(v, WP(R, a, tc + r * VIA.gauge, yf + 0.28), WP(R, b, tc + r * VIA.gauge, yf + 0.28), 0.07, [0.34, 0.3, 0.27], 0.16); // rail
         beam(v, WP(R, a, tc + r * VIA.gauge, yf + 0.355), WP(R, b, tc + r * VIA.gauge, yf + 0.355), 0.06, [0.72, 0.72, 0.74], 0.012); } } // polished head
     for (const sg of [-1, 1]) { beam(c, WP(R, a, sg * (VIA.hw - 0.5), yf + 0.42), WP(R, b, sg * (VIA.hw - 0.5), yf + 0.42), 0.34, [0.32, 0.33, 0.34], 0.14); // cable trough
-      beam(nb, WP(R, a, sg * (VIA.hw + 0.03), VIA.soffit + 0.78), WP(R, b, sg * (VIA.hw + 0.03), VIA.soffit + 0.78), 0.05, ledC.map((q) => q * 0.5), 0.07); // LED edge strip
-      beam(v, WP(R, a, sg * (VIA.hw - 0.16), VIA.top + 0.03), WP(R, b, sg * (VIA.hw - 0.16), VIA.top + 0.03), 0.36, [0.62, 0.62, 0.6], 0.06); } // coping
+      void ledC; } // LED edge strip + coping: base layer (edges())
   }
   // sleeper blocks (two-block sleepers every 1.25 m)
   for (let s = s0 + 0.6; s < s1; s += 1.25) for (const tr of [-1, 1]) for (const r of [-1, 1]) { const q = WP(R, s, tr * VIA.track + r * VIA.gauge, yf + 0.22); const p = R.at(s); put(c, G.box, q[0], q[1], q[2], 0.3, 0.06, 0.62, [0.42, 0.42, 0.41], Math.atan2(-p.tz, p.tx)); }
@@ -220,9 +238,7 @@ function spanDetail(W, R, sp, city) {
       beam(c, WP(R, pts[i], tc + (i ? 0.2 : -0.2), VIA.wire), WP(R, pts[i + 1], tc + (i ? -0.2 : 0.2), VIA.wire), 0.014, [0.62, 0.42, 0.25], 0.014, kg().tube4); // zig-zag contact wire
       for (let t = 0.25; t < 1; t += 0.25) { const s = pts[i] + (pts[i + 1] - pts[i]) * t; const sag = 0.35 * 4 * t * (1 - t); tube(c, WP(R, s, tc, VIA.wire + 1.0 - sag), WP(R, s, tc, VIA.wire), 0.004, [0.5, 0.4, 0.3], kg().tube4); } } }
   // soffit lamps at mid-span (housing + lens), night light cones down onto the street
-  { const s = (s0 + s1) / 2; const p = R.at(s); const yaw = Math.atan2(-p.tz, p.tx);
-    for (const sg of [-1, 1]) { const q = WP(R, s, sg * 2.6, VIA.soffit - 0.12); put(v, G.box, q[0], q[1], q[2], 0.9, 0.22, 0.4, [0.2, 0.2, 0.22], yaw); put(nb, G.box, q[0], q[1] - 0.12, q[2], 0.78, 0.02, 0.3, [0.55, 0.5, 0.42], yaw);
-      cone(cb, q[0], q[1] - 0.14, q[2], VIA.soffit - 0.3, 4.2, [1.0, 0.85, 0.65]); } }
+  void cb; // b_neon_sign: soffit lamps + light cones moved to the base layer (edges()), they read from far at night
   // girder name boards on every third span (both faces)
   if (sp.i % 3 === 1) { const s = (s0 + s1) / 2 + 6; const p = R.at(s); const yaw = Math.atan2(p.nx, p.nz);
     for (const sg of [-1, 1]) { const q = WP(R, s, sg * (VIA.hw + 0.06), VIA.soffit + 0.95); put(v, G.box, q[0], q[1], q[2], 3.3, 1.35, 0.1, [0.06, 0.06, 0.07], yaw);
