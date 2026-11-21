@@ -94,8 +94,9 @@ let CMAT = null;
 function containerMat() {
   if (CMAT) return CMAT;
   CMAT = prep(new THREE.MeshStandardMaterial({ map: containerAtlas(), roughness: 0.62, metalness: 0.35 }), 'portbox', (s) => {
+    s.uniforms.uNight = U.uNight;
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>
-attribute float aFace; attribute vec4 aLiv; varying float vFace; varying vec3 vLP; varying vec4 vLiv; varying vec3 vRib;`)
+attribute float aFace; attribute vec4 aLiv; varying float vFace; varying vec3 vLP; varying vec4 vLiv; varying vec3 vRib; varying vec3 vQP;`)
       .replace('#include <uv_vertex>', `#include <uv_vertex>
   { vec2 cu = uv; float row = aLiv.x;
     if (aFace < 0.5) cu = vec2((uv.x * aLiv.y + aLiv.z) * 0.75, uv.y);
@@ -104,14 +105,17 @@ attribute float aFace; attribute vec4 aLiv; varying float vFace; varying vec3 vL
     else cu = vec2(0.0095 + uv.x * 0.0025, 0.45 + uv.y * 0.1);
     cu.y = clamp(cu.y, 0.02, 0.98); vMapUv = vec2(cu.x, 1.0 - (row + 1.0 - cu.y) / ${NROW}.0); }`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-  vFace = aFace; vLP = position; vLiv = aLiv;
+  vFace = aFace; vLP = position; vLiv = aLiv; vQP = position;
+  #ifdef USE_INSTANCING
+    vQP = (instanceMatrix * vec4(position, 1.0)).xyz;
+  #endif
   { vec3 ax = aFace < 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 0.0, 1.0);
   #ifdef USE_INSTANCING
     ax = mat3(instanceMatrix) * ax;
   #endif
     vRib = normalize(normalMatrix * ax); }`);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
-varying float vFace; varying vec3 vLP; varying vec4 vLiv; varying vec3 vRib;
+varying float vFace; varying vec3 vLP; varying vec4 vLiv; varying vec3 vRib; varying vec3 vQP; uniform float uNight;
 float ph12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float pn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(ph12(i),ph12(i+vec2(1,0)),f.x), mix(ph12(i+vec2(0,1)),ph12(i+vec2(1,1)),f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -128,6 +132,16 @@ float pn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix
     float rib = vFace < 2.5 ? (vFace < 0.5 || vFace > 1.5 ? 1.0 : 0.0) : 0.0;
     float k = cos(along * 22.4) * 0.55 * rib * (1.0 - smoothstep(0.4, 1.2, fw));
     normal = normalize(normal + vRib * k); }`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  // b_port2 night: fake light from the yard masts (u every 80 m, pools at v 33 / 71), the crane floods over the quay lanes and
+  // the ship stacks, and a dim sodium bounce everywhere, so the yard reads at night without real point lights
+  if (uNight > 0.01) { vec3 q = vQP; float up = vFace > 2.5 && vFace < 3.5 ? 1.0 : 0.55;
+    float du = mod(q.x + 280.0, 80.0) - 40.0; float dv = min(abs(q.z - 33.0), abs(q.z - 71.0));
+    float mast = exp(-(du * du + dv * dv) / 1150.0) * step(abs(q.x), 285.0) * (0.55 + 0.45 * clamp(q.y / 10.0, 0.0, 1.0));
+    float cr = 0.0; for (int i = 0; i < 4; i++) { float cu = -168.0 + float(i) * 51.3; float dx = q.x - cu; cr += exp(-dx * dx / 160.0); }
+    cr *= smoothstep(-40.0, -30.0, q.z) * (1.0 - smoothstep(25.0, 40.0, q.z)) * clamp((q.y - 2.0) / 12.0, 0.25, 1.0);
+    vec3 L = vec3(1.0, 0.72, 0.42) * mast * 0.9 + vec3(0.95, 0.85, 0.7) * (cr * 0.8 + step(q.z, -3.5) * step(7.5, q.y) * 0.22) + vec3(0.32, 0.22, 0.4) * 0.1;
+    totalEmissiveRadiance += diffuseColor.rgb * L * up * uNight; }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   roughnessFactor = clamp(roughnessFactor + 0.25 * smoothstep(0.3, 0.8, pn(vLP.xz * 1.3 + vLiv.w * 5.0)), 0.0, 1.0);`);
   });
@@ -174,6 +188,27 @@ function poolMat() {
   return (POOL = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6,
     vertexShader: 'attribute vec3 color; varying vec3 vC; varying vec2 vU; void main(){ vC = color; vU = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: 'uniform float uNight; varying vec3 vC; varying vec2 vU; void main(){ float d = length(vU - 0.5) * 2.0; float a = pow(max(0.0, 1.0 - d), 2.2) * uNight * 0.42; gl_FragColor = vec4(vC * a, 1.0); }' }));
+}
+// b_port2: camera-facing additive glow sprites for lamp heads / aviation + nav lights / edge warning lights.
+// One program; geometry = 4 verts per light at the light centre, aG = (corner x, corner y, size m, kind). The sprite never shrinks below
+// ~2.5 px so the cranes and the ship still read as lit silhouettes from across the harbour. kind: 0 steady, 1 slow blink, 2 fast strobe.
+let GLOW = null;
+function glowMat() {
+  if (GLOW) return GLOW;
+  return (GLOW = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight, uTime: U.uTime }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: 'attribute vec3 color; attribute vec4 aG; uniform float uTime; varying vec3 vC; varying vec2 vU; void main(){ vC = color; vU = aG.xy;'
+      + ' vec4 mv = modelViewMatrix * vec4(position, 1.0); float d = max(1.0, -mv.z); float sz = max(aG.z, d * 0.0042);'
+      + ' float bl = aG.w < 0.5 ? 1.0 : aG.w < 1.5 ? step(0.45, fract(uTime * 0.5 + position.x * 0.013)) : step(0.86, fract(uTime * 1.1 + position.z * 0.07));'
+      + ' vC *= bl * min(1.6, sz / max(aG.z, 0.01) * 0.35 + 0.65); mv.xy += aG.xy * sz; gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'uniform float uNight; varying vec3 vC; varying vec2 vU; void main(){ float r2 = dot(vU, vU); if (r2 > 1.0) discard;'
+      + ' float a = exp(-r2 * 14.0) * 1.6 + exp(-r2 * 4.0) * 0.35 * (1.0 - r2); gl_FragColor = vec4(vC * a * (0.12 + 0.88 * uNight), 1.0); }' }));
+}
+class Glows {
+  constructor() { this.p = []; this.g = []; this.c = []; this.i = []; }
+  add(x, y, z, size, col, kind = 0) { const k = this.p.length / 3; for (const [cx, cy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { this.p.push(x, y, z); this.g.push(cx, cy, size, kind); this.c.push(...col); } this.i.push(k, k + 1, k + 2, k, k + 2, k + 3); }
+  mesh() { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3)); g.setAttribute('aG', new THREE.Float32BufferAttribute(this.g, 4));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3)); g.setIndex(this.i); g.computeBoundingSphere(); g.boundingSphere.radius += 30;
+    const m = new THREE.Mesh(g, glowMat()); m.name = 'portglow'; m.renderOrder = 3; m.castShadow = m.receiveShadow = false; return m; }
 }
 function hullTex() {
   const W = 2048, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); const r = mulberry(9902);
@@ -249,7 +284,9 @@ export class PortQuay {
     const t0 = performance.now(); const boxes = []; const W = new World(CH);
     withSeed(0xb0a7, () => { yardBoxes(boxes); shipBoxes(boxes); quayBoxes(boxes); });
     withSeed(0x5417, () => { hull(W); superstructure(W); });
-    const ms = W.build(this.group, this.mats, { neon: { cast: false }, hull: { cast: true } }); this.baseMeshes = ms;
+    const GL = new Glows(); withSeed(0x9a17, () => nightLights(W, GL));
+    const ms = W.build(this.group, this.mats, { neon: { cast: false }, hull: { cast: true }, cone: { cast: false, receive: false }, pool: { cast: false, receive: false } }); this.baseMeshes = ms;
+    this.glow = GL.mesh(); this.group.add(this.glow);
     // crane proxies (far): portal + boom + A-frame boxes in the crane colour
     const PW = new World(1e6); withSeed(0xc4a1, () => { for (const c of CRANES) craneProxy(PW, c); }); this.proxies = PW.build(this.group, this.mats, { neon: { cast: false } });
     // containers: one instanced mesh
@@ -487,7 +524,8 @@ function stsCrane(W, c) {
   // flood lights under both girders (housings, lit lenses, cones, pools on the quay / deck)
   const lampZ = c.up ? [6, 20, 30] : [-48, -36, -24, -12, 6, 20, 30];
   for (const s of Gs) for (const z of lampZ) { put(v, G.box, U0 + s, Hb - 1.75, z, 0.9, 0.5, 0.7, DARK); put(nb, G.box, U0 + s, Hb - 2.02, z, 0.75, 0.04, 0.55, [1.0, 0.82, 0.55].map((q) => q * 1.5));
-    if ((z > -6 && z < 25) || (z < -6 && rng() < 0.35)) { const gy = z > 0 ? 0.05 : SHIP.deck + 1.4; cone(cb, U0 + s, Hb - 2.05, z, Hb - 2.1 - gy, rand(4, 5.5), [0.95, 0.75, 0.45]); if (z > 0) pool(pl, U0 + s, 0.06, z, 11, [0.95, 0.72, 0.42]); } }
+    if (z < -6 && rng() < 0.35) cone(cb, U0 + s, Hb - 2.05, z, Hb - 2.1 - SHIP.deck - 1.4, rand(4, 5.5), [0.95, 0.75, 0.45]); } // quay-side cones + pools: nightLights()
+  void pl;
   // stair tower on the landside leg at -9: zig-zag flights with landings, + lift shaft on the +9 landside leg
   const sx = U0 - 9 - 1.9, sv = 33; for (let y = 2.6, k = 0; y < H - 4; y += 4.2, k++) { const z0 = sv - 1.6, z1 = sv + 1.6; const dir = k % 2 ? -1 : 1;
     box(d, sx - 1.4, y - 0.12, z0, sx, y, z1, {}, [0.28, 0.28, 0.29]); beam(d, [sx - 0.7, y, dir > 0 ? z0 : z1], [sx - 0.7, y + 4.2, dir > 0 ? z1 : z0], 1.0, [0.32, 0.32, 0.33], 0.12);
@@ -635,6 +673,67 @@ function lightMasts(W) {
     for (const o of [-2.4, -0.8, 0.8, 2.4]) { put(v, kg().box, u + o, H + 0.75, vv - 0.1, 1.2, 0.9, 0.5, [0.25, 0.25, 0.27]); put(nb, kg().box, u + o, H + 0.75, vv - 0.37, 1.0, 0.7, 0.04, [1, 0.85, 0.6].map((q) => q * 1.3)); }
     for (let y = 1.5; y < H; y += 0.4) put(d, kg().box, u + 0.48, y, vv, 0.06, 0.04, 0.45, DARK); // ladder rungs
     put(nb, kg().ball, u, H + 1.8, vv, 0.22, 0.22, 0.22, [1, 0.06, 0.04]);
-    cone(cb, u, H, vv - 2, H - 0.1, 12, [0.9, 0.78, 0.55].map((q) => q * 0.6)); pool(pl, u, 0.05, vv - 8, 24, [0.95, 0.75, 0.48]);
+    void cb; void pl; // light cone + ground pool live in the base nightLights() layer (b_port2) so they also show from afar
   }
+}
+
+// ============================================================ night lighting ====
+// b_port2: everything here is in the base LOD (built once within BASE_R, kept), so the port is lit from across the harbour too.
+// No real lights: emissive 'neon' parts, additive ground pools / wall washes (pool material, any quad orientation), volumetric
+// cones (cone material) and glow sprites (Glows). Only the glow sprites are a new shader program.
+const AMBER = [1, 0.55, 0.08], RED = [1, 0.06, 0.04], WARM = [1, 0.8, 0.52], CYAN = [0.1, 0.85, 1], MAG = [1, 0.18, 0.75];
+const sc = (c, k) => c.map((q) => q * k);
+// vertical wash quad facing +v (n = 1) or -v (n = -1) at plane v, centre (u, y), half sizes (ru, ry)
+function washV(b, u, y, v, ru, ry, col, n = 1) { const a = new THREE.Vector3(u - ru * n, y - ry, v), c = new THREE.Vector3(u + ru * n, y - ry, v), e = new THREE.Vector3(u + ru * n, y + ry, v), f = new THREE.Vector3(u - ru * n, y + ry, v);
+  b.quad(a, c, e, f, [0, 0, 1, 0, 1, 1, 0, 1], {}, col); }
+// wash quad facing +u / -u at plane u
+function washU(b, u, y, v, rv, ry, col, n = 1) { const a = new THREE.Vector3(u, y - ry, v + rv * n), c = new THREE.Vector3(u, y - ry, v - rv * n), e = new THREE.Vector3(u, y + ry, v - rv * n), f = new THREE.Vector3(u, y + ry, v + rv * n);
+  b.quad(a, c, e, f, [0, 0, 1, 0, 1, 1, 0, 1], {}, col); }
+function nightLights(W, GL) {
+  const S = SHIP;
+  // --- yard high masts: four lamp heads each, a long amber cone and a 24 m sodium pool; red top light
+  for (let u = -240; u <= 240; u += 80) for (const vv of [41, 79]) { const cb = W.b('cone', u, vv), pl = W.b('pool', u, vv); const H = 34;
+    cone(cb, u, H, vv - 2, H - 0.1, 12, sc([0.9, 0.78, 0.55], 0.6)); pool(pl, u, 0.05, vv - 8, 24, [1.0, 0.78, 0.5]); pool(pl, u, 0.07, vv - 8, 9, sc(WARM, 0.5));
+    for (const o of [-2.4, -0.8, 0.8, 2.4]) GL.add(u + o, H + 0.6, vv - 0.45, 0.9, sc(WARM, 1.1));
+    GL.add(u, H + 1.8, vv, 0.5, RED, 1); }
+  // --- container lanes: cross-aisle pools between yard blocks (cyan spill from the block ID pylons + sodium), the lane between the
+  //     two lines and the truck lane behind line B
+  BLOCKS.forEach((bu, bi) => { const gu = bu + 5 * BAYP + 5.2; const pl = W.b('pool', gu, 60);
+    for (const ln of [LINE_A, LINE_B]) { pool(pl, bu - 2.2, 0.06, ln.v0 + 1.2, 6, sc(CYAN, 0.55)); GL.add(bu - 2.2 + 0.3, 6.4, ln.v0 + 1.2, 0.7, sc(CYAN, 0.6)); }
+    if (gu < QUAY.u1 - 4) { pool(pl, gu, 0.06, 53, 8, sc(WARM, 0.55)); pool(pl, gu, 0.06, 70, 7, sc(bi % 2 ? MAG : CYAN, 0.35)); }
+    for (let k = 0; k < 2; k++) pool(pl, bu + 16 + k * 32, 0.06, 63.1, 6.5, sc(WARM, 0.45));
+    pool(pl, bu + 32, 0.06, 84, 13, sc(WARM, 0.5)); });
+  // --- STS cranes: aviation lights (leg tops, A-frame apex, boom tip / raised boom tip), quay floods (cone + pool), lens glows,
+  //     amber strobes on the sill beams, a lit spreader zone under the working ones
+  for (const c of CRANES) { const U0 = c.u, H = 46, Hb = 49; const cb = W.b('cone', U0, 18), pl = W.b('pool', U0, 18), nb = W.b('neon', U0, 18);
+    for (const du of [-9, 9]) for (const rv of RAIL_V) GL.add(U0 + du, H + 0.4, rv, 0.45, RED, 1);
+    GL.add(U0, 81.2, 10, 0.7, RED, 1);
+    if (c.up) GL.add(U0, Hb + Math.sin(1.36) * 54 + 1, -2 - Math.cos(1.36) * 54, 0.7, RED, 1); else { GL.add(U0, Hb + 1.2, -56, 0.6, RED, 1); GL.add(U0, Hb + 1.2, 50, 0.5, RED, 1); }
+    for (const rv of RAIL_V) for (const du of [-5, 5]) GL.add(U0 + du, 2.6, rv + (rv < 10 ? -1.0 : 1.0), 0.35, AMBER, 2);
+    const lampZ = c.up ? [6, 20, 30] : [-48, -36, -24, -12, 6, 20, 30];
+    for (const s of [-4, 4]) for (const z of lampZ) { GL.add(U0 + s, Hb - 2.1, z, 0.55, sc(WARM, 1.2));
+      if (z > -6 && z < 25) { cone(cb, U0 + s, Hb - 2.05, z, Hb - 2.15, 5, [0.95, 0.75, 0.45]); pool(pl, U0 + s, 0.06, z, 12, [1.0, 0.76, 0.46]); } }
+    if (!c.up) { pool(pl, U0, 0.08, 16, 16, sc(WARM, 0.35)); // work lane under the backreach (trucks)
+      washV(pl, U0, S.deck * 0.5, S.vC + S.B / 2 + 0.06, 13, S.deck * 0.5, sc(WARM, 0.55)); } // flood spill on the hull side below the crane
+    // cyan LED strip on the leg faces (reads as a cyber crane from afar)
+    for (const du of [-9, 9]) for (const rv of RAIL_V) put(nb, kg().box, U0 + du, 28, rv + (rv < 10 ? -1.04 : 1.04), 0.14, 32, 0.04, sc(CRANE_COL[c.s].led, 0.5)); }
+  // --- quay edge: amber warning beacons every 24 m (slow blink) with small pools, cyan LED line along the coping face
+  for (let u = QUAY.u0 + 6; u < QUAY.u1; u += 24) { const pl = W.b('pool', u, 0), nb = W.b('neon', u, 0);
+    put(nb, kg().box, u, 0.42, 0.45, 0.22, 0.22, 0.22, AMBER); GL.add(u, 0.55, 0.45, 0.3, AMBER, 1); pool(pl, u, 0.24, 1.6, 3.2, sc(AMBER, 0.6)); }
+  for (let u = QUAY.u0; u < QUAY.u1; u += 60) put(W.b('neon', u + 30, 0), kg().box, u + 30, 0.12, 0.03, Math.min(60, QUAY.u1 - u), 0.06, 0.03, sc(CYAN, 0.45));
+  // --- the ship: deck floods on the lashing bridges (cone onto the stacks), lit portholes / accommodation, masthead + nav lights,
+  //     anchor / stern lights, funnel + hull name washes
+  for (let b = 0; b < 11; b += 2) { const u = S.u0 + S.L * 0.19 + b * 13.4 - 0.5; const cb = W.b('cone', u, S.vC), pl = W.b('pool', u, S.vC);
+    for (const sd of [-1, 1]) { GL.add(u, S.deck + 7.2, S.vC + sd * 13.5, 0.4, sc(WARM, 0.9)); cone(cb, u + 1, S.deck + 7.0, S.vC + sd * 13.5, 5.5, 4, sc([0.95, 0.8, 0.55], 0.6)); }
+    void pl; }
+  { const a0 = S.u0 + 16, a1 = a0 + 14, hw = 12.5, deckH = 2.85, nd = 7; const nb = W.b('neon', S.u0 + 25, S.vC), pl = W.b('pool', S.u0 + 25, S.vC); const r = mulberry(4711);
+    for (let k = 1; k <= nd; k++) { const y = S.deck + 2 + k * deckH - 1.35; for (const sd of [-1, 1]) for (let i = 0; i < 9; i++) { if (r() < 0.45) continue;
+      put(nb, kg().box, a0 + 1 + i * 1.5, y, S.vC + sd * (hw + 0.08), 0.55, 0.55, 0.03, r() < 0.15 ? sc(CYAN, 0.5) : [0.42, 0.34, 0.22]); } // portholes / cabin windows
+      if (k % 2) GL.add(a1 + 0.3, y + 1.0, S.vC + hw - 1.5, 0.35, sc(WARM, 0.8)); }
+    washU(pl, a1 + 0.12, S.deck + 6, S.vC, 10, 6, sc(WARM, 0.4)); // deck floods washing the front of the house
+    const top = S.deck + 2 + nd * deckH, mu = a0 + 6;
+    GL.add(mu, top + 12.5, S.vC, 0.55, [1, 0.95, 0.85]); GL.add(a0 + 3, top + 2.4, S.vC - S.B / 2 - 0.8, 0.5, RED); GL.add(a0 + 3, top + 2.4, S.vC + S.B / 2 + 0.8, 0.5, [0.1, 1, 0.3]);
+    GL.add(S.u0 + S.L - 14, S.deck + 2.6 + 11.3, S.vC, 0.5, [1, 0.95, 0.85]); GL.add(S.u0 + 0.5, S.deck + 3, S.vC, 0.45, [1, 0.95, 0.85]);
+    const f0 = S.u0 + 7; washV(pl, f0 + 3.5, top + 4, S.vC + 4.1, 4.5, 5, sc(CYAN, 0.35)); // funnel emblem glow spilling on the casing
+    washV(pl, S.u0 + S.L * 0.5, 4.5, S.vC + S.B / 2 + 0.1, 30, 2.4, sc(WARM, 0.3)); } // hull name lit from the quay
 }

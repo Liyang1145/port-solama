@@ -1,0 +1,26 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0&ao=0&noshaft",
+ "reset": false,
+ "shots": [
+  {
+   "name": "port_far_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1120,-940,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-760,95,-1790); c.lookAt(-1150,8,-985); c.updateMatrixWorld(); __G.neon.port && __G.neon.port.sync(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {pq: __G.neon && __G.neon.port ? __G.neon.port.tris() : 0}))"
+  },
+  {
+   "name": "port_mid_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1120,-940,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1010,30,-1290); c.lookAt(-1150,10,-985); c.updateMatrixWorld(); __G.neon.port && __G.neon.port.sync(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {pq: __G.neon && __G.neon.port ? __G.neon.port.tris() : 0}))"
+  },
+  {
+   "name": "port_yard_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1120,-940,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1060,40,-905); c.lookAt(-1160,4,-975); c.updateMatrixWorld(); __G.neon.port && __G.neon.port.sync(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {pq: __G.neon && __G.neon.port ? __G.neon.port.tris() : 0}))"
+  },
+  {
+   "name": "port_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1120,-940,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1112,5.5,-958); c.lookAt(-1190,17,-1005); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0, pq: __G.neon && __G.neon.port ? __G.neon.port.tris() : 0}))"
+  },
+  {
+   "name": "port_ship_night",
+   "js": "__G.setHour(21.5); const g=__G.game; g.tp(-1250,-960,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1225,3.0,-975); c.lookAt(-1290,14,-1018); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); JSON.stringify(Object.assign(__G.stats(), {bl: __G.neon && __G.neon.bldg ? __G.neon.bldg.tris() : 0, pq: __G.neon && __G.neon.port ? __G.neon.port.tris() : 0}))"
+  }
+ ]
+}
