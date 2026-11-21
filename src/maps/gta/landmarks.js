@@ -132,8 +132,8 @@ function wheelAttach(scene, M) {
   if (!rig) return; SC = scene;
   // painted steel (vertex colours, no world-space plaster texture: it would swim over a moving part) + real bulbs:
   // frosted warm-white glass by day, incandescent glow at night (emissive follows U.uNight in wheelUpdate)
-  WM = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.15 }), 'lmwheel');
-  BM = prep(new THREE.MeshStandardMaterial({ color: 0xf2ede2, roughness: 0.18, metalness: 0.0, emissive: 0xffc27a, emissiveIntensity: 0.0 }), 'lmbulb');
+  WM = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.15, side: THREE.DoubleSide }), 'vcolc'); // same program as M.vcolCloth (roughness/metalness are uniforms)
+  BM = prep(new THREE.MeshStandardMaterial({ color: 0xf2ede2, roughness: 0.18, metalness: 0.0, emissive: 0xffc27a, emissiveIntensity: 0.0 }), 'pool'); // same program as M.pool (plain colour + emissive)
   rig.base = rigMeshes(rig.rv, rig.rb, rig.gv, rig.gr); rig.rv = rig.rb = rig.gv = null; wheelUpdate({ x: 1e9, z: 1e9 });
 }
 function wheelUpdate(cam) {
