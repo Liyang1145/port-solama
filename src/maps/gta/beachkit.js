@@ -13,6 +13,7 @@ import { GeoBucket } from '../../geo.js';
 import { mulberry } from '../../util.js';
 import { furnMat, PB } from '../../streetkit.js';
 import { beachOff } from './mapgeo.js';
+import { buildBeachProps } from './beachprops.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const MX = (x, y, z, rx = 0, ry = 0, rz = 0) => new THREE.Matrix4().compose(V3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz, 'YXZ')), V3(1, 1, 1));
@@ -280,26 +281,49 @@ export function buildBeachKit(scene, city) {
     // post-and-rope lines guiding the access path from the stair foot toward the water
     for (const s of [-1, 1]) { const pts = []; for (let x = a.x + 6.0; x <= a.x + 15.1; x += 2.3) pts.push([x, city.groundH(x, a.z + s * 1.9), a.z + s * 1.9]); ropeFence(misc, pts); } }
   for (const t of towers.slice(4)) showerAt(t.x - 15.5, t.z + 6.5);
-  // ---- dune sand fences: natural island ends, x = 346 + beachOff(z), segments with gaps (beach accesses)
-  const CH = 160; const chunks = new Map();
+  // ---- dune sand fences: natural island ends, x = 346 + beachOff(z), segments with gaps.
+  // a_beach2: designated walk-through openings (beach-access paths every ~100 m, the dune boardwalk end, each extended-beach
+  // lifeguard tower + its shower) are cut out of the fence and framed by two taller end posts; the old random gaps remain.
+  const rA = mulberry(7312); const openings = [];
+  const OP = { '1': [], '-1': [] };
+  for (const sg of [-1, 1]) { const L = OP[sg];
+    for (const t of towers.slice(4)) if (Math.sign(t.z) === sg) L.push({ c: Math.abs(t.z), hw: 12.5, kind: 'tower' }); // hut + ramp + shower (t.z+6.5)
+    if (sg > 0) L.push({ c: 588, hw: 2.2, kind: 'boardwalk' }); // the dune boardwalk ends at z~588
+    for (let a = 452 + rA() * 18; a < 1365; a += 86 + rA() * 24) if (!L.some((o) => Math.abs(o.c - a) < o.hw + 18)) L.push({ c: a, hw: 1.9, kind: 'path' });
+    L.sort((p, q) => p.c - q.c);
+    for (const o of L) { const z = sg * o.c; openings.push({ sg, z, hw: o.hw, kind: o.kind, x: 346 + beachOff(z) }); } }
+  const CH = 160; const chunks = new Map(); const endPosts = [];
+  const endPost = (c, x, z) => { const y = city.groundH(x, z) - 0.02;
+    c.near.push([CY(0.075, 0.085, 1.95, 8, x, y + 0.62, z), [0.5, 0.43, 0.35], PB.wood]); c.near.push([CY(0.0, 0.1, 0.12, 8, x, y + 1.65, z), [0.5, 0.43, 0.35], PB.wood]);
+    c.near.push([CY(0.079, 0.079, 0.14, 8, x, y + 1.38, z), [0.95, 0.45, 0.12], PAINTW]); c.near.push([CY(0.079, 0.079, 0.06, 8, x, y + 1.22, z), [0.96, 0.95, 0.9], PAINTW]); // marker bands
+    c.far.push([BX(0.14, 1.75, 0.14, x, y + 0.85, z), [0.5, 0.43, 0.35], PB.wood]);
+    city.col.add(x - 0.1, z - 0.1, x + 0.1, z + 0.1, y + 1.6, 'fence'); endPosts.push([x, z]); };
   for (const sg of [-1, 1]) {
-    let a = 412 + r() * 10;
-    while (a < 1385) { const len = 14 + r() * 22; const a1 = Math.min(a + len, 1390); const pts = [];
-      const wob = r() * 6.28; for (let q = a; q <= a1 + 0.01; q += 2.4) { const z = sg * q; const x = 346 + beachOff(z) + Math.sin(q * 0.05 + wob) * 1.6; pts.push([x, city.groundH(x, z) - 0.02, z]); }
+    const L = OP[sg]; let a = 412 + r() * 10, fromOpen = false;
+    while (a < 1385) { const len = 14 + r() * 22; let a1 = Math.min(a + len, 1390), next = a1 + 4 + r() * 9, toOpen = false;
+      const o = L.find((o) => o.c + o.hw > a + 0.01 && o.c - o.hw < a1);
+      if (o) { if (o.c - o.hw < a + 2.5) { a = o.c + o.hw; fromOpen = true; continue; } a1 = o.c - o.hw; next = o.c + o.hw; toOpen = true; }
+      const n = Math.max(1, Math.round((a1 - a) / 2.4)); const pts = [];
+      const wob = r() * 6.28; for (let k = 0; k <= n; k++) { const q = a + (a1 - a) * k / n; const z = sg * q; const x = 346 + beachOff(z) + Math.sin(q * 0.05 + wob) * 1.6; pts.push([x, city.groundH(x, z) - 0.02, z]); }
       // skip a segment that would cross a palm / umbrella / new tower or shower
       let blocked = false; for (const p of pts) { if (!clearOf(p[0], p[2], -0.6, 0.6, -0.6, 0.6, 0.9, 1.0)) { blocked = true; break; } for (const t of towers) if (Math.hypot(p[0] - t.x, p[2] - t.z) < 12) blocked = true; }
       if (pts.length > 1 && !blocked) { const key = Math.round(sg * (a + a1) / 2 / CH); let c = chunks.get(key); if (!c) chunks.set(key, c = { near: [], far: [], z: 0, n: 0, x: 0 });
         slatFence(c.near, c.far, pts, r);
-        for (let q = 0; q < pts.length - 1; q++) { const A = pts[q], B = pts[q + 1]; const l = Math.hypot(B[0] - A[0], B[2] - A[2]); city.col.addOBB((A[0] + B[0]) / 2, (A[2] + B[2]) / 2, (B[0] - A[0]) / l, (B[2] - A[2]) / l, l / 2, 0.08, A[1] + 1.0, 'fence'); } c.z += pts[0][2]; c.x += pts[0][0]; c.n++; stats.fenceM += (pts.length - 1) * 2.4; }
-      a = a1 + 4 + r() * 9; }
+        if (fromOpen) endPost(c, pts[0][0], pts[0][2]); if (toOpen) endPost(c, pts[pts.length - 1][0], pts[pts.length - 1][2]);
+        for (let q = 0; q < pts.length - 1; q++) { const A = pts[q], B = pts[q + 1]; const l = Math.hypot(B[0] - A[0], B[2] - A[2]); city.col.addOBB((A[0] + B[0]) / 2, (A[2] + B[2]) / 2, (B[0] - A[0]) / l, (B[2] - A[2]) / l, l / 2, 0.08, A[1] + 1.0, 'fence'); } c.z += pts[0][2]; c.x += pts[0][0]; c.n++; stats.fenceM += Math.hypot(pts[n][0] - pts[0][0], pts[n][2] - pts[0][2]); }
+      a = next; fromOpen = toOpen; }
   }
+  out.openings = openings; out.endPosts = endPosts;
   for (const c of chunks.values()) { const I = new THREE.Matrix4(); const bn = flush(c.near, I), bf = flush(c.far, I); stats.tri.fenceNear += tri(bn); stats.tri.fenceFar += tri(bf);
     groups.push({ x: c.x / c.n, z: c.z / c.n, lv: [mk(bn, true), mk(bf, false)], d: [[0, 170 + CH / 2], [170 + CH / 2, 1600]] }); }
   { const I = new THREE.Matrix4(); const bm = flush(misc, I); stats.tri.other += tri(bm); const bn = flush(near, I); stats.tri.other += tri(bn);
     // misc pieces are spread along the whole district beach: split showers/rope lines by z band so they cull
     const m1 = mk(bm, true); const m2 = mk(bn, false); groups.push({ x: 345, z: 0, lv: [m2], d: [[0, 0]], nearList: true }); out.miscNear = m2; out.misc = m1; }
   // near-detail meshes of the shower/rope set are only shown on the district beach (camera within 520 m of it)
+  // a_beach2: umbrellas / loungers / towels / surf racks / bins / drink carts (instanced, streamed)
+  const props = buildBeachProps(scene, city, { openings, towers, showers }); out.props = props;
   function update(cam) {
+    props.update(cam);
     const cx = cam.position.x, cz = cam.position.z;
     for (const g of groups) { if (g.nearList) { g.lv[0].visible = cx > 200 && Math.abs(cz) < 520; continue; }
       const d = Math.hypot(g.x - cx, g.z - cz); for (let i = 0; i < g.lv.length; i++) g.lv[i].visible = d >= g.d[i][0] && d < g.d[i][1]; }
