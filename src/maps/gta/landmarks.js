@@ -47,7 +47,7 @@ function eput(bk, g, E, a, d, y, col, sx = 1, sy = 1, sz = 1) {
 }
 
 // ------------------------------------------------------------------------------------------------ palette ----
-const WHITE = [0.93, 0.92, 0.88], RED = [0.66, 0.14, 0.09], BLACK = [0.1, 0.105, 0.11], VERD = [0.25, 0.4, 0.35], STONE = [0.44, 0.42, 0.38];
+const WHITE = [0.93, 0.92, 0.88], RED = [0.66, 0.14, 0.09], BLACK = [0.1, 0.105, 0.11], VERD = [0.25, 0.4, 0.35], STONE = [0.3, 0.29, 0.27];
 const LENS = [1.0, 0.82, 0.5], BULB = [1.0, 0.86, 0.6];
 
 // ======================================================================== base (resident) =====
@@ -61,7 +61,7 @@ export function landmarksBase(ctx, pick, ds) {
     // stone plinth drum on the rubble mound, white tapered tower with one terracotta day-mark band, black watch room,
     // round gallery, lantern (amber lens inside clear glazing), verdigris copper dome, ventilator ball, lightning rod
     const pl = new THREE.CylinderGeometry(3.7, 4.1, 2.7, 12); pl.translate(0, 1.35, 0); rput(v, pl, x, -1.6, z, STONE);
-    rput(v, new THREE.CylinderGeometry(3.85, 3.85, 0.18, 12), x, 1.19, z, [0.56, 0.55, 0.51]);
+    rput(v, new THREE.CylinderGeometry(3.85, 3.85, 0.18, 12), x, 1.19, z, [0.4, 0.39, 0.37]);
     const seg = [[1.1, 10.6, WHITE], [10.6, 13.6, RED], [13.6, 22.4, WHITE]]; const rAt = (y) => 2.5 - (y - 1.1) / 21.9 * 0.75;
     for (const [y0, y1, c] of seg) { const t = new THREE.CylinderGeometry(rAt(y1), rAt(y0), y1 - y0, 20, 1, true); t.translate(0, (y0 + y1) / 2, 0); rput(v, t, x, 0, z, c); }
     rput(v, new THREE.CylinderGeometry(2.05, 1.75, 0.6, 20), x, 22.7, z, WHITE);                 // corbel ring
@@ -141,7 +141,7 @@ function lighthouseDetail(W) {
     { const rp = rAt(4.75); rput(v, g.box, x + c * (rp + 0.02), 4.75, z, [0.62, 0.5, 0.26], 0, -a + Math.PI / 2, 0, 0.5, 0.34, 0.04); } // bronze plaque over the door
   }
   const deckY = 0.95; const bx0 = 522.2, bx1 = 525.4, bz0 = -376.0, bz1 = -372.0;
-  fbox(v, frame(0, 0), bx0, bx1, bz0, bz1, -1.2, deckY, [0.6, 0.59, 0.56]);
+  fbox(v, frame(0, 0), bx0, bx1, bz0, bz1, -1.2, deckY, [0.46, 0.45, 0.43]);
   for (const zz of [bz0 + 0.12, bz1 - 0.12]) { for (let xx = bx0 + 0.2; xx <= bx1; xx += 1.0) rput(m, g.cyl8, xx, deckY, zz, null, 0, 0, 0, 0.035, 1.05, 0.035);
     for (const y of [deckY + 1.0, deckY + 0.55]) rput(m, g.box, (bx0 + bx1) / 2, y, zz, null, 0, 0, 0, bx1 - bx0, 0.05, 0.05); }
   // plinth rim: iron mooring bollards, a steel access ladder into the water (east), rubble boulders hugging the drum
@@ -149,7 +149,7 @@ function lighthouseDetail(W) {
     rput(v, g.ball, x + Math.cos(a) * 3.35, 1.74, z + Math.sin(a) * 3.35, [0.13, 0.14, 0.15], 0, 0, 0, 0.2, 0.12, 0.2); }
   for (const dz of [-0.3, 0.3]) rput(m, g.box, x + 4.0, -0.3, z + dz, null, 0, 0, 0, 0.06, 3.0, 0.06);
   for (let y = -1.6; y < 1.2; y += 0.3) rput(m, g.box, x + 4.0, y, z, null, 0, 0, 0, 0.04, 0.04, 0.6);
-  for (let k = 0; k < 22; k++) { const a = r() * Math.PI * 2; const rr = 3.9 + r() * 1.6; const sc = 0.6 + r() * 0.9; const c = 0.3 + r() * 0.12;
+  for (let k = 0; k < 22; k++) { const a = r() * Math.PI * 2; const rr = 3.9 + r() * 1.6; const sc = 0.6 + r() * 0.9; const c = 0.2 + r() * 0.1;
     const px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr; if (px < 526 && pz > -377.5 && pz < -371) continue; // keep the bridge clear
     rput(v, g.rock, px, -1.1 + r() * 0.6, pz, [c * 1.02, c * 0.97, c * 0.88], r() * 6, r() * 6, r() * 6, sc * 1.2, sc * 0.7, sc); }
 }
