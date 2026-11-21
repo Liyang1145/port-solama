@@ -117,38 +117,38 @@ function shellMats() {
     s.uniforms.uNight = U.uNight; s.uniforms.uTime = U.uTime; s.uniforms.uFarOnly = { value: FAR_ONLY };
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>' + VCOMMON).replace('#include <begin_vertex>', '#include <begin_vertex>' + VBODY);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>' + FCOMMON)
-      .replace('#include <color_fragment>', '#include <color_fragment>\n  sGl = 0.0; sLit = 0.0; sMet = 0.0; vec3 ln = normalize(vLN); vec3 lp = vLP; float aa = clamp(length(fwidth(vIP + lp)) * 2.5, 0.0, 1.0);\n' + frag)
+      .replace('#include <color_fragment>', '#include <color_fragment>\n  sGl = 0.0; sLit = 0.0; sMet = 0.0; vec3 sNn = normalize(vLN); vec3 sPp = vLP; float sAA = clamp(length(fwidth(vIP + sPp)) * 2.5, 0.0, 1.0);\n' + frag)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.06, sGl);')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = max(metalnessFactor, sMet);')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += sLit * uNight * vec3(1.0, 0.72, 0.42) * 1.5;');
   });
   // solids: render-plaster slabs / boxes, darker soffits, slab-edge grime
   const solid = hook('villaSolid', `
-  diffuseColor.rgb *= 0.93 + 0.1 * sn(vIP.xz * 0.3 + lp.xz * 0.6); diffuseColor.rgb *= 1.0 - step(ln.y, -0.5) * 0.28;
-  diffuseColor.rgb *= 1.0 - (1.0 - step(0.5, abs(ln.y))) * smoothstep(vSc.y * 0.5 - 0.06, -vSc.y * 0.5, lp.y) * 0.08;`, { roughness: 0.82 });
+  diffuseColor.rgb *= 0.93 + 0.1 * sn(vIP.xz * 0.3 + sPp.xz * 0.6); diffuseColor.rgb *= 1.0 - step(sNn.y, -0.5) * 0.28;
+  diffuseColor.rgb *= 1.0 - (1.0 - step(0.5, abs(sNn.y))) * smoothstep(vSc.y * 0.5 - 0.06, -vSc.y * 0.5, sPp.y) * 0.08;`, { roughness: 0.82 });
   // thin: glazing walls, window units, glass rails, balustrades
   const thin = hook('villaThin', `
-  float fz = step(0.5, abs(ln.z)); vec2 f = vec2(lp.x + vSc.x * 0.5, lp.y + vSc.y * 0.5); // metres from the unit's lower-left corner (face)
+  float fz = step(0.5, abs(sNn.z)); vec2 sF = vec2(sPp.x + vSc.x * 0.5, sPp.y + vSc.y * 0.5); // metres from the unit's lower-left corner (face)
   if (vKind > 0.5 && vKind < 1.5) { // glass wall: 1.7 m bays, slim dark-alu mullions, head / sill rails, a lit pane now and then
-    float bay = floor(f.x / 1.7); float m = 1.0 - step(0.045, fract(f.x / 1.7)) * step(fract(f.x / 1.7), 0.97); float rail = 1.0 - step(0.07, f.y) * step(f.y, vSc.y - 0.07);
-    float fr = clamp(max(m, rail) * fz * (1.0 - aa * 0.7), 0.0, 1.0);
-    vec3 gc = mix(vec3(0.05, 0.08, 0.10), vec3(0.20, 0.27, 0.32), clamp(f.y / max(vSc.y, 0.1), 0.0, 1.0) * 0.6) * (0.85 + 0.3 * sh(vec2(bay, vSeed * 13.0)));
+    float bay = floor(sF.x / 1.7); float m = 1.0 - step(0.045, fract(sF.x / 1.7)) * step(fract(sF.x / 1.7), 0.97); float rail = 1.0 - step(0.07, sF.y) * step(sF.y, vSc.y - 0.07);
+    float fr = clamp(max(m, rail) * fz * (1.0 - sAA * 0.7), 0.0, 1.0);
+    vec3 gc = mix(vec3(0.05, 0.08, 0.10), vec3(0.20, 0.27, 0.32), clamp(sF.y / max(vSc.y, 0.1), 0.0, 1.0) * 0.6) * (0.85 + 0.3 * sh(vec2(bay, vSeed * 13.0)));
     diffuseColor.rgb = mix(gc, vec3(0.16, 0.17, 0.18), max(fr, 1.0 - fz)); sGl = (1.0 - fr) * fz; sMet = sGl * 0.25;
     sLit = sGl * step(0.55, sh(vec2(bay, vSeed * 7.0 + floor(vIP.y)))) * (0.7 + 0.3 * sn(f * 1.3)); }
   else if (vKind > 1.5 && vKind < 2.5) { // window unit: painted frame, meeting rail, glass
-    float bw = 0.07; float fr = 1.0 - step(bw, f.x) * step(f.x, vSc.x - bw) * step(bw, f.y) * step(f.y, vSc.y - bw); fr = max(fr, 1.0 - step(0.03, abs(f.y - vSc.y * 0.5)));
-    fr = max(fr, (1.0 - step(0.022, abs(f.x - vSc.x * 0.5))) * step(vSc.x, 1.5) * 0.0); fr = clamp(fr * (1.0 - aa * 0.6) + aa * 0.25, 0.0, 1.0);
-    vec3 gc = mix(vec3(0.05, 0.07, 0.09), vec3(0.22, 0.28, 0.32), smoothstep(vSc.y * 0.5, vSc.y, f.y) * 0.5);
+    float bw = 0.07; float fr = 1.0 - step(bw, sF.x) * step(sF.x, vSc.x - bw) * step(bw, sF.y) * step(sF.y, vSc.y - bw); fr = max(fr, 1.0 - step(0.03, abs(sF.y - vSc.y * 0.5)));
+    fr = max(fr, (1.0 - step(0.022, abs(sF.x - vSc.x * 0.5))) * step(vSc.x, 1.5) * 0.0); fr = clamp(fr * (1.0 - sAA * 0.6) + sAA * 0.25, 0.0, 1.0);
+    vec3 gc = mix(vec3(0.05, 0.07, 0.09), vec3(0.22, 0.28, 0.32), smoothstep(vSc.y * 0.5, vSc.y, sF.y) * 0.5);
     diffuseColor.rgb = mix(gc, diffuseColor.rgb, max(fr, 1.0 - fz)); sGl = (1.0 - fr) * fz; sMet = sGl * 0.2;
-    sLit = sGl * step(0.6, sh(vec2(floor(vIP.x * 0.7 + vIP.z * 1.3), floor(f.y / 2.0) + vSeed * 11.0))); }
+    sLit = sGl * step(0.6, sh(vec2(floor(vIP.x * 0.7 + vIP.z * 1.3), floor(sF.y / 2.0) + vSeed * 11.0))); }
   else if (vKind > 2.5 && vKind < 3.5) { sGl = 0.8; sMet = 0.3; diffuseColor.rgb *= 0.55; }
   else if (vKind > 4.5) { // balustrade: top + bottom rails, 4.5 cm balusters every 14 cm (gaps cut)
-    float rail = 1.0 - step(0.06, f.y) * step(f.y, vSc.y - 0.09); float ax = abs(ln.z) > 0.5 ? f.x : lp.z + vSc.z * 0.5; float bal = 1.0 - step(0.045, fract(ax / 0.14));
-    if (abs(ln.y) < 0.5 && max(rail, bal) < 0.5 && aa < 0.6) discard; diffuseColor.rgb *= 0.96; }`, { roughness: 0.5 });
+    float rail = 1.0 - step(0.06, sF.y) * step(sF.y, vSc.y - 0.09); float ax = abs(sNn.z) > 0.5 ? sF.x : sPp.z + vSc.z * 0.5; float bal = 1.0 - step(0.045, fract(ax / 0.14));
+    if (abs(sNn.y) < 0.5 && max(rail, bal) < 0.5 && sAA < 0.6) discard; diffuseColor.rgb *= 0.96; }`, { roughness: 0.5 });
   // roof tiles: barrel (warm colours) or flat concrete (greys), courses up the slope, ridge mortar, weathering
   const roof = hook('villaRoof', `
-  { float lx = abs(ln.x) > abs(ln.z) ? 1.0 : 0.0; float c = mix(lp.x, lp.z, lx);
-    float eave = mix(vSc.z * 0.5 - abs(lp.z), vSc.x * 0.5 - abs(lp.x), lx); float up = lp.y; float s = sqrt(up * up + max(eave, 0.0) * max(eave, 0.0)); // slope distance from the eave
+  { float lx = abs(sNn.x) > abs(sNn.z) ? 1.0 : 0.0; float c = mix(sPp.x, sPp.z, lx);
+    float eave = mix(vSc.z * 0.5 - abs(sPp.z), vSc.x * 0.5 - abs(sPp.x), lx); float up = sPp.y; float s = sqrt(up * up + max(eave, 0.0) * max(eave, 0.0)); // slope distance from the eave
     vec3 base = diffuseColor.rgb; float warm = clamp((base.r - base.b) * 3.0, 0.0, 1.0);
     float ci = floor(c / 0.24), si = floor(s / 0.38); float cf = fract(c / 0.24), sf = fract(s / 0.38);
     float barrel = mix(0.55 + 0.45 * sqrt(max(sin(cf * 3.14159), 0.0)), 1.0, 1.0 - warm); float cap = mod(ci, 2.0);
@@ -156,14 +156,14 @@ function shellMats() {
     float tile = 0.82 + 0.36 * sh(vec2(ci, si + vSeed * 31.0));
     float pat = barrel * mix(1.0, 0.88 + 0.12 * cap, warm) * butt * mix(1.0, tile, 0.7);
     float flatLine = 1.0 - (1.0 - step(0.03, fract(c / 0.33))) * (1.0 - warm) * 0.25;
-    pat *= flatLine; pat = mix(pat, 0.86, aa);
-    diffuseColor.rgb = base * pat * (0.86 + 0.22 * sn(vIP.xz + lp.xz * 0.5));
-    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.72, 0.66), smoothstep(0.55, 0.9, sn(lp.xz * 0.35 + vSeed * 20.0)) * 0.5); // weathering / mildew
+    pat *= flatLine; pat = mix(pat, 0.86, sAA);
+    diffuseColor.rgb = base * pat * (0.86 + 0.22 * sn(vIP.xz + sPp.xz * 0.5));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.72, 0.66), smoothstep(0.55, 0.9, sn(sPp.xz * 0.35 + vSeed * 20.0)) * 0.5); // weathering / mildew
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.78, 0.74), step(vSc.y - 0.12, up) * 0.6); }`, { roughness: 0.78 });
   // canvas awnings: 25 cm stripes (colour / cream), scalloped valance shade, a little sag shading
   const awn = hook('villaAwn', `
-  { float st = step(0.5, fract((lp.x + vSc.x * 0.5) / 0.5)); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.90, 0.84), st * (1.0 - aa * 0.5));
-    diffuseColor.rgb *= 0.9 + 0.1 * sn(lp.xy * 3.0); }`, { roughness: 0.92, side: THREE.DoubleSide });
+  { float st = step(0.5, fract((sPp.x + vSc.x * 0.5) / 0.5)); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 0.90, 0.84), st * (1.0 - sAA * 0.5));
+    diffuseColor.rgb *= 0.9 + 0.1 * sn(sPp.xy * 3.0); }`, { roughness: 0.92, side: THREE.DoubleSide });
   MATS = { solid, thin, roof, awn };
   return MATS;
 }

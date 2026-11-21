@@ -224,26 +224,26 @@ float bh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float bn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(bh(i), bh(i + vec2(1, 0)), f.x), mix(bh(i + vec2(0, 1)), bh(i + vec2(1, 1)), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
   gK = floor(vK + 0.5); gCoat = 0.0; gRough = 0.32; gMet = 0.0; gCaus = 0.0;
-  vec3 lp = vLP; vec3 ln = normalize(vLN); float aa = clamp(length(fwidth(lp)) * 6.0, 0.0, 1.0); // pattern fade with distance
+  vec3 bPp = vLP; vec3 bNn = normalize(vLN); float bAA = clamp(length(fwidth(bPp)) * 6.0, 0.0, 1.0); // pattern fade with distance
   if (gK > 0.5 && gK < 1.5) { diffuseColor.rgb *= vTint; gCoat = 1.0; gRough = 0.16; }
   if (gK > 7.5 && gK < 8.5) { gCoat = 1.0; gRough = 0.2; }
-  if (gK > 6.5 && gK < 7.5) { diffuseColor.rgb *= 0.8 + 0.3 * bn(lp.xz * 3.0 + vSd * 40.0); gRough = 0.85; }
+  if (gK > 6.5 && gK < 7.5) { diffuseColor.rgb *= 0.8 + 0.3 * bn(bPp.xz * 3.0 + vSd * 40.0); gRough = 0.85; }
   if (gK > 5.5 && gK < 6.5) { // teak: 7.5 cm planks along the boat, black caulk seams, staggered butt joints, grain
-    float pz = (abs(ln.y) > 0.5 ? lp.z : lp.y) / 0.075; float pi = floor(pz); float fz = fract(pz);
-    float bx = (lp.x + bh(vec2(pi, vSd)) * 2.4) / 2.4; float butt = 1.0 - step(0.012, fract(bx)) * step(fract(bx), 0.996);
+    float pz = (abs(bNn.y) > 0.5 ? bPp.z : bPp.y) / 0.075; float pi = floor(pz); float fz = fract(pz);
+    float bx = (bPp.x + bh(vec2(pi, vSd)) * 2.4) / 2.4; float butt = 1.0 - step(0.012, fract(bx)) * step(fract(bx), 0.996);
     float seam = max(1.0 - smoothstep(0.06, 0.16, fz) * smoothstep(0.94, 0.84, fz), butt);
-    float tone = 0.82 + 0.3 * bh(vec2(pi, floor(bx) + vSd * 17.0)); float grain = 0.9 + 0.12 * bn(vec2(lp.x * 9.0, pz * 3.0));
+    float tone = 0.82 + 0.3 * bh(vec2(pi, floor(bx) + vSd * 17.0)); float grain = 0.9 + 0.12 * bn(vec2(bPp.x * 9.0, pz * 3.0));
     vec3 tk = vec3(0.56, 0.40, 0.25) * tone * grain; tk = mix(tk, vec3(0.62, 0.57, 0.50), 0.35 * vSd); // some decks silvered by the sun
-    diffuseColor.rgb = mix(mix(tk, vec3(0.05, 0.045, 0.04), seam * 0.9), vec3(0.50, 0.38, 0.26), aa * 0.8); gRough = 0.7; }
-  if (gK > 8.5) { vec2 g = abs(fract(lp.xz / 0.05) - 0.5); float dia = step(0.35, g.x + g.y); diffuseColor.rgb *= mix(0.95 + 0.06 * dia, 1.0, aa); gRough = 0.72; }
-  if (gK > 2.5 && gK < 3.5) { diffuseColor.rgb = vec3(0.86, 0.87, 0.88); gMet = 1.0; gRough = 0.1 + 0.12 * bn(vec2(lp.x * 2.0, lp.y * 60.0 + lp.z * 60.0)); }
+    diffuseColor.rgb = mix(mix(tk, vec3(0.05, 0.045, 0.04), seam * 0.9), vec3(0.50, 0.38, 0.26), bAA * 0.8); gRough = 0.7; }
+  if (gK > 8.5) { vec2 g = abs(fract(bPp.xz / 0.05) - 0.5); float dia = step(0.35, g.x + g.y); diffuseColor.rgb *= mix(0.95 + 0.06 * dia, 1.0, bAA); gRough = 0.72; }
+  if (gK > 2.5 && gK < 3.5) { diffuseColor.rgb = vec3(0.86, 0.87, 0.88); gMet = 1.0; gRough = 0.1 + 0.12 * bn(vec2(bPp.x * 2.0, bPp.y * 60.0 + bPp.z * 60.0)); }
   // waterline: wet dark band at the water, algae / scum grime fading up the topsides, sun-on-water ripple caustic
-  if ((gK > 0.5 && gK < 1.5) || gK > 6.5 && gK < 8.5) { float side = 1.0 - abs(ln.y);
-    float wet = 1.0 - smoothstep(0.0, 0.06, lp.y); diffuseColor.rgb *= 1.0 - 0.35 * wet;
-    float gr = (1.0 - smoothstep(0.1, 0.32 + 0.25 * bn(vec2(lp.x * 1.3, vSd * 9.0)), lp.y)) * (0.45 + 0.55 * bn(vec2(lp.x * 4.0, lp.y * 2.0 + vSd * 30.0)));
+  if ((gK > 0.5 && gK < 1.5) || gK > 6.5 && gK < 8.5) { float side = 1.0 - abs(bNn.y);
+    float wet = 1.0 - smoothstep(0.0, 0.06, bPp.y); diffuseColor.rgb *= 1.0 - 0.35 * wet;
+    float gr = (1.0 - smoothstep(0.1, 0.32 + 0.25 * bn(vec2(bPp.x * 1.3, vSd * 9.0)), bPp.y)) * (0.45 + 0.55 * bn(vec2(bPp.x * 4.0, bPp.y * 2.0 + vSd * 30.0)));
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.62, 0.60, 0.46), gr * 0.55 * side * (0.4 + 0.6 * vSd));
-    float t = uTime; float c1 = sin(lp.x * 5.3 + t * 1.6 + sin(lp.x * 1.7 - t * 0.9) * 1.8 + lp.y * 7.0); float c2 = sin(lp.x * 3.1 - t * 1.25 + lp.z * 2.0 - lp.y * 11.0);
-    gCaus = pow(max(0.0, c1 * c2), 3.0) * (1.0 - smoothstep(0.02, 0.75, lp.y)) * step(0.0, lp.y) * side * (1.0 - aa * 0.7); }`)
+    float t = uTime; float c1 = sin(bPp.x * 5.3 + t * 1.6 + sin(bPp.x * 1.7 - t * 0.9) * 1.8 + bPp.y * 7.0); float c2 = sin(bPp.x * 3.1 - t * 1.25 + bPp.z * 2.0 - bPp.y * 11.0);
+    gCaus = pow(max(0.0, c1 * c2), 3.0) * (1.0 - smoothstep(0.02, 0.75, bPp.y)) * step(0.0, bPp.y) * side * (1.0 - bAA * 0.7); }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   roughnessFactor = gRough; if (gK > 1.5 && gK < 2.5 || gK > 4.5 && gK < 5.5) roughnessFactor = 0.04;`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
