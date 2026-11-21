@@ -8,6 +8,7 @@ import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
 import { CYBER } from './mapsel.js';
 import { furnMat, PB } from './streetkit.js';
+import { buildBeachKit } from './maps/gta/beachkit.js';
 
 function streetLightGeo() {
   const b = new GeoBucket();
@@ -240,7 +241,9 @@ export function buildProps(scene, city, T) {
   // ---------- lifeguard towers, umbrellas, loungers
   {
     const g = new GeoBucket();
-    for (const lg of city.deco.lifeguards) {
+    // a_beach: map 索拉纳港 builds its own lifeguard towers / showers / dune fences (maps/gta/beachkit.js); old stands stay on map 霓港
+    if (!CYBER) out.beach = buildBeachKit(scene, city);
+    for (const lg of (CYBER ? city.deco.lifeguards : [])) {
       const y0 = city.groundH(lg.x, lg.z);
       const m = new THREE.Matrix4().makeTranslation(lg.x, y0, lg.z);
       const add = (geo, c) => g.geom(geo, m, {}, c);
@@ -321,6 +324,7 @@ export function buildProps(scene, city, T) {
 
 export function updateProps(P, cam, night, phase) {
   const n = night;
+  if (P.beach) P.beach.update(cam);
   { const L = P.lampCull, cx = cam.position.x, cz = cam.position.z; if (L && Math.hypot(cx - L.lx, cz - L.lz) > 25) { L.lx = cx; L.lz = cz; let k = 0;
     for (const [a, b, x, z, ci] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); L.cones.setMatrixAt(k, a); L.cones.setColorAt(k, ci); k++; }
     for (const m of [L.im, L.glow, L.pools, L.cones]) { m.count = k; m.instanceMatrix.needsUpdate = true; } L.cones.instanceColor.needsUpdate = true; } }

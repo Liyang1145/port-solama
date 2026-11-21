@@ -667,10 +667,64 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   });
   } else {
   M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(1.22, 1.18, 1.10), roughness: 1 }), 'sand', (s) => {
-    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vSandY;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandY = (modelMatrix*vec4(position,1.0)).y;');
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vSandY;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\nfloat wetS = smoothstep(-0.55, -0.9, vSandY); diffuseColor.rgb *= mix(1.0, 0.55, wetS);')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
+    // a_beach: world-space beach close-up detail on the barrier-island beach (bu = metres seaward of the beach line, same
+    // beachOff curve as mapgeo.js): damp high-tide line with a sargassum / shell wrack strip, swash bubble lines and glossy
+    // wet sand at the water, lifeguard-truck tyre ruts on the firm sand, scattered footprints (albedo + normal), all faded
+    // out by screen-space footprint size so the far beach stays clean. Same 'sand' program as before.
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandW = (modelMatrix*vec4(position,1.0)).xyz;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;' + HASH + `
+float bkFoot(vec2 p, float dens) {
+  vec2 c = floor(p * 2.0); float h = h12(c + 17.0); if (h > dens) return 0.0;
+  float a = (h12(c + 3.0) < 0.5 ? 0.0 : 3.1416) + (h12(c + 5.0) - 0.5) * 1.4;
+  vec2 o = (c + 0.5 + (vec2(h12(c + 9.0), h12(c + 11.0)) - 0.5) * 0.3) * 0.5; vec2 q = p - o; float ca = cos(a), sa = sin(a);
+  q = vec2(ca * q.x + sa * q.y, -sa * q.x + ca * q.y); q.y += (h12(c + 13.0) < 0.5 ? 0.06 : -0.06);
+  float d = min(length((q - vec2(-0.075, 0.0)) / vec2(0.05, 0.042)), length((q - vec2(0.055, 0.008)) / vec2(0.07, 0.05)));
+  return -smoothstep(1.05, 0.45, d) + smoothstep(1.45, 1.05, d) * smoothstep(0.75, 1.05, d) * 0.3; }
+float bkRut(float bu, float z) {
+  float tc = 68.0 + 3.0 * sin(z * 0.011) + 1.5 * sin(z * 0.037 + 1.0); float dd = bu - tc;
+  float r1 = abs(dd - 0.8), r2 = abs(dd + 0.8); float rr = min(r1, r2);
+  float tread = step(0.5, fract(z * 3.2 + (dd > 0.0 ? 0.0 : 0.5) + rr * 3.0));
+  return -smoothstep(0.17, 0.1, rr) * (0.75 + 0.25 * tread) + smoothstep(0.24, 0.17, rr) * smoothstep(0.1, 0.17, rr) * 0.25; }`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+float vSandY = vSandW.y; float wetS = smoothstep(-0.62, -0.93, vSandY);
+float bkZ = vSandW.z, bkAZ = abs(bkZ);
+float bkOff = smoothstep(380.0, 540.0, bkAZ) * (18.0 * sin(bkZ * 0.0047) + 10.0 * sin(bkZ * 0.013 + 1.3) - 6.0);
+float bu = vSandW.x - 335.0 - bkOff; float onB = step(0.0, bu) * step(bkAZ, 1440.0);
+float bkPW = length(fwidth(vSandW.xz)); vec3 bkN = vec3(0.0); float bkGloss = 0.0;
+if (onB > 0.5) {
+  float dn = vnoise(vSandW.xz * 0.03) * 0.6 + vnoise(vSandW.xz * 0.13) * 0.4; diffuseColor.rgb *= mix(0.95, 1.04, dn);
+  // damp high-tide line (sharp landward edge) + wrack strip just above it
+  float wl = -0.6 + (vnoise(vec2(bkZ * 0.07, 3.0)) - 0.5) * 0.1 + (vnoise(vec2(bkZ * 0.6, 9.0)) - 0.5) * 0.025;
+  float damp = smoothstep(wl + 0.012, wl - 0.012, vSandY); diffuseColor.rgb *= mix(1.0, 0.84, damp * (1.0 - wetS));
+  float band = smoothstep(0.045, 0.0, abs(vSandY - wl - 0.035));
+  float weed = band * smoothstep(0.42, 0.72, vnoise(vSandW.xz * vec2(1.4, 0.35)) * 0.7 + vnoise(vSandW.xz * 6.0) * 0.3);
+  diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.17, 0.12, 0.05), vec3(0.32, 0.24, 0.09), vnoise(vSandW.xz * 9.0)), weed * 0.85);
+  bkGloss += weed * 0.35;
+  float fine = smoothstep(0.06, 0.02, bkPW);
+  { vec2 sc = vSandW.xz / 0.16; vec2 ci = floor(sc); float hs = h12(ci + 41.0); float dens = 0.006 + 0.09 * smoothstep(0.09, 0.0, abs(vSandY - wl - 0.03));
+    float sh = step(1.0 - dens, hs) * smoothstep(0.3, 0.16, length(fract(sc) - 0.5 - (vec2(h12(ci + 2.0), h12(ci + 5.0)) - 0.5) * 0.3));
+    vec3 shc = mix(vec3(0.97, 0.93, 0.86), vec3(0.93, 0.7, 0.62), h12(ci + 7.0)); if (h12(ci + 8.0) < 0.25) shc = vec3(0.3, 0.27, 0.24);
+    diffuseColor.rgb = mix(diffuseColor.rgb, shc, sh * fine); diffuseColor.rgb *= 1.0 + dens * 0.6 * (1.0 - fine); }
+  // swash: bubble lines + glassy film at the water's edge
+  float sw = smoothstep(0.012, 0.0, abs(vSandY - (-0.84 + 0.035 * sin(bkZ * 0.23) + (vnoise(vec2(bkZ * 0.05, 1.0)) - 0.5) * 0.08)));
+  sw += 0.6 * smoothstep(0.008, 0.0, abs(vSandY - (-0.9 + 0.03 * sin(bkZ * 0.17 + 2.0))));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.84, 0.8), clamp(sw, 0.0, 1.0) * 0.5 * smoothstep(0.4, 0.1, bkPW));
+  bkGloss += smoothstep(-0.88, -0.97, vSandY);
+  // tyre ruts (firm sand) + footprints, as albedo and as a normal tilt
+  float ruF = smoothstep(0.5, 0.15, bkPW) * (1.0 - smoothstep(1380.0, 1420.0, bkAZ));
+  if (ruF > 0.0) { float r0 = bkRut(bu, bkZ), rx = bkRut(bu + 0.03, bkZ), rz = bkRut(bu, bkZ + 0.03);
+    diffuseColor.rgb *= 1.0 + r0 * 0.13 * ruF; bkN.xz += vec2(rx - r0, rz - r0) / 0.03 * 0.035 * ruF; }
+  float fpF = smoothstep(0.09, 0.035, bkPW) * (1.0 - smoothstep(-0.8, -0.93, vSandY));
+  if (fpF > 0.0) { float trail = smoothstep(0.5, 0.85, vnoise(vec2(bkZ * 0.06, bu * 0.012) + 4.0));
+    float dens = (0.05 + 0.3 * trail + 0.12 * smoothstep(0.1, 0.0, abs(bu - 57.0) / 20.0)) * smoothstep(1.0, 4.0, bu);
+    float f0 = bkFoot(vSandW.xz, dens), fx = bkFoot(vSandW.xz + vec2(0.02, 0.0), dens), fz = bkFoot(vSandW.xz + vec2(0.0, 0.02), dens);
+    float wetF = damp; diffuseColor.rgb *= 1.0 + f0 * (0.1 + 0.12 * wetF) * fpF;
+    bkN.xz += vec2(fx - f0, fz - f0) / 0.02 * (0.02 + 0.015 * wetF) * fpF; }
+}
+diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+if (onB > 0.5) normal = normalize(normal + (viewMatrix * vec4(-bkN.x, 0.0, -bkN.z, 0.0)).xyz);`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS); roughnessFactor = mix(roughnessFactor, 0.12, clamp(bkGloss, 0.0, 1.0));');
   });
   }
   const grass = texSet(T, 'grass', 1); for (const t of [grass.map, grass.normalMap, grass.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
