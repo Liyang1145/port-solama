@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies } from './city.js';
-import { farCrown } from './crown.js';
+import { farCrown, setCrownParcel } from './crown.js';
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
@@ -157,7 +157,7 @@ export class Stream {
     for (const p of c.parcels) {
       if (p.far) continue;
       const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
-      withSeed(p.seed, () => genParcel(ctx, p));
+      setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); // b_tower3: crown sizes/content from the seed
       const m = parcelMatrix(p);
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
     }
