@@ -319,7 +319,8 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
     const ua = [Math.cos(ang), -Math.sin(ang)]; const q = F.P(ac, bc + s); const ub = norm2(sub(q, p));
     wf = { x: p[0], z: p[1], ua, ub, hw, hd, h, two, flat, wall: [rec[7], rec[8], rec[9]], u0: a0 - ac, u1: a1 - ac, vf: -(setback + hd / 2), seed: Math.floor(rec[11] * 1e9) };
     (fab.wf = fab.wf || []).push(wf); }
-  if (!flat) { const rh = Math.min(hw, hd) * rr(0.22, 0.3), rc = pickR(fab, ROOFS); addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, rh, ang, rc); if (wf) { wf.roofH = rh; wf.roofC = rc; } }
+  // marina_b: a canal lot's roof is drawn by villafar.js (tile shader, same transform); same rr/pickR calls, so R() is unchanged
+  if (!flat) { const rh = Math.min(hw, hd) * rr(0.22, 0.3), rc = pickR(fab, ROOFS); if (!wf) addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, rh, ang, rc); else { wf.roofH = rh; wf.roofC = rc; } }
   // driveway (verge part + yard part, skipping the sidewalk) on one side, car on it half the time
   const ds = R() < 0.5 ? -1 : 1; const ad = ac + ds * (hw / 2 - 1.8); if (wf) wf.drive = ad - ac;
   const yardA = f0, yardB = f0 + s * setback; const pv = F.P(ad, (f0 - s * (LSW + LVG * 0.5)));

@@ -7,7 +7,9 @@
 import * as THREE from 'three';
 import { job, mulb, seedOf, fbox, lb, put, geos, COL, frame, signBoard, door } from './bldgdetail.js';
 import { addPalmRaw } from './fabric.js';
-import { boatFleet, TYPES } from './boats.js';
+import { boatFleet, TYPES, SWELL } from './boats.js';
+import { U } from '../../env.js';
+import { villaShells } from './villafar.js';
 import { setCalm } from './calm.js';
 
 const WY = -1.0; // LAYOUT.waterY
@@ -88,11 +90,23 @@ export function planMarina({ fab, DS, piers, col }) {
   // walkable decks (fingers + fuel platform) for city.isLand / groundH
   MR.onDeck = (x, z) => { if (x > -18 || x < -110 || z < -110 || z > 130) return false; for (const d of decks) if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) return true; return false; };
   const fleet = boatFleet(boats); MR.fleet = fleet;
-  MR.attach = (scene) => fleet.attach(scene);
+  const VS = villaShells(fab.wf || []); MR.shells = VS;
+  MR.attach = (scene) => { if (DS.M) floatMat(DS.M, piers); fleet.attach(scene); VS.attach(scene); };
   MR.update = (cam) => fleet.update(cam);
   return MR;
 }
 
+// marina_b: floating-finger material = the shared vcol look + a heave from the boats' swell field, weighted 0 at the fixed pier
+// spine and 1 from 2.5 m out (the hinge), and only inside the three piers' x span. World-space buckets, so xz is world.
+function floatMat(M, piers) {
+  if (M.vcolFloat || !M.vcol) return; const base = M.vcol; const m = base.clone(); const P = piers.map((p) => new THREE.Vector4(p.x0, p.x1, p.z, p.hw));
+  m.onBeforeCompile = (s, r) => { base.onBeforeCompile(s, r); s.uniforms.uTime = U.uTime; s.uniforms.uPier = { value: P };
+    s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>
+uniform float uTime; uniform vec4 uPier[${P.length}];` + SWELL + `
+float fHinge(vec2 p){ float w = 0.0; for (int i = 0; i < ${P.length}; i++) { vec4 q = uPier[i]; if (p.x > q.x - 2.0 && p.x < q.y + 2.0) w = max(w, clamp((abs(p.y - q.z) - q.w) / 2.5, 0.0, 1.0)); } return w; }`)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.y += mSwell(transformed.xz, uTime) * fHinge(transformed.xz);'); };
+  m.customProgramCacheKey = () => 'vcolFloat'; M.vcolFloat = m;
+}
 // ---------------------------------------------------------------------------------------------------- pier detail ----
 function cleat(bk, x, y, z, along = 'x') { const a = along === 'x'; fbox(bk, frame(x, z, a ? 1 : 0, a ? 0 : 1), -0.17, 0.17, -0.035, 0.035, y, y + 0.09, COL.dkalu); fbox(bk, frame(x, z, a ? 1 : 0, a ? 0 : 1), -0.06, 0.06, -0.05, 0.05, y, y + 0.06, COL.dkalu); }
 function pile(bk, G, x, z, top, col = WOOD, cap = true) { put(bk, G.cyl, x, WY - 2.4, z, col, 0.15, top - WY + 2.4, 0.15); if (cap) put(bk, G.cone, x, top, z, [0.92, 0.92, 0.9], 0.17, 0.16, 0.17); }
@@ -111,12 +125,20 @@ function pierDetail(Wd, p, pi, decks, G) {
     for (let x = p.x0 + 1; x < p.x1; x += 4) put(bk, G.cone, x, 0.5, p.z + sz * (p.hw - 0.15), [0.92, 0.92, 0.9], 0.17, 0.14, 0.17); }
   fbox(bk, frame(0, 0), p.x0 - 0.07, p.x0, p.z - p.hw, p.z + p.hw, -0.22, y + 0.02, WOODD);
   // fingers: deck, plank seams, outer pile, cleats; a power pedestal where each finger meets the pier
+  // marina_b: the fingers FLOAT (bucket vcolFloat: heaves with the boats' swell, hinged at the fixed spine); guide piles stay put
+  const fk = Wd.b('vcolFloat', (p.x0 + p.x1) / 2, p.z);
   for (const d of decks) { if (d.kind !== 'finger' || d.pier !== pi) continue; const xc = (d.x0 + d.x1) / 2; const zo = d.sz > 0 ? d.z1 : d.z0, zi = d.sz > 0 ? d.z0 : d.z1;
-    fbox(bk, frame(0, 0), d.x0, d.x1, d.z0, d.z1, -0.1, y, WOOD);
-    for (let z = d.z0 + 0.45; z < d.z1; z += 0.55) fbox(bk, frame(0, 0), d.x0, d.x1, z - 0.012, z + 0.012, y, y + 0.002, WOODD);
+    fbox(fk, frame(0, 0), d.x0, d.x1, d.z0, d.z1, -0.1, y, WOOD);
+    for (let z = d.z0 + 0.45; z < d.z1; z += 0.55) fbox(fk, frame(0, 0), d.x0, d.x1, z - 0.012, z + 0.012, y, y + 0.002, WOODD);
+    // float tubs under the deck (grey polyethylene, weed line at the water) + an aluminium edge frame with rub strip
+    for (let z = Math.min(zi, zo) + 0.25; z < Math.max(zi, zo) - 0.5; z += 1.25) { fbox(fk, frame(0, 0), d.x0 + 0.04, d.x1 - 0.04, z, z + 1.0, WY - 0.32, WY + 0.06, [0.38, 0.37, 0.33]);
+      fbox(fk, frame(0, 0), d.x0 + 0.05, d.x1 - 0.05, z + 0.02, z + 0.98, WY + 0.06, -0.1, [0.62, 0.62, 0.60]); }
+    for (const xs of [d.x0 - 0.035, d.x1]) fbox(fk, frame(0, 0), xs, xs + 0.035, d.z0, d.z1, -0.22, y - 0.02, COL.alu);
+    fbox(fk, frame(0, 0), d.x0 - 0.06, d.x0 - 0.035, d.z0, d.z1, -0.14, 0.0, COL.rubber); fbox(fk, frame(0, 0), d.x1 + 0.035, d.x1 + 0.06, d.z0, d.z1, -0.14, 0.0, COL.rubber);
     pile(bk, G, xc, zo - d.sz * 0.15, 1.35); pile(bk, G, xc + 0.62, zo - d.sz * 0.15, 1.2, WOODG); pile(bk, G, xc, (zo + zi) / 2, 0.5, WOODD, false);
-    cleat(bk, xc - 0.32, y, (zo + zi) / 2 + d.sz * 1.2, 'z'); cleat(bk, xc + 0.32, y, zo - d.sz * 0.6, 'z'); cleat(bk, xc - 0.32, y, zo - d.sz * 0.6, 'z');
-    pedestal(bk, xc, y, zi + d.sz * 0.45); }
+    { const pz = zo - d.sz * 0.15; for (const s of [-1, 1]) fbox(fk, frame(xc, pz), -0.24, 0.24, s * 0.2, s * 0.2 + s * 0.05, y - 0.25, y + 0.05, COL.dkalu); } // pile hoop
+    cleat(fk, xc - 0.32, y, (zo + zi) / 2 + d.sz * 1.2, 'z'); cleat(fk, xc + 0.32, y, zo - d.sz * 0.6, 'z'); cleat(fk, xc - 0.32, y, zo - d.sz * 0.6, 'z');
+    pedestal(fk, xc, y, zi + d.sz * 0.45); }
   // lamp posts (alternating edges), dock boxes, a bench + life-ring stand at the head
   let k = 0; for (let x = p.x1 - 6; x > p.x0 + 2; x -= 12, k++) { const sz = k % 2 ? 1 : -1; dockLamp(Wd, bk, G, x, p.z + sz * (p.hw - 0.3), y);
     if (r() < 0.6) { const bz = p.z - sz * (p.hw - 0.45); fbox(bk, frame(x - 3, bz), -0.7, 0.7, -0.3, 0.3, y, y + 0.62, [0.94, 0.94, 0.92]); fbox(bk, frame(x - 3, bz), -0.72, 0.72, -0.32, 0.32, y + 0.62, y + 0.66, [0.84, 0.84, 0.82]); } }
@@ -199,12 +221,11 @@ function canalLot(Wd, w, G) {
   const ws = w.wall; const white = [0.95, 0.95, 0.93];
   if (w.flat) { // modern villa: thin roof slab overhanging all round (deep over the canal terrace), glass wall + balcony on the canal side
     const back = S.lanai ? 3.2 : 1.4;
-    L.box(bk, -hw - 0.7, hw + 0.7, -hd - 0.7, hd + back, H - 0.02, H + 0.24, white, true);
-    L.box(bk, -hw - 0.72, hw + 0.72, -hd - 0.72, hd + back + 0.02, H + 0.24, H + 0.27, [0.78, 0.78, 0.76]);
+    // marina_b: roof slab, canal glass wall, balcony slab and the upper street glass band are villafar.js shells (all distances)
     const Eb = L.faceV(hd, 1, -hw, hw); const fl = w.two ? [[0.08, 2.75], [3.25, H - 0.4]] : [[0.08, H - 0.45]];
-    for (const [y0, y1] of fl) { lb(bk, Eb, 0.5, Eb.len - 0.5, -0.02, 0.05, y0, y1, COL.glass); for (let a = 0.5; a <= Eb.len - 0.45; a += 1.7) lb(bk, Eb, a - 0.04, a + 0.04, -0.02, 0.09, y0, y1, COL.dkalu);
+    for (const [y0, y1] of fl) { for (let a = 0.5; a <= Eb.len - 0.45; a += 1.7) lb(bk, Eb, a - 0.04, a + 0.04, -0.02, 0.09, y0, y1, COL.dkalu);
       lb(bk, Eb, 0.45, Eb.len - 0.45, -0.02, 0.1, y0 - 0.05, y0 + 0.02, COL.dkalu); lb(bk, Eb, 0.45, Eb.len - 0.45, -0.02, 0.1, y1, y1 + 0.07, COL.dkalu); }
-    if (w.two) { lb(bk, Eb, 0.3, Eb.len - 0.3, -0.02, 1.7, 2.8, 3.05, white, true); lb(gl, Eb, 0.35, Eb.len - 0.35, 1.62, 1.68, 3.05, 4.05, [1, 1, 1]); lb(bk, Eb, 0.32, Eb.len - 0.32, 1.6, 1.7, 4.05, 4.1, COL.steel, true);
+    if (w.two) { lb(gl, Eb, 0.35, Eb.len - 0.35, 1.62, 1.68, 3.05, 4.05, [1, 1, 1]); lb(bk, Eb, 0.32, Eb.len - 0.32, 1.6, 1.7, 4.05, 4.1, COL.steel, true);
       for (const a of [0.35, Eb.len - 0.35]) lb(gl, Eb, a - 0.03, a + 0.03, 0.1, 1.65, 3.05, 4.05, [1, 1, 1]); }
     if (S.lanai) for (const u of [-hw + 0.3, hw - 0.3]) { const q = L.P(u, hd + back - 0.25); put(bk, G.cyl6, q[0], 0, q[1], COL.dkalu, 0.07, H, 0.07); }
     // front: entry recess with a timber-slat feature wall, tall pivot door, slab canopy
@@ -212,7 +233,7 @@ function canalLot(Wd, w, G) {
     for (let a = da - 1.25; a < da + 1.25; a += 0.12) lb(bk, Ef, a, a + 0.06, 0.08, 0.12, 0.1, H - 0.5, [0.38, 0.27, 0.17]);
     door(bk, Ef, da + 2.2, 1.2, 2.5, 0.0, { leaf: [0.2, 0.15, 0.11], frame: COL.dkalu, steps: 1 });
     lb(bk, Ef, da + 1.3, da + 3.1, -0.02, 1.4, 2.9, 3.05, white, true);
-    if (w.two) { lb(bk, Ef, Ef.len * 0.55, Ef.len - 0.6, -0.02, 0.05, 3.5, 5.1, COL.glass); lb(bk, Ef, Ef.len * 0.55 - 0.08, Ef.len - 0.52, -0.02, 0.5, 5.1, 5.2, white, true); }
+    if (w.two) { lb(bk, Ef, Ef.len * 0.55 - 0.08, Ef.len - 0.52, -0.02, 0.5, 5.1, 5.2, white, true); }
   } else { // bungalow: eave gutters, screened-lanai frame + flat roof on the canal side, porch with columns at the door
     const Ef = L.faceV(-hd, -1, hw, -hw), Eb = L.faceV(hd, 1, -hw, hw);
     for (const E of [Ef, Eb]) { lb(bk, E, -0.45, E.len + 0.45, 0.32, 0.5, H - 0.16, H - 0.02, [0.92, 0.92, 0.9], true); }
@@ -227,7 +248,7 @@ function canalLot(Wd, w, G) {
     const da = Ef.len * 0.55; door(bk, Ef, da, 0.95, 2.1, 0.0, { leaf: [0.85, 0.83, 0.78], frame: [0.92, 0.92, 0.9], steps: 2 });
     lb(bk, Ef, da - 1.4, da + 1.4, -0.02, 1.6, 2.55, 2.7, [0.9, 0.9, 0.88], true); for (const s of [-1.25, 1.25]) lb(bk, Ef, da + s - 0.1, da + s + 0.1, 1.3, 1.5, 0, 2.55, [0.94, 0.94, 0.92]);
     // window frames + shutters on the street side
-    for (const a of [1.6, Ef.len - 1.8]) { if (Math.abs(a - da) < 2.2) continue; lb(bk, Ef, a - 0.65, a + 0.65, -0.02, 0.05, 0.95, 2.15, COL.glass); lb(bk, Ef, a - 0.7, a + 0.7, -0.02, 0.12, 0.88, 0.95, [0.95, 0.95, 0.93], true);
+    for (const a of [1.6, Ef.len - 1.8]) { if (Math.abs(a - da) < 2.2) continue; lb(bk, Ef, a - 0.7, a + 0.7, -0.02, 0.12, 0.88, 0.95, [0.95, 0.95, 0.93], true);
       const sc = pickL(r, [[0.2, 0.36, 0.42], [0.92, 0.92, 0.9], [0.32, 0.4, 0.26], [0.22, 0.25, 0.3]]); for (const s of [-1, 1]) lb(bk, Ef, a + s * 0.68 - 0.24, a + s * 0.68 + 0.24, -0.02, 0.07, 0.92, 2.2, sc); }
   }
   // garage door on the driveway side of the street façade (both styles), AC condenser on a pad at the side

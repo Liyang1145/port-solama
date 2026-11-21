@@ -1,6 +1,7 @@
 // marina_a: original procedural boats for map A 索拉纳港 (no external assets). Five hull types, each built twice (near / far LOD)
 // as one vertex-coloured BufferGeometry with a per-vertex part code aK:
 //   0 plain   1 hull topside (takes the per-instance tint aTint)   2 glass   3 chrome / stainless   4 nav / anchor light   5 cabin glass that may be lit at night
+//   marina_b: 6 teak (planked, black caulk)   7 antifouling bottom   8 boot stripe (painted, clear-coated)   9 non-skid deck
 // Local frame: +x = bow, +y up, z = beam, origin at the waterline amidships. Instances bob / roll on the water in the vertex shader.
 import * as THREE from 'three';
 import { prep } from '../../mats.js';
@@ -61,7 +62,7 @@ class GB {
 // --------------------------------------------------------------------------------------------------------- hull ----
 // planing / displacement hull lofted from cross-sections: topside band (tinted), boot stripe, antifouling bottom, transom, deck.
 function hull(gb, o, lod) {
-  const { L, B, fb, rise = 0.3, dk = 0.5, rake = 1.0, boot = C.navy, bottom = C.bottomB, deck = C.deck } = o;
+  const { L, B, fb, rise = 0.3, dk = 0.5, rake = 1.0, boot = C.navy, bottom = C.bottomB, deck = C.deck, deckK = 9 } = o;
   const N = lod ? 9 : 24;
   const hbf = (t) => (t < 0.5 ? 0.88 + 0.12 * (t / 0.5) : Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.5) / 0.5, 2.1))));
   const hb = (t) => Math.max(0.015, (B / 2) * hbf(t)), ys = (t) => fb * (1 + rise * t * t), yk = (t) => -dk * (t < 0.72 ? 1 : Math.max(0.12, 1 - (t - 0.72) / 0.28));
@@ -72,15 +73,15 @@ function hull(gb, o, lod) {
   const T = []; for (let i = 0; i < N; i++) T.push(i / (N - 1));
   for (const sz of [1, -1]) for (const band of ['top', 'boot', 'bot']) {
     const P = T.map((t) => sec(t)[band].map(([z, y]) => [X(t, y), y, z * sz]));
-    gb.grid(P, band === 'top' ? C.white : band === 'boot' ? boot : bottom, band === 'top' ? 1 : 0, sz > 0);
+    gb.grid(P, band === 'top' ? C.white : band === 'boot' ? boot : bottom, band === 'top' ? 1 : band === 'boot' ? 8 : 7, sz > 0);
   }
   // transom (t = 0): fan over the whole section, tinted like the topsides above the boot stripe
   { const s = sec(0); const pts = [...s.top, ...s.boot.slice(1), ...s.bot.slice(1)]; const x = X(0, 0) ;
     for (let j = 0; j < pts.length - 1; j++) for (const sz of [1, -1]) { const a = [x, pts[j][1], pts[j][0] * sz], b = [x, pts[j + 1][1], pts[j + 1][0] * sz], c = [x, pts[j + 1][1], 0], d = [x, pts[j][1], 0];
-      const col = pts[j][1] > 0.15 ? C.white : pts[j][1] > 0.0 ? boot : bottom; const kk = pts[j][1] > 0.15 ? 1 : 0; if (sz > 0) gb.quad(d, c, b, a, col, kk); else gb.quad(a, b, c, d, col, kk); } }
+      const col = pts[j][1] > 0.15 ? C.white : pts[j][1] > 0.0 ? boot : bottom; const kk = pts[j][1] > 0.15 ? 1 : pts[j][1] > 0.0 ? 8 : 7; if (sz > 0) gb.quad(d, c, b, a, col, kk); else gb.quad(a, b, c, d, col, kk); } }
   // deck at the sheer
   { const P = T.map((t) => [[X(t, ys(t)), ys(t), hb(t)], [X(t, ys(t)), ys(t), -hb(t)]]);
-    for (let i = 0; i < N - 1; i++) { const a = P[i][0], b = P[i][1], c = P[i + 1][1], d = P[i + 1][0]; gb.quad(a, d, c, b, deck, 0); } }
+    for (let i = 0; i < N - 1; i++) { const a = P[i][0], b = P[i][1], c = P[i + 1][1], d = P[i + 1][0]; gb.quad(a, d, c, b, deck, deckK); } }
   // rub rail / toe rail along the sheer (dark / stainless)
   if (!lod) for (let i = 0; i < N - 1; i++) for (const sz of [1, -1]) { const t0 = T[i], t1 = T[i + 1];
     gb.rod([X(t0, ys(t0) - 0.06), ys(t0) - 0.06, (hb(t0) + 0.02) * sz], [X(t1, ys(t1) - 0.06), ys(t1) - 0.06, (hb(t1) + 0.02) * sz], 0.035, o.rub || C.grey, 0, 4); }
@@ -96,6 +97,8 @@ function bowRail(gb, H, x0, x1, h, n = 5) {
 const rectP = (x0, x1, z0, z1) => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
 // a cabin outline following the hull's half-beam between x0 and x1, inset w from the gunwale, nose pointed when x1 nears the bow
 function cabinPoly(H, x0, x1, w, n = 6) { const L = [], R = []; for (let i = 0; i <= n; i++) { const x = x0 + (x1 - x0) * i / n; const b = Math.max(0.12, H.at(x).hb - w); L.push([x, b]); R.push([x, -b]); } return [...L, ...R.reverse()]; }
+// marina_b: polished stainless rim behind a hull port (glass box stands 3 mm proud of it)
+function portRim(gb, x, y, sz, b, hx, hy) { gb.box(x - hx, x + hx, y - hy, y + hy, sz * (b + 0.002) - 0.009, sz * (b + 0.002) + 0.009, C.steel, 3); }
 function outboard(gb, x, z, y, s = 1) {
   gb.box(x - 0.55 * s, x, y - 0.1, y + 0.62 * s, z - 0.26 * s, z + 0.26 * s, C.black); gb.box(x - 0.5 * s, x - 0.05, y + 0.62 * s, y + 0.7 * s, z - 0.22 * s, z + 0.22 * s, C.black);
   gb.box(x - 0.34 * s, x - 0.16 * s, y - 0.95, y - 0.1, z - 0.07, z + 0.07, C.grey); gb.box(x - 0.42 * s, x - 0.04, y - 1.0, y - 0.9, z - 0.1, z + 0.1, C.grey);
@@ -134,25 +137,25 @@ export function boatGeometry(type, lod) {
     const H = hull(gb, { L, B, fb: 1.25, rise: 0.25, dk: 0.75, rake: 1.4, boot: C.navy, bottom: C.bottomB }, lod);
     const y = H.at(-L * 0.3).ys - 0.01;
     gb.prism(cabinPoly(H, 0.6, L / 2 - 1.6, 0.35, lod ? 3 : 6), y, y + 0.42, C.white, 1, 0.25, 0.1); // foredeck cabin top
-    if (!lod) for (const sz of [1, -1]) for (let k = 0; k < 3; k++) { const x = 1.6 + k * 1.1; const b = H.at(x).hb; gb.box(x - 0.3, x + 0.3, y - 0.45, y - 0.28, sz * (b + 0.003) - 0.012, sz * (b + 0.003) + 0.012, C.glass, 5); } // hull ports
+    if (!lod) for (const sz of [1, -1]) for (let k = 0; k < 3; k++) { const x = 1.6 + k * 1.1; const b = H.at(x).hb; gb.box(x - 0.3, x + 0.3, y - 0.45, y - 0.28, sz * (b + 0.003) - 0.012, sz * (b + 0.003) + 0.012, C.glass, 5); portRim(gb, x, y - 0.365, sz, b, 0.34, 0.12); } // hull ports
     const wx = 0.3; const a = H.at(wx);
     gb.prism([[wx, a.hb - 0.15], [wx + 0.5, a.hb - 0.4], [wx + 0.5, -(a.hb - 0.4)], [wx, -(a.hb - 0.15)]], y + 0.42, y + 0.95, C.glass, 2, 0.2, -0.45); // windscreen
     for (const sz of [1, -1]) gb.rod([wx - 2.6, y, sz * (a.hb - 0.2)], [wx - 2.2, y + 1.85, sz * (a.hb - 0.3)], 0.05, C.white, 0, lod ? 4 : 6); // hardtop legs
     gb.prism(rectP(wx - 2.9, wx - 0.1, -(a.hb - 0.25), a.hb - 0.25), y + 1.85, y + 1.98, C.white, 1, 0.05); // hardtop
-    gb.box(-L / 2 - 0.8, -L / 2, 0.15, 0.3, -(B / 2 - 0.3), B / 2 - 0.3, C.teak); // swim platform
+    gb.box(-L / 2 - 0.8, -L / 2, 0.15, 0.3, -(B / 2 - 0.3), B / 2 - 0.3, C.teak, 6); // swim platform
     if (!lod) { gb.box(-L / 2 + 0.3, -L / 2 + 1.6, y - 0.2, y + 0.3, -(B / 2 - 0.4), B / 2 - 0.4, C.cush); gb.box(-L / 2 + 0.3, -L / 2 + 0.6, y + 0.3, y + 0.8, -(B / 2 - 0.4), B / 2 - 0.4, C.cush);
       gb.box(wx - 1.6, wx - 0.6, y, y + 0.85, a.hb - 1.2, a.hb - 0.3, C.white); gb.box(wx - 0.9, wx - 0.7, y + 0.85, y + 0.9, a.hb - 0.95, a.hb - 0.55, C.black);
       gb.box(wx - 2.0, wx - 1.8, y + 1.98, y + 2.25, -0.04, 0.04, C.steel, 3); gb.box(wx - 1.94, wx - 1.86, y + 2.25, y + 2.31, -0.04, 0.04, C.white, 4);
       bowRail(gb, H, L * 0.05, L / 2 - 0.6, 0.55, 5); }
   } else if (type === 3) { // flybridge motor yacht: two-deck superstructure, dark window band, flybridge with bimini + radar arch
-    const H = hull(gb, { L, B, fb: 1.7, rise: 0.22, dk: 1.0, rake: 2.0, boot: C.navy, bottom: C.bottomB, rub: C.steel }, lod);
+    const H = hull(gb, { L, B, fb: 1.7, rise: 0.22, dk: 1.0, rake: 2.0, boot: C.navy, bottom: C.bottomB, rub: C.steel, deck: C.teak, deckK: 6 }, lod);
     const y = H.at(-L * 0.3).ys - 0.01;
     const sup = cabinPoly(H, -L * 0.28, L * 0.2, 0.45, lod ? 3 : 6);
     gb.prism(sup, y, y + 0.55, C.white, 0, 0.0);                                   // saloon base
     gb.prism(sup.map(([x, z]) => [x, z * 1.004]), y + 0.55, y + 1.45, C.glass, 5, 0.12, 0.0, false); // window band (raked inward)
     gb.prism(cabinPoly(H, -L * 0.28 + 0.12, L * 0.2 - 0.6, 0.57, lod ? 3 : 6), y + 1.45, y + 1.6, C.white, 0, 0.0);
     gb.prism(cabinPoly(H, -L * 0.28 + 0.12, L * 0.2 - 0.6, 0.57, lod ? 3 : 6), y + 1.6, y + 1.75, C.white, 1, 0.08);
-    if (!lod) { for (const sz of [1, -1]) for (let k = 0; k < 4; k++) { const x = L * 0.22 + k * 0.9; const b = H.at(x).hb; gb.box(x - 0.32, x + 0.32, y - 0.62, y - 0.45, sz * (b + 0.003) - 0.012, sz * (b + 0.003) + 0.012, C.glass, 5); }
+    if (!lod) { for (const sz of [1, -1]) for (let k = 0; k < 4; k++) { const x = L * 0.22 + k * 0.9; const b = H.at(x).hb; gb.box(x - 0.32, x + 0.32, y - 0.62, y - 0.45, sz * (b + 0.003) - 0.012, sz * (b + 0.003) + 0.012, C.glass, 5); portRim(gb, x, y - 0.535, sz, b, 0.36, 0.12); }
       for (const sz of [1, -1]) { const b = H.at(-L * 0.05).hb; gb.box(-L * 0.25, L * 0.12, y - 0.95, y - 0.75, sz * (b + 0.005) - 0.015, sz * (b + 0.005) + 0.015, C.glass, 5); } }
     // flybridge: helm console, seating, rail, bimini on struts, radar arch with lights
     const fy = y + 1.75; const fx0 = -L * 0.24, fx1 = L * 0.08; const fb2 = H.at(0).hb - 0.75;
@@ -163,13 +166,13 @@ export function boatGeometry(type, lod) {
     gb.prism(rectP(fx0 + 0.6, fx0 + 1.2, -(fb2 - 0.2), fb2 - 0.2), fy + 2.0, fy + 2.12, C.white, 0, 0.0); // radar arch top
     gb.prism(rectP(fx0 + 1.1, fx1 - 0.3, -(fb2 - 0.1), fb2 - 0.1), fy + 1.85, fy + 1.92, C.canvas, 0, 0.0); // bimini
     if (!lod) { gb.box(fx0 + 0.75, fx0 + 1.05, fy + 2.12, fy + 2.22, -0.9, 0.9, C.black); gb.box(fx0 + 0.85, fx0 + 0.95, fy + 2.22, fy + 2.3, -0.04, 0.04, C.white, 4);
-      gb.box(-L / 2 - 1.2, -L / 2, 0.2, 0.36, -(B / 2 - 0.35), B / 2 - 0.35, C.teak); for (const sz of [1, -1]) gb.rod([-L / 2 - 0.1, 0.36, sz * 0.9], [-L / 2 - 0.1, y + 0.1, sz * 0.9], 0.02, C.steel, 3, 4); // swim platform + ladder rails
+      gb.box(-L / 2 - 1.2, -L / 2, 0.2, 0.36, -(B / 2 - 0.35), B / 2 - 0.35, C.teak, 6); for (const sz of [1, -1]) gb.rod([-L / 2 - 0.1, 0.36, sz * 0.9], [-L / 2 - 0.1, y + 0.1, sz * 0.9], 0.02, C.steel, 3, 4); // swim platform + ladder rails
       gb.box(-L / 2 + 0.1, -L * 0.28, y - 0.05, y + 0.95, B / 2 - 0.45, B / 2 - 0.35, C.white); gb.box(-L / 2 + 0.1, -L * 0.28, y - 0.05, y + 0.95, -(B / 2 - 0.35), -(B / 2 - 0.45), C.white); // cockpit coamings
-      gb.box(-L / 2 + 0.3, -L * 0.28 - 0.3, y + 0.85, y + 0.95, -1.0, 1.0, C.teak); // cockpit table
+      gb.box(-L / 2 + 0.3, -L * 0.28 - 0.3, y + 0.85, y + 0.95, -1.0, 1.0, C.teak, 6); // cockpit table
       bowRail(gb, H, L * 0.18, L / 2 - 0.8, 0.7, 6); }
-    else gb.box(-L / 2 - 1.2, -L / 2, 0.2, 0.36, -(B / 2 - 0.35), B / 2 - 0.35, C.teak);
+    else gb.box(-L / 2 - 1.2, -L / 2, 0.2, 0.36, -(B / 2 - 0.35), B / 2 - 0.35, C.teak, 6);
   } else { // sloop: low coachroof with ports, mast, boom with sail cover, shrouds, stays, wheel
-    const H = hull(gb, { L, B, fb: 1.0, rise: 0.18, dk: 0.6, rake: 1.6, boot: C.red, bottom: C.bottomR, deck: C.offw }, lod);
+    const H = hull(gb, { L, B, fb: 1.0, rise: 0.18, dk: 0.6, rake: 1.6, boot: C.red, bottom: C.bottomR, deck: C.teak, deckK: 6 }, lod);
     const y = H.at(-L * 0.3).ys - 0.01;
     const cab = cabinPoly(H, -L * 0.12, L * 0.22, 0.42, lod ? 3 : 6);
     gb.prism(cab, y, y + 0.48, C.offw, 0, 0.15, 0.05);
@@ -192,34 +195,67 @@ export function boatGeometry(type, lod) {
 
 // ------------------------------------------------------------------------------------------------------ material ----
 // bob / roll / pitch around the instance origin, per-instance tint on the topsides, glass + chrome + lights by part code.
+// marina_b: one shared swell field SWELL(xz) drives both the boats' heave and the floating finger docks (marina.js), so a boat
+// and the finger beside it rise and fall together. Physical material: clear-coated gelcoat / boot stripe, planked teak with
+// black caulk, non-skid deck, polished stainless, waterline grime and the sun-on-water ripple caustic along the topsides.
+export const SWELL = `
+float mSwell(vec2 p, float t){ return 0.045 * sin(t * 0.97 + p.x * 0.11 + p.y * 0.07) + 0.015 * sin(t * 1.9 + p.x * 0.05 - p.y * 0.13); }`;
 let MAT = null;
 export function boatMaterial() {
   if (MAT) return MAT;
-  MAT = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.0 }), 'boatBob', (s) => {
+  MAT = prep(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.03 }), 'boatBob2', (s) => {
     s.uniforms.uTime = U.uTime; s.uniforms.uNight = U.uNight;
-    const BOB = `
-uniform float uTime; attribute float aK; attribute vec3 aTint; attribute float aCalm; varying float vK; varying vec3 vTint; varying float vLit;
+    const BOB = SWELL + `
+uniform float uTime; attribute float aK; attribute vec3 aTint; attribute float aCalm; varying float vK; varying vec3 vTint; varying float vLit; varying vec3 vLP; varying vec3 vLN; varying float vSd;
 mat3 bobR(){ vec2 io = vec2(instanceMatrix[3][0], instanceMatrix[3][2]); float ph = io.x * 0.37 + io.y * 0.23; float a = aCalm;
   float roll = a * (0.026 * sin(uTime * 1.07 + ph) + 0.011 * sin(uTime * 2.31 + ph * 1.7)); float pit = a * 0.011 * sin(uTime * 0.83 + ph * 1.3);
   float cr = cos(roll), sr = sin(roll), cp = cos(pit), sp = sin(pit);
   return mat3(cp, sp, 0.0, -sp, cp, 0.0, 0.0, 0.0, 1.0) * mat3(1.0, 0.0, 0.0, 0.0, cr, sr, 0.0, -sr, cr); }
-float bobH(){ vec2 io = vec2(instanceMatrix[3][0], instanceMatrix[3][2]); float ph = io.x * 0.29 + io.y * 0.41; return aCalm * (0.045 * sin(uTime * 0.97 + ph) + 0.015 * sin(uTime * 1.9 + ph * 2.1)); }`;
+float bobH(){ vec2 io = vec2(instanceMatrix[3][0], instanceMatrix[3][2]); return aCalm * mSwell(io, uTime); }`;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\n' + BOB)
-      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n  objectNormal = bobR() * objectNormal;')
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n  vLN = objectNormal; objectNormal = bobR() * objectNormal;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-  transformed = bobR() * transformed + vec3(0.0, bobH(), 0.0); vK = aK; vTint = aTint;
-  { vec2 io = vec2(instanceMatrix[3][0], instanceMatrix[3][2]); vLit = step(0.45, fract(sin(dot(io, vec2(12.9898, 78.233))) * 43758.5453)); }`);
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight; varying float vK; varying vec3 vTint; varying float vLit; float gK;')
+  vLP = transformed; float hv = bobH(); transformed = bobR() * transformed + vec3(0.0, hv, 0.0); vK = aK; vTint = aTint;
+  { vec2 io = vec2(instanceMatrix[3][0], instanceMatrix[3][2]); vLit = step(0.45, fract(sin(dot(io, vec2(12.9898, 78.233))) * 43758.5453)); vSd = fract(io.x * 0.131 + io.y * 0.071);
+    }`);
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
+uniform float uNight; uniform float uTime; varying float vK; varying vec3 vTint; varying float vLit; varying vec3 vLP; varying vec3 vLN; varying float vSd; float gK; float gCoat; float gRough; float gMet; float gCaus;
+float bh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float bn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(bh(i), bh(i + vec2(1, 0)), f.x), mix(bh(i + vec2(0, 1)), bh(i + vec2(1, 1)), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-  gK = floor(vK + 0.5);
-  if (gK > 0.5 && gK < 1.5) diffuseColor.rgb *= vTint;`)
+  gK = floor(vK + 0.5); gCoat = 0.0; gRough = 0.32; gMet = 0.0; gCaus = 0.0;
+  vec3 lp = vLP; vec3 ln = normalize(vLN); float aa = clamp(length(fwidth(lp)) * 6.0, 0.0, 1.0); // pattern fade with distance
+  if (gK > 0.5 && gK < 1.5) { diffuseColor.rgb *= vTint; gCoat = 1.0; gRough = 0.16; }
+  if (gK > 7.5 && gK < 8.5) { gCoat = 1.0; gRough = 0.2; }
+  if (gK > 6.5 && gK < 7.5) { diffuseColor.rgb *= 0.8 + 0.3 * bn(lp.xz * 3.0 + vSd * 40.0); gRough = 0.85; }
+  if (gK > 5.5 && gK < 6.5) { // teak: 7.5 cm planks along the boat, black caulk seams, staggered butt joints, grain
+    float pz = (abs(ln.y) > 0.5 ? lp.z : lp.y) / 0.075; float pi = floor(pz); float fz = fract(pz);
+    float bx = (lp.x + bh(vec2(pi, vSd)) * 2.4) / 2.4; float butt = 1.0 - step(0.012, fract(bx)) * step(fract(bx), 0.996);
+    float seam = max(1.0 - smoothstep(0.06, 0.16, fz) * smoothstep(0.94, 0.84, fz), butt);
+    float tone = 0.82 + 0.3 * bh(vec2(pi, floor(bx) + vSd * 17.0)); float grain = 0.9 + 0.12 * bn(vec2(lp.x * 9.0, pz * 3.0));
+    vec3 tk = vec3(0.56, 0.40, 0.25) * tone * grain; tk = mix(tk, vec3(0.62, 0.57, 0.50), 0.35 * vSd); // some decks silvered by the sun
+    diffuseColor.rgb = mix(mix(tk, vec3(0.05, 0.045, 0.04), seam * 0.9), vec3(0.50, 0.38, 0.26), aa * 0.8); gRough = 0.7; }
+  if (gK > 8.5) { vec2 g = abs(fract(lp.xz / 0.05) - 0.5); float dia = step(0.35, g.x + g.y); diffuseColor.rgb *= mix(0.95 + 0.06 * dia, 1.0, aa); gRough = 0.72; }
+  if (gK > 2.5 && gK < 3.5) { diffuseColor.rgb = vec3(0.86, 0.87, 0.88); gMet = 1.0; gRough = 0.1 + 0.12 * bn(vec2(lp.x * 2.0, lp.y * 60.0 + lp.z * 60.0)); }
+  // waterline: wet dark band at the water, algae / scum grime fading up the topsides, sun-on-water ripple caustic
+  if ((gK > 0.5 && gK < 1.5) || gK > 6.5 && gK < 8.5) { float side = 1.0 - abs(ln.y);
+    float wet = 1.0 - smoothstep(0.0, 0.06, lp.y); diffuseColor.rgb *= 1.0 - 0.35 * wet;
+    float gr = (1.0 - smoothstep(0.1, 0.32 + 0.25 * bn(vec2(lp.x * 1.3, vSd * 9.0)), lp.y)) * (0.45 + 0.55 * bn(vec2(lp.x * 4.0, lp.y * 2.0 + vSd * 30.0)));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.62, 0.60, 0.46), gr * 0.55 * side * (0.4 + 0.6 * vSd));
+    float t = uTime; float c1 = sin(lp.x * 5.3 + t * 1.6 + sin(lp.x * 1.7 - t * 0.9) * 1.8 + lp.y * 7.0); float c2 = sin(lp.x * 3.1 - t * 1.25 + lp.z * 2.0 - lp.y * 11.0);
+    gCaus = pow(max(0.0, c1 * c2), 3.0) * (1.0 - smoothstep(0.02, 0.75, lp.y)) * step(0.0, lp.y) * side * (1.0 - aa * 0.7); }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-  if (gK > 1.5 && gK < 2.5 || gK > 4.5) roughnessFactor = 0.06; else if (gK > 0.5 && gK < 1.5) roughnessFactor = 0.18; else if (gK > 2.5 && gK < 3.5) roughnessFactor = 0.22;`)
+  roughnessFactor = gRough; if (gK > 1.5 && gK < 2.5 || gK > 4.5 && gK < 5.5) roughnessFactor = 0.04;`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-  if (gK > 2.5 && gK < 3.5) metalnessFactor = 0.9;`)
+  metalnessFactor = gMet;`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+  #ifdef USE_CLEARCOAT
+  material.clearcoat = clearcoat * gCoat;
+  #endif`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  totalEmissiveRadiance += vec3(0.75, 0.9, 1.0) * gCaus * 0.32 * (1.0 - uNight);
   if (gK > 3.5 && gK < 4.5) totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * (0.2 + uNight * 4.0);
-  if (gK > 4.5) totalEmissiveRadiance += vec3(1.0, 0.74, 0.45) * uNight * vLit * 0.9;`);
+  if (gK > 4.5 && gK < 5.5) totalEmissiveRadiance += vec3(1.0, 0.74, 0.45) * uNight * vLit * 0.9;`);
   });
   return MAT;
 }
