@@ -520,7 +520,7 @@ vRd = aRd; vRW = (modelMatrix * vec4(position, 1.0)).xyz;`);
       .replace('#include <common>', `#include <common>
 uniform float uWet; uniform float uNight; uniform sampler2D tRefl; uniform mat4 uReflMat; uniform float uReflOn; varying vec4 vRd; varying vec3 vRW; uniform vec4 uLampP[10]; uniform vec3 uLampC[10];
 ${HASH}
-float bandM(float x, float c, float w){ return smoothstep(w*0.5+0.02, w*0.5-0.02, abs(x-c)); }`)
+float bandM(float x, float c, float w){ return 1.0 - smoothstep(w*0.5-0.02, w*0.5+0.02, abs(x-c)); }`)
       .replace('#include <map_fragment>', `
 vec4 texelColor = texture2D(map, vMapUv);
 float u = vRd.x, v = vRd.y, L = vRd.z, kind = floor(vRd.w + 0.5);
@@ -560,7 +560,7 @@ float paintMask = clamp(wpaint + ypaint, 0.0, 1.0) * (0.55 + 0.45 * smoothstep(0
 vec3 asph = texelColor.rgb * diffuse;
 // tyre tracks: darker, smoother bands in each lane centre
 float lanePos = abs(fract((au) / 3.5) - 0.5);
-float tracks = (kind == 1.0) ? 0.0 : smoothstep(0.32, 0.18, abs(lanePos - 0.25)) * 0.2;
+float tracks = (kind == 1.0) ? 0.0 : (1.0 - smoothstep(0.18, 0.32, abs(lanePos - 0.25))) * 0.2;
 // patches / sealed cracks
 float patchN = smoothstep(0.62, 0.66, vnoise(vRW.xz * 0.06 + 3.0));
 asph *= (1.0 - tracks) * (1.0 - patchN * 0.25) * (0.9 + 0.2 * wear);
@@ -617,7 +617,7 @@ if (wet > 0.01) {
     vec3 d = lp.xyz - vRW; float dl = length(d); d /= dl;
     float dh = length(rh - normalize(d.xz + 1e-5));             // ~ azimuth error (rad)
     float dv = asin(clamp(R.y, -1.0, 1.0)) - asin(clamp(d.y, -1.0, 1.0));
-    acc += uLampC[i] * lp.w * exp(-dh * dh / (sh * sh) - dv * dv / (sv * sv)) * smoothstep(110.0, 50.0, dl);
+    acc += uLampC[i] * lp.w * exp(-dh * dh / (sh * sh) - dv * dv / (sv * sv)) * (1.0 - smoothstep(50.0, 110.0, dl));
   }
   float fr2 = 0.04 + 0.96 * pow(1.0 - clamp(-V.y, 0.0, 1.0), 5.0);
   totalEmissiveRadiance += acc * wet * mix(${CYBER ? '0.55, 1.6' : '0.30, 1.0'}, pud) * clamp(fr2 * 1.6 + 0.12, 0.0, 1.0) * (1.0 - paintF * 0.5);
@@ -634,11 +634,11 @@ export function simpleMats(T) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? '' : `
 { // r6.3 索拉纳港 pavement wear: dark joint-sealant lines get dirtier, flattened gum spots, drip / coffee stains, a few hairline cracks per slab
   vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = fract(sin(dot(cl, vec2(12.9898, 78.233))) * 43758.5453);
-  vec2 gq = sp * 7.0; vec2 gi = floor(gq); float gh = fract(sin(dot(gi, vec2(41.3, 289.1))) * 15731.7); float gum = step(0.993, gh) * smoothstep(0.32, 0.18, length(fract(gq) - 0.5));
+  vec2 gq = sp * 7.0; vec2 gi = floor(gq); float gh = fract(sin(dot(gi, vec2(41.3, 289.1))) * 15731.7); float gum = step(0.993, gh) * (1.0 - smoothstep(0.18, 0.32, length(fract(gq) - 0.5)));
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, gum);
-  vec2 sq = sp * 0.55; vec2 si = floor(sq); float sh = fract(sin(dot(si, vec2(7.7, 113.3))) * 9134.1); float stain = step(0.82, sh) * smoothstep(0.42, 0.1, length(fract(sq) - 0.5 + (sh - 0.9) * 0.4));
+  vec2 sq = sp * 0.55; vec2 si = floor(sq); float sh = fract(sin(dot(si, vec2(7.7, 113.3))) * 9134.1); float stain = step(0.82, sh) * (1.0 - smoothstep(0.1, 0.42, length(fract(sq) - 0.5 + (sh - 0.9) * 0.4)));
   diffuseColor.rgb *= 1.0 - stain * 0.16;
-  vec2 lc = fract(sp / 1.6); float ck = step(0.72, hs) * smoothstep(0.012, 0.0, abs(lc.y - 0.5 - 0.25 * sin(lc.x * 6.0 + hs * 20.0)) ) * step(abs(lc.x - 0.5), 0.3 + 0.2 * hs);
+  vec2 lc = fract(sp / 1.6); float ck = step(0.72, hs) * (1.0 - smoothstep(0.0, 0.012, abs(lc.y - 0.5 - 0.25 * sin(lc.x * 6.0 + hs * 20.0)))) * step(abs(lc.x - 0.5), 0.3 + 0.2 * hs);
   diffuseColor.rgb *= 1.0 - ck * 0.35; }`))
       .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying vec3 vSWP;');
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSWP;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSWP = (modelMatrix * vec4(position,1.0)).xyz;');
@@ -767,7 +767,7 @@ if (onB > 0.5) normal = normalize(normal + (viewMatrix * vec4(-bkN.x, 0.0, -bkN.
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.28, 1.10, 0.70), dry * 0.6);
   float soil = smoothstep(0.70, 0.86, vnoise(vLW.xz * 0.012 + 5.3) * 0.65 + vnoise(vLW.xz * 0.09) * 0.35);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.36, 0.27) * (0.85 + 0.3 * vnoise(vLW.xz * 0.5)), soil * 0.45);
-  float far = max(smoothstep(-3590.0, -3680.0, vLW.x), smoothstep(2890.0, 2980.0, abs(vLW.z))) * step(vLW.x, -950.0);
+  float far = max(1.0 - smoothstep(-3680.0, -3590.0, vLW.x), smoothstep(2890.0, 2980.0, abs(vLW.z))) * step(vLW.x, -950.0);
   if (far > 0.0) {
     vec2 q = vLW.xz; vec2 cl = vec2(118.0, 104.0); vec2 g = abs(fract(q / cl) - 0.5) * cl; float rd = 1.0 - smoothstep(4.0, 6.0, min(g.x, g.y));
     vec2 art = vec2(472.0, 416.0); vec2 ga = abs(fract((q + 59.0) / art) - 0.5) * art; float ar = 1.0 - smoothstep(6.5, 9.0, min(ga.x, ga.y));
