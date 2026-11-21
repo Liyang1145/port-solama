@@ -12,6 +12,7 @@ import { box, polyCap, prismWalls, rect } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL, RUST } from './kit.js';
 import { grime, sidewalk, hangingSign, laundryLine, streak } from './dress.js';
+import { cnSignboard, shopBits } from './street2.js';
 
 // --------------------------------------------------------------- shop street ----
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
@@ -25,7 +26,9 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     else if (r < 0.62) { storefront(W, F, a0, a1, y0, yt); awning(W, F, a0, a1, yt + 0.05, rand(1.3, 2.0)); }
     else if (r < 0.75) { storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, 0.92); } // open shop: shutter rolled up into the housing
     else storefront(W, F, a0, a1, y0, yt);
-    if (opts.signs !== false && rng() < 0.75) signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9));
+    // r6.4 b_street2: about half the shop boards are Chinese light boxes (invented names); stickers / condensers / wiring per bay
+    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); else signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9)); }
+    if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) vending(W, F, a0 + 0.6 + j * 1.0, y0); }
   }
   // r6.3: hanging light-box signs on wall arms over the pavement (every couple of bays) + sidewalk dressing (bins, trash, crates,

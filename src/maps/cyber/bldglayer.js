@@ -13,6 +13,7 @@ import { kg, beam, tube, put, cableBundle, NEONC, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { laundryLine } from './dress.js';
 import { shopStreet } from './arch.js';
+import { Viaduct, nearViaduct } from './viaduct.js';
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -41,6 +42,7 @@ export class BldgLayer {
   constructor(scene, mats, city) {
     this.mats = mats; this.stream = city.stream; if (mats && mats.vcol && !mats.vcolD) mats.vcolD = mats.vcol; /* LOD alias (kit.js) */
     this.lmats = Object.assign(Object.create(mats), { cone: coneMat() }); this.group = new THREE.Group(); this.group.name = 'bldglayer'; scene.add(this.group);
+    this.via = city.viaduct ? new Viaduct(scene, this.lmats, city, city.viaduct) : null; // r6.4 b_street2 elevated light-rail
     this.items = new Map(); this.built = new Map(); this.counts = { port: 0, walk: 0, bridge: 0, cables: 0 };
     const add = (k, it) => { let l = this.items.get(k); if (!l) this.items.set(k, l = []); l.push(it); };
     const P = city.parcels.filter((p) => !p.far);
@@ -70,6 +72,7 @@ export class BldgLayer {
       const ox = -a.fz, oz = a.fx; const la = 0, lb = (b.x - a.x) * ox + (b.z - a.z) * oz; const lm = (la + lb) / 2;
       const A = { x: a.x + ox * lm, z: a.z + oz * lm }; const Bp = { x: A.x + a.fx * ((b.x - a.x) * a.fx + (b.z - a.z) * a.fz), z: A.z + a.fz * ((b.x - a.x) * a.fx + (b.z - a.z) * a.fz) };
       const mid = { x: (A.x + Bp.x) / 2, z: (A.z + Bp.z) / 2 }; const nr = city.graph.index.near(mid.x, mid.z); if (!nr || nr.d > nr.e.hw + 1) continue;
+      if (nearViaduct(city.viaduct, A, Bp, 13)) continue; // r6.4: no skyways / cross-street cables through the light-rail deck
       const hmin = Math.min(p.h, q.h); const r = R(); const seed = (p.seed ^ q.seed) >>> 0;
       const dt = p.style === 'downtown' && q.style === 'downtown';
       if ((dt || p.style === 'mid' || q.style === 'mid') && hmin > 14 && r < (dt ? 0.4 : 0.22)) { used.add(i); used.add(best); add(keyOf(A.x, A.z), { kind: 'walk', A, B: Bp, y: Math.min(hmin - 4, 6.5 + R() * 2.5), seed, dt }); this.counts.walk++; }
@@ -99,15 +102,16 @@ export class BldgLayer {
         const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m); }
       else withSeed(it.seed, () => (it.kind === 'walk' ? skyway(W, it) : it.kind === 'bridge' ? skyBridge(W, it) : streetCables(W, it)));
     }
-    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false } });
+    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false }, steam: { cast: false, receive: false }, cnsign: { cast: false } });
   }
   sync() {
     const st = this.stream; if (!st) return;
+    if (this.via) this.via.sync(globalThis.__G && globalThis.__G.camera); // r6.4 light-rail near detail (own distance LOD)
     // detail LOD: small clutter meshes ('vcolD') only within DETAIL_R of the camera (chunk centre distance)
     const cam = globalThis.__G && globalThis.__G.camera; if (cam) { const p = cam.position; let n = 0;
       for (const c of st.chunks.values()) { if (!c.near) continue; const on = Math.hypot(c.cx - p.x, c.cz - p.z) < DETAIL_R + Math.max(0, p.y - 40) * 0.5;
-        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|')) { m.visible = on; n += on; } }
-      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
+        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|') || m.name.startsWith('steam|')) { m.visible = on; n += on; } }
+      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|') || m.name.startsWith('steam|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
       this.detailOn = n; }
     for (const [k, list] of this.items) {
       const c = st.chunks.get(k); const on = !!(c && c.near); const b = this.built.get(k);

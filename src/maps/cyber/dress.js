@@ -13,6 +13,7 @@ import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
+import { STALLS } from './street2.js';
 
 // r6.3 hanging light-box sign faces: 4x4 atlas of invented, Chinese-style stroke glyphs (original, procedurally drawn; no real
 // characters or brands). Light background in the vertex (neon) colour, darker glyph strokes; night emissive like 'neon'.
@@ -207,7 +208,7 @@ export function sidewalk(W, F, y0, grit = 0.5, opts = {}) {
     else if (r < 0.26 * grit + 0.07) { wheelieBin(W, F, a, rand(0.55, 0.8), y0); if (rng() < 0.6) wheelieBin(W, F, a + 0.75, rand(0.55, 0.8), y0); a += rand(3, 6); }
     else if (r < 0.36 * grit + 0.1) { crates(W, F, a, rand(0.6, 1.0), y0); a += rand(3, 6); }
     else if (r < 0.4 * grit + 0.12) { gasBottles(W, F, a, 0.45, y0); a += rand(2, 4); }
-    else if (r < 0.52 && opts.stalls !== false && L > 10) { foodStall(W, F, Math.min(L - 1.6, a + 1.2), rand(2.0, 2.6), y0); a += rand(6, 10); }
+    else if (r < 0.52 && opts.stalls !== false && L > 10) { const f = rng() < 0.3 ? foodStall : pick(STALLS); f(W, F, Math.min(L - 1.6, a + 1.2), rand(2.0, 2.6), y0); a += rand(6, 10); } // r6.4: + 面摊 / 烧烤 / 维修摊 (street2.js)
     else if (r < 0.62 && opts.tables !== false) { umbrellaTable(W, F, a + 0.8, rand(1.8, 2.6), y0); a += rand(4, 7); }
     else a += rand(2, 5);
   }

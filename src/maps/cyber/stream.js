@@ -158,7 +158,7 @@ export class Stream {
       const m = parcelMatrix(p);
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
     }
-    c.near = W.build(this.group, this.mats, { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false } });
+    c.near = W.build(this.group, this.mats, { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false }, steam: { cast: false, receive: false }, cnsign: { cast: false } });
     for (const m of c.far) m.visible = c.parcels.some((p) => p.far); // keep far-only parcels' boxes (none in near chunks normally)
     this.stats.builds++; this.stats.ms = performance.now() - t0;
   }

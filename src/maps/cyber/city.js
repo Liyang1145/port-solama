@@ -10,6 +10,8 @@ import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
 import { megatower, tenement, shopStreet } from './arch.js';
 import { signFaceMat } from './dress.js';
+import { cnSignMat, steamMat } from './street2.js';
+import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
 // r6.2: streamed parcels are built with a stub collider (stream.js nullCol); the hand-built Deco core uses the real grid
@@ -58,6 +60,8 @@ export function buildCity(scene, mats, T) {
         .replace('#include <opaque_fragment>', 'outgoingLight = min(outgoingLight, vec3(mix(0.09, 3.0, uNight)));\n#include <opaque_fragment>'); };
     mats.puddle.customProgramCacheKey = () => 'puddleN'; }
   if (!mats.signface) mats.signface = signFaceMat();
+  if (!mats.cnsign) mats.cnsign = cnSignMat(); // r6.4 b_street2: Chinese light-box signs / paper stickers (text atlas)
+  if (!mats.steam) mats.steam = steamMat(); // r6.4 b_street2: stall steam / grill smoke
   const W = new World(250);
   W.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 };
   W.attrs.road = { aRd: 4 };
@@ -182,6 +186,9 @@ export function buildCity(scene, mats, T) {
     if (p.style === 'canal' || p.style === 'villa' || p.style === 'mansion') { const bx = -Math.cos(p.ang), bz = -Math.sin(p.ang); // back yard palm
       const x = p.x + bx * (p.d / 2 + 3), z = p.z + bz * (p.d / 2 + 3); if (landAt(x, z) && !graph.index.near(x, z)) palms.push({ x, z, h: rand(7, 12), lean: rand(-0.08, 0.08), rot: rand(0, 6.28), s: 1, region: true }); }
   }
+  // r6.4 b_street2: elevated light-rail over 零点大道 / 霓滨大道 (viaduct.js) — plan it now so palms under the deck are dropped and
+  // the columns get colliders; the geometry is built by the street-structure layer (bldglayer.js)
+  const viaduct = viaductRoute(graph, lamps, parcels); viaductClear(viaduct, palms, col);
   // ---------------------------------------------------------- street lights ----
   for (const s of segs) {
     if (s.bridge) continue;
@@ -240,7 +247,7 @@ export function buildCity(scene, mats, T) {
   };
   const bedH = (x, z) => { if (inCore(x, z)) return 0; if (wild.inside(x, z)) return wild.H(x, z); if (onBeach(x, z)) return Math.max(beachH(x, z), -6); return landAt(x, z) ? 0 : L.waterY - 3; }; // water shader bed (bridges ignored)
   const junctions = graph.nodes.filter((n) => n.deg >= 3);
-  return { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild };
+  return { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild, viaduct };
 }
 
 function roadQuad(rd, s) {

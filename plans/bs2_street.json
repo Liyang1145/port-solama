@@ -1,0 +1,38 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0",
+ "reset": false,
+ "shots": [
+  {
+   "name": "b_night_street",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "b_day_street",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1650,-268,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "via_under_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1600,-790,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1593.7,1.8,-783.0); c.lookAt(-1606.3,7.5,-827.5); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "via_under_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1600,-790,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1593.7,1.8,-783.0); c.lookAt(-1606.3,7.5,-827.5); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "stall_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1622,-262,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1621.7,1.7,-269.8); c.lookAt(-1634.4,1.3,-275.6); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "stall_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1622,-262,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1621.7,1.7,-269.8); c.lookAt(-1634.4,1.3,-275.6); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "shop_day",
+   "js": "__G.setHour(13.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1600,1.8,-794); c.lookAt(-1589,3.2,-780); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "tenement_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1604,3.5,-805); c.lookAt(-1586,10,-776); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  }
+ ]
+}
