@@ -175,7 +175,7 @@ function pitGeometry(kind) {
   box(cw, ch, S - 2 * cw, hs - cw / 2, ch / 2, 0, 0.52, 0.02, 0.98, 0.46); box(cw, ch, S - 2 * cw, -hs + cw / 2, ch / 2, 0, 0.52, 0.02, 0.98, 0.46);
   const ins = S - 2 * cw; const pl = new THREE.PlaneGeometry(ins, ins); pl.rotateX(-Math.PI / 2); const uv = pl.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, kind ? 0.5 + uv.getX(i) * 0.5 : uv.getX(i) * 0.5, kind ? 0.5 + uv.getY(i) * 0.5 : uv.getY(i)); pl.translate(0, kind ? 0.09 : 0.025, 0); parts.push(pl);
-  const o = mergeColored(parts.map((g) => [g, [1, 1, 1], 0])); o.deleteAttribute('aSway'); o.deleteAttribute('color'); o.computeBoundingSphere(); return o;
+  const o = mergeColored(parts.map((g) => [g, [1, 1, 1], 0])); o.deleteAttribute('aSway'); o.computeBoundingSphere(); return o; // keeps the white vertex colour: pits share the flWood program
 }
 
 // ---------------------------------------------------------------- build ----
@@ -186,7 +186,8 @@ export function buildPalmsA(scene, city, list, ctx) {
   const frondMat = mkF(frondT), fanMat = mkF(fanT);
   const trunkMats = {}; for (const b of ['coco', 'royal', 'sabal', 'sabalS']) { const t = barkTexA(b); trunkMats[b] = prep(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, normalScale: new THREE.Vector2(1.3, 1.3), roughness: 0.9, color: 0xffffff }), 'ptrunk', (s) => foliagePatch(s, 0.0)); }
   const crownMat = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, color: 0xffffff }), 'pcrownA', (s) => foliagePatch(s, 0.0));
-  const pitMat = prep(new THREE.MeshStandardMaterial({ map: pitTex(), roughness: 0.88, color: 0xffffff }), 'pitA');
+  // shader-program reuse (01:42 rule): same params + key as flora.js woodMat ('flWood': map + vertex colour + instancing, foliagePatch 0) -> no new program
+  const pitMat = prep(new THREE.MeshStandardMaterial({ map: pitTex(), vertexColors: true, roughness: 0.88, color: 0xffffff }), 'flWood', (s) => foliagePatch(s, 0.0));
   const fDepth = ctx.depthFor(frondMat), nDepth = ctx.depthFor(fanMat);
   const groups = VARIANTS_A.map(() => []); for (const p of list) groups[p.vi].push(p);
   const sets = []; const ims = []; const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();

@@ -22,6 +22,14 @@ const fbm = (x, z) => vn(x, z) * 0.6 + vn(x * 2.3 + 7.1, z * 2.3 - 3.7) * 0.3 + 
 
 // ---------------------------------------------------------------- geometry accumulator ----
 function GA() { return { p: [], n: [], c: [], uv: [], s: [], i: [] }; }
+// bake both faces of every triangle (each copy wound to agree with its own normal) so a front-sided material can stand in for DoubleSide
+function twoSided(g) { const P = g.attributes.position.array, N = g.attributes.normal.array, I = g.index.array; const idx = []; const nv = P.length / 3; const attrs = {};
+  for (const k in g.attributes) { const a = g.attributes[k]; const src = a.array, sz = a.itemSize; const d = new Float32Array(src.length * 2); d.set(src); d.set(src, src.length); if (k === 'normal') for (let i = src.length; i < d.length; i++) d[i] = -d[i]; attrs[k] = new THREE.Float32BufferAttribute(d, sz); }
+  for (let t = 0; t < I.length; t += 3) { const a = I[t], b = I[t + 1], c = I[t + 2];
+    const ux = P[b * 3] - P[a * 3], uy = P[b * 3 + 1] - P[a * 3 + 1], uz = P[b * 3 + 2] - P[a * 3 + 2], vx = P[c * 3] - P[a * 3], vy = P[c * 3 + 1] - P[a * 3 + 1], vz = P[c * 3 + 2] - P[a * 3 + 2];
+    const gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx; const ok = gx * N[a * 3] + gy * N[a * 3 + 1] + gz * N[a * 3 + 2] >= 0;
+    if (ok) idx.push(a, b, c, a + nv, c + nv, b + nv); else idx.push(a, c, b, a + nv, b + nv, c + nv); }
+  const o = new THREE.BufferGeometry(); for (const k in attrs) o.setAttribute(k, attrs[k]); o.setIndex(idx); o.computeBoundingSphere(); return o; }
 function gaBuild(o, normals = true) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(o.p, 3));
   if (o.n.length) g.setAttribute('normal', new THREE.Float32BufferAttribute(o.n, 3));
@@ -359,8 +367,9 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
   diffuseColor.rgb *= mix(vec3(1.0), vColor, k); }`);
     });
     for (const sg of [1, -1]) for (const g of duneApron(city, sg)) { const me = new THREE.Mesh(g, duneMat); me.receiveShadow = true; me.castShadow = true; me.userData.flora = 'duneApron'; scene.add(me); out.push(me); stats.duneApron = (stats.duneApron || 0) + g.index.count / 3; }
-    if (BW.geo) { const bwMat = prep(new THREE.MeshStandardMaterial({ map: plankTex(), vertexColors: true, roughness: 0.85, side: THREE.DoubleSide }), 'flBoardwalk');
-      const me = new THREE.Mesh(BW.geo, bwMat); me.castShadow = true; me.receiveShadow = true; me.userData.flora = 'boardwalk'; scene.add(me); out.push(me); stats.boardwalk = BW.spans.length; stats.boardwalkTris = BW.geo.index.count / 3; }
+    if (BW.geo) { // program reuse: front-sided + instanced (1 identity instance) + 'flWood' key = same program as the hammock wood; both faces are baked into the geometry instead of DoubleSide
+      const bwMat = prep(new THREE.MeshStandardMaterial({ map: plankTex(), vertexColors: true, roughness: 0.85 }), 'flWood', (s) => foliagePatch(s, 0.0));
+      const me = new THREE.InstancedMesh(twoSided(BW.geo), bwMat, 1); me.setMatrixAt(0, new THREE.Matrix4()); me.frustumCulled = false; me.castShadow = true; me.receiveShadow = true; me.userData.flora = 'boardwalk'; scene.add(me); out.push(me); stats.boardwalk = BW.spans.length; stats.boardwalkTris = BW.geo.index.count / 3; }
   }
   // ---------- 2. island ends: coastal hammock understory, bay-edge sea grape (north) / mangroves + marsh (south) ----
   const sgNear = [seagrapeGeo(31, false), seagrapeGeo(37, false)], sgFar = [seagrapeGeo(31, true), seagrapeGeo(37, true)];
