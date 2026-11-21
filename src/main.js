@@ -154,7 +154,7 @@ async function load() {
     const pc = game.P && game.P.car; const kmh = pc ? Math.abs(pc.speed || 0) * 3.6 : 0;
     post.blur = Q.get('mb') === '0' ? 0 : THREE.MathUtils.smoothstep(kmh, 25, 110) * 0.6;
     if (post.dof && game.P) post.focus = camera.position.distanceTo(game.P.pos) + 0.3;
-    const sy = U.uSunDir.value.y; const gold = THREE.MathUtils.smoothstep(sy, 0.55, 0.08) * (1 - env.look.night);
+    const sy = U.uSunDir.value.y; const gold = (1 - THREE.MathUtils.smoothstep(sy, 0.08, 0.55)) /* shaftfix: was (sy,0.55,0.08) -> min>max made gold 1 at noon, 0 at golden hour; now matches env.js smooth(0.55,0.06,sd.y) */ * (1 - env.look.night);
     post.update(U.uSunDir.value, U.uSunCol.value, env.look.night, U.uTime.value, gold);
     if (Q.has('nopost')) renderer.render(scene, camera); else post.render();
   }
