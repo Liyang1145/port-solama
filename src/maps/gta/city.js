@@ -7,6 +7,7 @@ import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
 import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
+import { landmarksBase, decoCloseJob } from './landmarks.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -631,7 +632,8 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     signs.push({ x: fx + s * 0.06, y: yA + 0.75, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: Math.min(14, z1 - z0 - 4), h: 1.1, vertical: false, color: pick(['#ffd49a', '#ffe2b8', '#ffc77e']) });
   }
   if (ctx.ds) { const p = { x0, z0, x1, z1, facing, poly, top, ground, floors, fh, style: dStyle, ww: dWw, wall, accent, R, pylon, small };
-    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('deco', (Wd) => decoHotelDetail(Wd, p))); }
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('deco', (Wd) => decoHotelDetail(Wd, p)));
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, decoCloseJob({ ...p, pylonTop: pylon ? top + ph + 1.2 : 0 })); } // r6.4 a_landmarks
 }
 
 function midrise(ctx, x0, z0, x1, z1) {
@@ -926,25 +928,5 @@ function marina(ctx) {
 }
 
 // skyline guides: lighthouse at the south jetty head, 「海风之眼」 Ferris wheel at the north end of the beach
-function landmarks(ctx) {
-  const { W, col } = ctx;
-  { const x = 528, z = -374; const v = W.b('vcol', x, z);
-    const tw = new THREE.CylinderGeometry(1.7, 2.6, 24, 18, 6); tw.translate(0, 12, 0);
-    const red = new THREE.CylinderGeometry(2.02, 2.22, 5, 18); red.translate(0, 12.5, 0); gput(v, red, x, -0.5, z, [0.78, 0.1, 0.08]);
-    v.geom(tw, new THREE.Matrix4().makeTranslation(x, -0.5, z), {}, [1, 1, 1]);
-    box(v, x - 2.4, 23.4, z - 2.4, x + 2.4, 23.8, z + 2.4, {}, [0.15, 0.15, 0.15]);
-    const lan = new THREE.CylinderGeometry(1.2, 1.2, 2.4, 12); gput(W.b('neon', x, z), lan, x, 25, z, [1.0, 0.85, 0.5]);
-    const cap = new THREE.ConeGeometry(1.6, 1.6, 12); gput(v, cap, x, 27, z, [0.8, 0.12, 0.1]);
-    col.add(x - 2.6, z - 2.6, x + 2.6, z + 2.6, 30, 'lighthouse');
-   }
-  { const x = 384, z = 352, R = 16, H = R + 3; const v = W.b('vcol', x, z); const n = W.b('neon', x, z);
-    for (const sz of [-1.2, 1.2]) {
-      const rim = new THREE.TorusGeometry(R, 0.22, 6, 64); gput(v, rim, x, H, z + sz, [0.95, 0.95, 0.95]);
-      const rim2 = new THREE.TorusGeometry(R + 0.35, 0.07, 4, 64); gput(n, rim2, x, H, z + sz, [0.9, 0.72, 0.45]); // r6.1 warm bulb ring
-      for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.07, 0.07, R, 4); sp.translate(0, R / 2, 0); sp.rotateZ(a); gput(v, sp, x, H, z + sz, [0.9, 0.9, 0.9]); }
-      for (const dx of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.3, 0.45, Math.hypot(H, R * 0.55), 6); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, Math.hypot(H, R * 0.55) / 2, 0); leg.rotateZ(ang); gput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
-    }
-    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.1; const gx = x + Math.cos(a) * R, gy = H + Math.sin(a) * R;
-      box(v, gx - 0.8, gy - 2.2, z - 0.9, gx + 0.8, gy - 0.6, z + 0.9, {}, pick([[0.95, 0.4, 0.45], [0.25, 0.65, 0.75], [0.98, 0.8, 0.3], [0.95, 0.95, 0.92]])); }
-    box(v, x - 4, 0, z - 3, x + 4, 2.4, z + 3, {}, [0.85, 0.82, 0.76]); col.add(x - R * 0.7, z - 3, x + R * 0.7, z + 3, 6, 'wheel'); }
-}
+// r6.4 a_landmarks: modelled in ./landmarks.js (resident base + streamed close-up detail; same 16 pick() calls as before)
+function landmarks(ctx) { landmarksBase(ctx, pick, ctx.ds); }
