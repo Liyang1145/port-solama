@@ -7,12 +7,15 @@ export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
 export function setCSM(csm, aniso) { CSMREF = csm; ANISO = aniso; }
 
+const NODEDUP = typeof location !== 'undefined' && /[?&]nodedup/.test(location.search); // loadtime A/B switch
 export function prep(mat, key = 'std', patch = null) {
   mat.onBeforeCompile = (s, r) => {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
     if (patch) patch(s);
   };
-  mat.customProgramCacheKey = () => key;
+  // loadtime: without a patch the shader text is the stock one for every key -> one shared program instead of one per name
+  // ('roof', 'bark', 'metal', ... were each a separate, identical compile). Uniforms stay per material.
+  const ck = patch || NODEDUP ? key : 'std'; mat.customProgramCacheKey = () => ck;
   return mat;
 }
 
