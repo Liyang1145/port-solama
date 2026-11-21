@@ -55,7 +55,7 @@ void main(){
   vec3 c = texture2D(tAtlas, vUv + vec2(glitch, 0.0)).rgb;
   float scan = 0.72 + 0.28 * sin(vWP.y * 26.0 - t * 6.0);
   float flick = 0.86 + 0.14 * step(0.08, hh(floor(t * 13.0) + vSeed.y * 7.0));
-  float roll = 0.8 + 0.4 * smoothstep(0.0, 0.08, fract(vWP.y * 0.05 - t * 0.15)) * smoothstep(0.2, 0.08, fract(vWP.y * 0.05 - t * 0.15));
+  float roll = 0.8 + 0.4 * smoothstep(0.0, 0.08, fract(vWP.y * 0.05 - t * 0.15)) * (1.0 - smoothstep(0.08, 0.2, fract(vWP.y * 0.05 - t * 0.15)));
   float k = uNight * scan * flick * roll * (1.4 + vSeed.y);
   gl_FragColor = vec4(c * k * 2.4, 1.0);
 }`;
@@ -106,7 +106,7 @@ export function buildNeon(scene, city) {
     vertexShader: 'varying vec2 vUv; varying float vY; void main(){ vUv = uv; vY = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `uniform sampler2D tAtlas; uniform float uNight, uTime; uniform vec4 uCell; varying vec2 vUv; varying float vY;
       void main(){ vec2 uv = uCell.xy + fract(vUv) * uCell.zw; vec3 c = texture2D(tAtlas, uv).rgb; float scan = 0.7 + 0.3 * sin(vUv.y * 40.0 - uTime * 5.0);
-        float edge = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.92, vUv.y); gl_FragColor = vec4(c * uNight * scan * edge * 2.2 + vec3(0.1, 0.6, 0.8) * uNight * 0.08 * edge, 1.0); }` });
+        float edge = smoothstep(0.0, 0.08, vUv.y) * (1.0 - smoothstep(0.92, 1.0, vUv.y)); gl_FragColor = vec4(c * uNight * scan * edge * 2.2 + vec3(0.1, 0.6, 0.8) * uNight * 0.08 * edge, 1.0); }` });
   out.rings = [];
   for (let i = 0; i < Math.min(14, tall.length); i += 1) { const p = tall[i]; if (i % 2) continue; const m = ringMat.clone(); m.uniforms.uNight = U.uNight; m.uniforms.uTime = U.uTime; m.uniforms.tAtlas = { value: tex };
     const ci = Math.floor(R() * 16); m.uniforms.uCell = { value: new THREE.Vector4((ci % 4) * 0.25, (3 - Math.floor(ci / 4)) * 0.125, 0.25, 0.125) };

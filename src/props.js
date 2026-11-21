@@ -130,8 +130,8 @@ export function buildProps(scene, city, T) {
         gl_Position = projectionMatrix * viewMatrix * wp; }`,
     fragmentShader: `uniform float uNight, uK; varying vec3 vC; varying float vH; varying vec3 vN; varying vec3 vV; varying float vD;
       void main(){ float f = abs(dot(normalize(vN), normalize(vV)));            // 1 at the cone's centre line, 0 at its silhouette
-        float a = pow(f, 2.2) * pow(1.0 - vH, 1.6) * smoothstep(1.0, 0.72, vH) * (0.35 + 0.65 * smoothstep(0.0, 0.08, vH));
-        a *= smoothstep(220.0, 60.0, vD) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
+        float a = pow(f, 2.2) * pow(1.0 - vH, 1.6) * (1.0 - smoothstep(0.72, 1.0, vH)) * (0.35 + 0.65 * smoothstep(0.0, 0.08, vH));
+        a *= (1.0 - smoothstep(60.0, 220.0, vD)) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
         gl_FragColor = vec4(vC * a * uK * smoothstep(0.35, 0.9, uNight), 1.0); }`,
   });
   const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
