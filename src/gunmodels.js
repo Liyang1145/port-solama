@@ -11,8 +11,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 // palette (linear)
 const PARK = [0.07, 0.074, 0.08], BLUED = [0.05, 0.055, 0.068], STEEL = [0.2, 0.205, 0.21], BLACK = [0.03, 0.03, 0.032];
-const POLY = [0.085, 0.085, 0.08], POLYD = [0.05, 0.05, 0.048], WOOD = [0.34, 0.17, 0.07], WOODD = [0.17, 0.08, 0.03];
-const TAN = [0.46, 0.38, 0.25], RUBBER = [0.028, 0.028, 0.028], WORN = [0.62, 0.63, 0.645], ALU = [0.42, 0.43, 0.44];
+const POLY = [0.085, 0.085, 0.08], POLYD = [0.05, 0.05, 0.048], WOOD = [0.24, 0.12, 0.05], WOODD = [0.12, 0.055, 0.022];
+const TAN = [0.46, 0.38, 0.25], RUBBER = [0.028, 0.028, 0.028], WORN = [0.44, 0.45, 0.46], ALU = [0.42, 0.43, 0.44];
 const WHITE = [0.85, 0.85, 0.78], GLASS = [0.04, 0.075, 0.09], RED = [0.9, 0.06, 0.03], BEAD = [0.75, 0.58, 0.28];
 const ASH = [0.6, 0.43, 0.26], TAPE = [0.045, 0.045, 0.05];
 
@@ -89,7 +89,7 @@ const BUILD = {
   pistol(k) {
     const h = k.hi, S = h ? 16 : 8;
     // slide (nitrided steel, rubbed edges), ejection port, barrel hood, serrations
-    k.add(cbox(0.029, 0.033, 0.19, 0.0065, 0.002), PARK, { metal: 1, wear: 0.85, at: [0, 0.068, 0.045] });
+    k.add(cbox(0.029, 0.033, 0.19, 0.0035, 0.0015), PARK, { metal: 1, wear: 0.6, at: [0, 0.068, 0.045] });
     k.add(box(0.0012, 0.012, 0.034), BLACK, { at: [0.0146, 0.0735, 0.066] });
     k.add(cbox(0.012, 0.004, 0.034, 0.0012, 0.0006), STEEL, { metal: 1, wear: 0.9, at: [0.0025, 0.0846, 0.066] });
     if (h) {
@@ -118,7 +118,7 @@ const BUILD = {
   },
   smg(k) {
     const h = k.hi, S = h ? 18 : 10;
-    k.add(cbox(0.046, 0.06, 0.28, 0.009, 0.0025), PARK, { metal: 1, wear: 0.8, at: [0, 0.06, 0.08] }); // receiver
+    k.add(cbox(0.046, 0.06, 0.28, 0.005, 0.002), PARK, { metal: 1, wear: 0.6, at: [0, 0.06, 0.08] }); // receiver
     k.add(box(0.0012, 0.018, 0.05), BLACK, { at: [0.0231, 0.068, 0.1] }); // ejection port
     k.add(cbox(0.012, 0.008, 0.016, 0.002, 0.0008), STEEL, { metal: 1, wear: 0.9, at: [-0.028, 0.072, 0.17] }); // charging handle
     if (h) for (const s of [-1, 1]) k.add(box(0.0012, 0.003, 0.2), BLACK, { at: [s * 0.0231, 0.046, 0.07] }); // side flute
@@ -176,13 +176,13 @@ const BUILD = {
     k.add(lathe(fp, S), WOOD, { wear: 0, jit: 0.12, ops: CYL, at: [0, 0.047, 0.3], fn: (x, y, z) => (Math.hypot(x, z) < 0.0222 ? WOODD : null) });
     // wooden stock with wrist checkering, rubber recoil pad
     k.add(profG([[-0.07, 0.088], [-0.085, 0.08], [-0.15, 0.066], [-0.41, 0.08], [-0.425, 0.075], [-0.432, -0.065], [-0.42, -0.072], [-0.25, -0.03], [-0.15, -0.012], [-0.1, -0.008], [-0.075, 0.01], [-0.066, 0.022]], 0.042, 0.004),
-      WOOD, { wear: 0.35, wc: [0.48, 0.29, 0.14], jit: 0.14, ops: PROF, fn: (x, y) => (Math.sin(x * 260 + y * 40) > 0.6 ? lerp3(WOOD, WOODD, 0.35) : null) });
+      WOOD, { wear: 0.35, wc: [0.36, 0.2, 0.1], jit: 0.14, ops: PROF, fn: (x, y) => (Math.sin(x * 260 + y * 40) > 0.6 ? lerp3(WOOD, WOODD, 0.35) : null) });
     for (const s of [-1, 1]) stip(k, 0.06, 0.03, WOODD, s, [s * 0.0211, 0.035, -0.12], -0.15, 0.005);
     k.add(profG([[-0.425, 0.079], [-0.447, 0.081], [-0.454, -0.068], [-0.432, -0.07]], 0.044, 0.002), RUBBER, { wear: 0.1, ops: PROF });
   },
   rifle(k) {
     const h = k.hi, S = h ? 16 : 8;
-    const ALUW = { wear: 0.75, wc: ALU, jit: 0.08 }; // painted aluminium: edges wear through to bare metal
+    const ALUW = { wear: 0.5, wc: ALU, jit: 0.08 }; // painted aluminium: edges wear through to bare metal
     // upper receiver, ejection port cover, forward assist, charging handle
     k.add(cbox(0.042, 0.046, 0.25, 0.008, 0.002), TAN, { ...ALUW, at: [0, 0.074, 0.035] });
     k.add(box(0.0012, 0.019, 0.05), POLYD, { at: [0.0213, 0.07, 0.02] });
