@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { prep, M } from '../../mats.js';
 import { U } from '../../env.js';
 import { foliagePatch, swayDepth, canvasTex } from '../../veg.js';
+import { woodPatch } from './palms.js';
 import { mulberry, westCoast, beachOff, ISLE, smooth } from './mapgeo.js';
 
 const TAU = Math.PI * 2;
@@ -221,33 +222,40 @@ export function floraExtras(city) {
 // (posts, handrails, a ramp down to the beach) cross the dunes every ~120-190 m. Static, chunked meshes (frustum culled).
 const NAT = (z) => Math.abs(z) > 400 && Math.abs(z) < ISLE.tip - 70;
 const DECO = (z) => Math.abs(z) < 372;
-const bandW = (z) => DECO(z) ? 11 : 16 + 9 * vn(z * 0.01, 3.3);
+// a_palms3: natural ends get a much wider foredune / back-dune complex (34-52 m, was 16-25 m) so it reads from the 190 m aerial
+const natRamp = (z) => { const a = Math.abs(z); return Math.max(0, Math.min(1, (a - 400) / 60, (ISLE.tip - 70 - a) / 80)); };
+const bandW = (z) => DECO(z) ? 11 : 16 + 9 * vn(z * 0.01, 3.3) + (18 + 9 * vn(z * 0.013, 5.9)) * natRamp(z);
+// sea-grape thicket patches on the landward half of the dune band (shared by the apron colour and the shrub placement)
+function sgPatch(x, z) { if (!NAT(z)) return 0; const u = (x - 335 - beachOff(z)) / bandW(z); if (u < 0.02 || u > 0.62) return 0;
+  return smooth(0.6, 0.7, fbm(x * 0.045 + 11.3, z * 0.026 - 4.1)) * smooth(0.62, 0.45, u) * smooth(0.02, 0.08, u) * natRamp(z); }
 let WALKZ = null;
-function walkZs() { if (WALKZ) return WALKZ; const rw = mulberry(7301); WALKZ = []; for (const sg of [1, -1]) for (let a = 470 + rw() * 40; a < ISLE.tip - 130; a += 120 + rw() * 70) WALKZ.push(sg * a); return WALKZ; }
+function walkZs() { if (WALKZ) return WALKZ; const rw = mulberry(7301); WALKZ = []; for (const sg of [1, -1]) for (let a = 470 + rw() * 40; a < ISLE.tip - 130; a += 95 + rw() * 60) WALKZ.push(sg * a); return WALKZ; }
 const walkDip = (z) => { let d = 1; for (const wz of walkZs()) d = Math.min(d, 1 - 0.7 * Math.exp(-(((z - wz) / 5) ** 2))); return d; };
-function ridgeHc(z) { if (!NAT(z)) return 0; const a = Math.abs(z); const ramp = Math.max(0, Math.min(1, (a - 400) / 60, (ISLE.tip - 70 - a) / 80));
-  return ramp * (0.4 + 0.65 * fbm(z * 0.017, 7.7)) * (1 - 0.8 * smooth(0.68, 0.8, vn(z * 0.028, 2.2))) * walkDip(z); }
+function ridgeHc(z) { if (!NAT(z)) return 0; const ramp = natRamp(z);
+  return ramp * (0.5 + 0.75 * fbm(z * 0.017, 7.7)) * (1 - 0.8 * smooth(0.68, 0.8, vn(z * 0.028, 2.2))) * walkDip(z); }
 // dune height above the beach surface (0 outside the natural ends)
 export function duneH(x, z) {
   const hc = ridgeHc(z); if (!hc) return 0; const x0 = 335 + beachOff(z); const b = bandW(z); const u = (x - x0) / b; if (u <= 0 || u >= 1.25) return 0;
   const c = 0.42 + 0.22 * (vn(z * 0.021, 1.1) - 0.5); const d = (u - c) / 0.3;
   let h = Math.exp(-d * d * (d > 0 ? 1.7 : 1.0)) + 0.4 * Math.exp(-(((u - c - 0.42) / 0.16) ** 2)) * vn(z * 0.05, 9.1); // crest + seaward hummocks
-  h *= hc * (1 + 0.3 * (vn(x * 0.22, z * 0.11) - 0.5)); return h * smooth(0, 0.14, u) * smooth(1.25, 1.02, u);
+  h += 0.55 * Math.exp(-(((u - 0.15) / 0.09) ** 2)) * vn(z * 0.033, 4.4) + 0.3 * Math.exp(-(((u - 0.27) / 0.06) ** 2)) * vn(z * 0.06 + 2.0, 6.6); // a_palms3: back-dune swell + secondary hummock row
+  h *= hc * (1 + 0.35 * (vn(x * 0.16, z * 0.09) - 0.5)); return h * smooth(0, 0.07, u) * smooth(1.25, 1.02, u);
 }
 // vegetation cover 0..1 on the dune band (shared by the apron colours and the grass clump placement)
 function duneCover(x, z, h) { const x0 = 335 + beachOff(z); const u = (x - x0) / bandW(z);
-  return smooth(0.42, 0.64, fbm(x * 0.06, z * 0.035) + h * 0.16 + (u < 0.5 ? 0.08 : -0.04)) * smooth(1.2, 0.9, u); }
+  return Math.max(sgPatch(x, z), smooth(0.40, 0.62, fbm(x * 0.06, z * 0.035) + h * 0.16 + (u < 0.55 ? 0.12 : -0.04)) * smooth(1.2, 0.9, u)); }
 function duneApron(city, sg) {
-  const gH = (x, z) => city.groundH(x, z); const chunks = []; const NX = 20, DZ = 2.0;
+  const gH = (x, z) => city.groundH(x, z); const chunks = []; const DZ = 2.0;
   const a0 = 404, a1 = ISLE.tip - 72; const rows = Math.floor((a1 - a0) / DZ);
   for (let c0 = 0; c0 < rows; c0 += 30) {
-    const p = [], col = [], uv = [], idx = []; const nr = Math.min(30, rows - c0);
+    const p = [], col = [], uv = [], idx = []; const nr = Math.min(30, rows - c0); const NX = 20 + Math.round(10 * natRamp(sg * (a0 + (c0 + nr / 2) * DZ)));
     for (let rI = 0; rI <= nr; rI++) { const z = sg * (a0 + (c0 + rI) * DZ); const x0 = 335 + beachOff(z), b = bandW(z);
       for (let i = 0; i <= NX; i++) { const u = 0.02 + 1.2 * i / NX; const x = x0 + u * b; const h = duneH(x, z); const edge = i === 0 || i === NX;
         const y = gH(x, z) + (edge ? -0.14 : 0.035 + h); p.push(x, y, z); uv.push(x, z);
         const cv = duneCover(x, z, h); const dry = smooth(0.55, 0.75, vn(x * 0.045 + 3.0, z * 0.02)); const t = 0.85 + 0.25 * vn(x * 0.3, z * 0.3);
         const veg = [0.50 * t, 0.60 * t, 0.33 * t], straw = [0.90, 0.82, 0.60]; const vc = veg.map((v, j) => v + (straw[j] - v) * dry * 0.7);
-        const bare = 1 - 0.06 * smooth(0.3, 0.9, h); col.push(...vc.map((v) => bare + (v - bare) * cv)); } }
+        const sp = sgPatch(x, z); const vc2 = vc.map((v, j) => v + ([0.30, 0.40, 0.19][j] - v) * sp); // a_palms3: dark sea-grape thicket patches
+        const bare = 1 - 0.06 * smooth(0.3, 0.9, h); col.push(...vc2.map((v) => bare + (v - bare) * cv)); } }
     for (let rI = 0; rI < nr; rI++) for (let i = 0; i < NX; i++) { const a = rI * (NX + 1) + i, b = a + NX + 1; if (sg < 0) idx.push(a, a + 1, b, b, a + 1, b + 1); else idx.push(a, b, a + 1, b, b + 1, a + 1); }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); g.computeBoundingSphere(); chunks.push(g);
@@ -260,7 +268,7 @@ function plankTex() { const r = mulberry(5151); return canvasTex(128, 32, (g) =>
   for (let k = 0; k < 6; k++) { g.fillStyle = 'rgba(60,50,40,0.6)'; g.beginPath(); g.arc(r() * 128, 4 + r() * 20, 0.8, 0, TAU); g.fill(); } // nail heads
   g.fillStyle = '#2b2520'; g.fillRect(0, 27, 128, 5); }); }
 function boardwalks(city) {
-  const G = GA(); const gH = (x, z) => city.groundH(x, z); const WOOD = [0.78, 0.72, 0.64];
+  const G = GA(); const gH = (x, z) => city.groundH(x, z); const WOOD = [0.86, 0.73, 0.60]; // a_palms3: warmer (was 0.78/0.72/0.64), reads as weathered cypress instead of grey-green in backlight
   const quad = (a, b, c, d, n, uvs, col = WOOD) => { const st = G.p.length / 3; for (const q of [a, b, c, d]) { G.p.push(...q); G.n.push(...n); G.c.push(...col); G.s.push(0); }
     G.uv.push(...uvs); G.i.push(st, st + 1, st + 2, st, st + 2, st + 3); };
   // oriented box from p0 to p1 (centre line), width w (horizontal), height h (vertical extent below the line)
@@ -305,7 +313,7 @@ export function buildFloraA(scene, city, ctx) {
   const sgMat = prep(new THREE.MeshStandardMaterial({ map: sgTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.62, vertexColors: true, color: new THREE.Color().setRGB(1.25, 1.25, 1.1) }), 'flSG', (s) => foliagePatch(s, 0.5, 1, 1.5));
   const mgMat = prep(new THREE.MeshStandardMaterial({ map: mgTex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.4, vertexColors: true, color: new THREE.Color().setRGB(1.05, 1.1, 0.95) }), 'flMG', (s) => foliagePatch(s, 0.5, 1, 1.3));
   const sgDepth = swayDepth(sgMat, 1.5, 'flSG'), mgDepth = swayDepth(mgMat, 1.3, 'flMG');
-  const woodMat = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, map: T.bark_d || null }), 'flWood', (s) => foliagePatch(s, 0.0));
+  const woodMat = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, map: T.bark_d || null }), 'flWood', woodPatch);
   const palmettoMat = prep(new THREE.MeshStandardMaterial({ map: fanMat.map, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.6, vertexColors: true, color: new THREE.Color().setRGB(1.2, 1.2, 1.1) }), 'flPalmetto', (s) => foliagePatch(s, 0.35, 1, 1.4));
   const palmettoDepth = swayDepth(palmettoMat, 1.4, 'flPalmetto');
   const hedgeMat = prep(new THREE.MeshStandardMaterial({ map: sgTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.7, vertexColors: true, color: new THREE.Color().setRGB(1.05, 1.15, 0.95) }), 'flHedge', (s) => foliagePatch(s, 0.45, 0.6, 0.6));
@@ -345,13 +353,13 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
   const dist = (zz) => Math.abs(zz) < 372; // Deco district: narrower strip, umbrellas start at x≈354
   const BW = boardwalks(city); const onWalk = (x, z) => BW.spans.some(([wz, xs, xe]) => Math.abs(z - wz) < 1.7 && x > xs - 1 && x < xe + 1);
   for (let z = -ISLE.tip + 60; z < ISLE.tip - 60; z += 1.6) {
-    const x0 = 335 + beachOff(z); const band = dist(z) ? 11 : 16 + 9 * vn(z * 0.01, 3.3); // iter2: wider foredune on the natural ends (read from the air)
+    const x0 = 335 + beachOff(z); const band = bandW(z); // iter2: wider foredune on the natural ends (read from the air)
     if (stairs.some((s) => Math.abs(z - s) < 4.5)) continue; // keep the beach stairs / showers clear
     const nat = NAT(z); // a_palms: natural ends follow the vegetated foredune ridge (denser, patchy, on top of the dune surface)
-    for (let k = 0; k < (nat ? 10 : 6); k++) {
+    for (let k = 0; k < (nat ? 10 + Math.round(12 * natRamp(z)) : 6); k++) {
       const x = x0 + 1.2 + rd() * band * (nat ? 1.12 : 1), zz = z + (rd() - 0.5) * 1.6; const m = fbm(x * 0.09, zz * 0.05); const edge = (x - x0) / band;
       const dh = nat ? duneH(x, zz) : 0;
-      if (nat ? duneCover(x, zz, dh) < 0.25 + rd() * 0.5 : m < 0.30 + edge * 0.30) continue; if (onWalk(x, zz) || !freeAt(city, x, zz, 0.8)) continue;
+      if (nat ? duneCover(x, zz, dh) < 0.25 + rd() * 0.5 : m < 0.30 + edge * 0.30) continue; if (onWalk(x, zz) || sgPatch(x, zz) > 0.55 || !freeAt(city, x, zz, 0.8)) continue;
       const y = gH(x, zz) + dh; const rot = rd() * TAU; const s = 0.75 + rd() * 0.55;
       if (rd() < (nat ? 0.55 + 0.3 * smooth(0.2, 1.0, dh) : 0.62)) oatI[rd() < 0.5 ? 0 : 1].push({ x, z: zz, m: mat4(x, y - 0.04, zz, rot, s, s * (0.8 + m * 0.5), s) });
       else lowI.push({ x, z: zz, m: mat4(x, y - 0.03, zz, rot, s * 1.3, s, s * 1.3) });
@@ -368,7 +376,7 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
     });
     for (const sg of [1, -1]) for (const g of duneApron(city, sg)) { const me = new THREE.Mesh(g, duneMat); me.receiveShadow = true; me.castShadow = true; me.userData.flora = 'duneApron'; scene.add(me); out.push(me); stats.duneApron = (stats.duneApron || 0) + g.index.count / 3; }
     if (BW.geo) { // program reuse: front-sided + instanced (1 identity instance) + 'flWood' key = same program as the hammock wood; both faces are baked into the geometry instead of DoubleSide
-      const bwMat = prep(new THREE.MeshStandardMaterial({ map: plankTex(), vertexColors: true, roughness: 0.85 }), 'flWood', (s) => foliagePatch(s, 0.0));
+      const bwMat = prep(new THREE.MeshStandardMaterial({ map: plankTex(), vertexColors: true, roughness: 0.85 }), 'flWood', woodPatch);
       const me = new THREE.InstancedMesh(twoSided(BW.geo), bwMat, 1); me.setMatrixAt(0, new THREE.Matrix4()); me.frustumCulled = false; me.castShadow = true; me.receiveShadow = true; me.userData.flora = 'boardwalk'; scene.add(me); out.push(me); stats.boardwalk = BW.spans.length; stats.boardwalkTris = BW.geo.index.count / 3; }
   }
   // ---------- 2. island ends: coastal hammock understory, bay-edge sea grape (north) / mangroves + marsh (south) ----
@@ -411,6 +419,13 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
   for (const [cz, n, xr] of [[-1150, 26, [520, 600]], [1150, 26, [520, 600]], [-374, 22, [540, 585]], [820, 14, [515, 560]]]) {
     for (let k = 0; k < n; k++) { const x = xr[0] + rh() * (xr[1] - xr[0]) + beachOff(cz), z = cz + (rh() - 0.5) * 120; const s = 0.8 + rh() * 1.8;
       rockI[rh() < 0.5 ? 0 : 1].push({ x, z, m: mat4(x, -1.35 + rh() * 0.35, z, rh() * TAU, s * 1.3, s * 0.7, s, (rh() - 0.5) * 0.3, 0) }); } }
+  { // a_palms3: sea-grape thickets on the landward dune half (same sea-grape fields: near 90 m, far leaves to 1200 m)
+    const rs = mulberry(7203);
+    for (let z = -ISLE.tip + 70; z < ISLE.tip - 70; z += 2.6) { if (!NAT(z)) continue; const x0 = 335 + beachOff(z), b = bandW(z);
+      for (let k = 0; k < 6; k++) { const x = x0 + b * (0.03 + rs() * 0.6), zz = z + (rs() - 0.5) * 2.6; const sp = sgPatch(x, zz);
+        if (sp < 0.35 + rs() * 0.4 || onWalk(x, zz) || !freeAt(city, x, zz, 1.5)) continue; const s = 0.8 + rs() * 0.55 + sp * 0.3;
+        sgI[rs() < 0.5 ? 0 : 1].push({ x, z: zz, m: mat4(x, gH(x, zz) + duneH(x, zz) - 0.1, zz, rs() * TAU, s, s * (0.7 + rs() * 0.4), s) }); } }
+  }
   // ---------- 3. promenade hedges (clipped sea grape / clusia), Deco district ----------------------------------------
   const hedgeG = (() => { const G = GA(); const r = mulberry(91); // 4 m long clipped hedge segment: box-ish card shell
     for (let k = 0; k < 120; k++) { const side = Math.floor(r() * 5); let x = (r() - 0.5) * 4, y = 0.15 + r() * 0.85, z = (r() - 0.5) * 0.9, n = [0, 1, 0];

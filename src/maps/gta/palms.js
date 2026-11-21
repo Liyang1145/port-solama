@@ -82,24 +82,32 @@ function atlas(liveTex, deadCanvas, w, h) {
   const lc = liveTex.userData.canvas; const t = canvasTex(w * 2, h, (g) => { g.clearRect(0, 0, w * 2, h); g.drawImage(lc, 0, 0, w, h); g.drawImage(deadCanvas, w, 0, w, h); });
   t.wrapS = THREE.ClampToEdgeWrapping; liveTex.dispose(); return t;
 }
+// a_palms3: shared patch for every 'flWood' material (hammock wood, crossover boardwalks, tree pits) -> still one program.
+// foliagePatch(s, 0) already zeroes leaf transmission; its sky-fill emissive is blue-green (0.05/0.065/0.075), which turned weathered
+// wood and the pit grates green on the shadowed side when backlit -> neutral-warm fill, slightly weaker.
+export const woodPatch = (s) => { foliagePatch(s, 0.0);
+  s.fragmentShader = s.fragmentShader.replace('diffuseColor.rgb * vec3(0.05, 0.065, 0.075)', 'diffuseColor.rgb * vec3(0.052, 0.047, 0.042)'); };
 // tree-pit atlas: [0,0.5]x[0,1] cast-iron grate, [0.5,1]x[0.5,1] mulch, [0.5,1]x[0,0.5] concrete curb
 function pitTex() {
   const r = mulberry(77);
   return canvasTex(512, 256, (g) => {
-    g.fillStyle = '#2a2622'; g.fillRect(0, 0, 256, 256); // mulch showing through the grate
-    for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(${60 + r() * 40},${44 + r() * 26},${28 + r() * 14},0.8)`; g.fillRect(r() * 256, r() * 256, 2 + r() * 4, 1 + r() * 2); }
-    g.strokeStyle = '#3b3e40'; g.lineCap = 'butt'; // concentric slotted rings (cast iron)
+    g.fillStyle = '#17130f'; g.fillRect(0, 0, 256, 256); // a_palms3: dark river pebbles showing through the grate (was brown mulch, read like the sidewalk)
+    for (let i = 0; i < 1400; i++) { const v = r() * 34; g.fillStyle = `rgb(${38 + v},${36 + v},${34 + v})`; g.beginPath(); g.ellipse(r() * 256, r() * 256, 1.5 + r() * 2.5, 1 + r() * 1.8, r() * TAU, 0, TAU); g.fill(); }
+    g.strokeStyle = '#1f2123'; g.lineCap = 'butt'; // concentric slotted rings (cast iron)
     for (let k = 0; k < 6; k++) { const rad = 30 + k * 17; g.lineWidth = 8; const n = 10 + k * 5;
       for (let s = 0; s < n; s++) { const a0 = s / n * TAU + 0.04, a1 = (s + 1) / n * TAU - 0.04; g.beginPath(); g.arc(128, 128, rad, a0, a1); g.stroke(); } }
-    g.fillStyle = '#3b3e40'; for (let s = 0; s < 8; s++) { g.save(); g.translate(128, 128); g.rotate(s / 8 * TAU); g.fillRect(24, -4, 104, 8); g.restore(); } // spokes
+    g.fillStyle = '#1f2123'; for (let s = 0; s < 8; s++) { g.save(); g.translate(128, 128); g.rotate(s / 8 * TAU); g.fillRect(24, -4, 104, 8); g.restore(); } // spokes
     g.fillRect(0, 0, 256, 12); g.fillRect(0, 244, 256, 12); g.fillRect(0, 0, 12, 256); g.fillRect(244, 0, 12, 256); // frame
-    for (let x = 0; x < 256; x += 64) for (let y = 0; y < 256; y += 64) { if (Math.hypot(x + 32 - 128, y + 32 - 128) < 120) continue; g.fillRect(x + 6, y + 6, 52, 52); g.fillStyle = '#2a2622'; for (let q = 0; q < 4; q++) g.fillRect(x + 12 + q * 12, y + 12, 6, 40); g.fillStyle = '#3b3e40'; }
-    for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(${120 + r() * 50},${80 + r() * 30},${50 + r() * 20},0.22)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 3, 1 + r() * 3); } // rust bloom
-    g.fillStyle = '#4a3624'; g.fillRect(256, 0, 256, 128); // mulch bed
-    for (let i = 0; i < 2600; i++) { const v = r(); g.fillStyle = v < 0.5 ? `rgb(${92 + r() * 50},${60 + r() * 30},${36 + r() * 16})` : v < 0.8 ? `rgb(${60 + r() * 20},${42 + r() * 16},${28})` : `rgb(${150 + r() * 40},${120 + r() * 30},${84})`;
+    for (let x = 0; x < 256; x += 64) for (let y = 0; y < 256; y += 64) { if (Math.hypot(x + 32 - 128, y + 32 - 128) < 120) continue; g.fillRect(x + 6, y + 6, 52, 52); g.fillStyle = '#121010'; for (let q = 0; q < 4; q++) g.fillRect(x + 12 + q * 12, y + 12, 6, 40); g.fillStyle = '#1f2123'; }
+    for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(${96 + r() * 40},${56 + r() * 24},${34 + r() * 14},0.18)`; g.fillRect(r() * 256, r() * 256, 1 + r() * 3, 1 + r() * 3); } // rust bloom
+    g.fillStyle = '#241a12'; g.fillRect(256, 0, 256, 128); // a_palms3: dark (dyed) hardwood mulch bed, was light #4a3624
+    for (let i = 0; i < 2600; i++) { const v = r(); g.fillStyle = v < 0.55 ? `rgb(${50 + r() * 30},${33 + r() * 18},${22 + r() * 10})` : v < 0.88 ? `rgb(${30 + r() * 14},${22 + r() * 10},${16})` : `rgb(${96 + r() * 30},${70 + r() * 20},${46})`;
       g.save(); g.translate(256 + r() * 256, r() * 128); g.rotate(r() * TAU); g.fillRect(-3, -1, 4 + r() * 6, 1.5 + r() * 2); g.restore(); }
-    g.fillStyle = '#b8b2a6'; g.fillRect(256, 128, 256, 128); // curb concrete
-    for (let i = 0; i < 2000; i++) { const v = (r() - 0.5) * 40; g.fillStyle = `rgba(${170 + v},${166 + v},${156 + v},0.5)`; g.fillRect(256 + r() * 256, 128 + r() * 128, 1 + r() * 2, 1 + r() * 2); }
+    { const pb = (x0, y0, w, h, n) => { for (let i = 0; i < n; i++) { const v = r() * 60; g.fillStyle = `rgb(${70 + v},${66 + v},${60 + v})`; g.beginPath(); g.ellipse(x0 + r() * w, y0 + r() * h, 2 + r() * 3, 1.5 + r() * 2, r() * TAU, 0, TAU); g.fill(); } };
+      pb(256, 0, 256, 16, 260); pb(256, 112, 256, 16, 260); pb(256, 0, 16, 128, 130); pb(496, 0, 16, 128, 130); } // river-pebble border inside the curb
+    g.fillStyle = '#4e4c49'; g.fillRect(256, 128, 256, 128); // a_palms3: charcoal granite curb (was pale concrete = same as the sidewalk)
+    for (let i = 0; i < 2600; i++) { const v = (r() - 0.5) * 50; g.fillStyle = `rgba(${84 + v},${82 + v},${78 + v},0.6)`; g.fillRect(256 + r() * 256, 128 + r() * 128, 1 + r() * 2, 1 + r() * 2); }
+    for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(${200 + r() * 40},${196 + r() * 40},${190 + r() * 40},0.5)`; g.fillRect(256 + r() * 256, 128 + r() * 128, 1, 1); } // feldspar glints
   });
 }
 
@@ -168,7 +176,7 @@ export function palmGeometryA(v, lvl) {
 }
 // tree pit: kind 0 = cast-iron grate flush with the sidewalk, kind 1 = mulch bed in a low concrete curb
 function pitGeometry(kind) {
-  const parts = []; const S = kind ? 1.9 : 1.7; const ch = kind ? 0.16 : 0.035, cw = 0.13;
+  const parts = []; const S = kind ? 2.2 : 2.0; const ch = kind ? 0.16 : 0.035, cw = kind ? 0.14 : 0.16; // a_palms3: larger, granite-framed
   const box = (w, h, d, x, y, z, u0, v0, u1, v1) => { const g = new THREE.BoxGeometry(w, h, d); const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * (u1 - u0), v0 + uv.getY(i) * (v1 - v0)); g.translate(x, y, z); parts.push(g); };
   const hs = S / 2;
   box(S, ch, cw, 0, ch / 2, hs - cw / 2, 0.52, 0.02, 0.98, 0.46); box(S, ch, cw, 0, ch / 2, -hs + cw / 2, 0.52, 0.02, 0.98, 0.46);
@@ -187,7 +195,7 @@ export function buildPalmsA(scene, city, list, ctx) {
   const trunkMats = {}; for (const b of ['coco', 'royal', 'sabal', 'sabalS']) { const t = barkTexA(b); trunkMats[b] = prep(new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, normalScale: new THREE.Vector2(1.3, 1.3), roughness: 0.9, color: 0xffffff }), 'ptrunk', (s) => foliagePatch(s, 0.0)); }
   const crownMat = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, color: 0xffffff }), 'pcrownA', (s) => foliagePatch(s, 0.0));
   // shader-program reuse (01:42 rule): same params + key as flora.js woodMat ('flWood': map + vertex colour + instancing, foliagePatch 0) -> no new program
-  const pitMat = prep(new THREE.MeshStandardMaterial({ map: pitTex(), vertexColors: true, roughness: 0.88, color: 0xffffff }), 'flWood', (s) => foliagePatch(s, 0.0));
+  const pitMat = prep(new THREE.MeshStandardMaterial({ map: pitTex(), vertexColors: true, roughness: 0.88, color: 0xffffff }), 'flWood', woodPatch);
   const fDepth = ctx.depthFor(frondMat), nDepth = ctx.depthFor(fanMat);
   const groups = VARIANTS_A.map(() => []); for (const p of list) groups[p.vi].push(p);
   const sets = []; const ims = []; const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
