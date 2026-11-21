@@ -3,7 +3,7 @@
 // Everything is original artwork drawn on canvas (Chinese/English invented street names, generic sign shapes).
 import * as THREE from 'three';
 import { GeoBucket } from './geo.js';
-import { M, prep } from './mats.js';
+import { M, prep, SHOPK } from './mats.js';
 import { U } from './env.js';
 import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
@@ -302,13 +302,18 @@ export function buildShopSigns(scene, city) {
   });
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
   const b = new GeoBucket(); const r = mulberry(5150); let k = 0;
+  // a_interior: what sells behind each sign -> shop-kind grid read by the storefront interior shader (map A only).
+  // kind: 0 market / pharmacy / phone repair, 1 café / bakery / ice cream, 2 boutique, 3 office / salon / lobby, 4 diner / bar, 5 laundromat
+  const KIND = [[1, 0], [2, 0], [5, 0], [0, 1], [0, 0], [3, 0], [4, 0], [2, 0], [4, 1], [2, 0], [2, 0], [2, 0], [0, 0], [2, 0], [1, 0], [1, 0],
+    [0, 0], [1, 0], [0, 0], [0, 2], [4, 0], [3, 0], [3, 0], [3, 0], [1, 0], [2, 0], [3, 0], [3, 0], [3, 0], [3, 0], [4, 1], [4, 0]];
+  const kreg = [];
   for (const a of city.awnings) {
     const len = a.z1 - a.z0; if (len < 4) continue;
     const sx = Math.sign(a.out) || 1; const xf = a.x0 + a.out + sx * 0.03; // front valance of the awning
     const nShops = len > 16 ? 3 : len > 8 ? 2 : 1;
     for (let j = 0; j < nShops; j++) {
       const cell = Math.floor(r() * 32); const cx = cell % 4, cy = Math.floor(cell / 4);
-      const zc = a.z0 + len * (j + 0.5) / nShops; const w = Math.min(len / nShops * 0.8, 4.2), h = Math.min(0.62, w * 0.3);
+      const zc = a.z0 + len * (j + 0.5) / nShops; kreg.push([a.x0, a.z0 + len * j / nShops - (j === 0 ? 1 : 0), a.z0 + len * (j + 1) / nShops + (j === nShops - 1 ? 1 : 0), KIND[cell]]); const w = Math.min(len / nShops * 0.8, 4.2), h = Math.min(0.62, w * 0.3);
       const geo = new THREE.PlaneGeometry(w, h); const uv = geo.attributes.uv;
       for (let i = 0; i < 4; i++) uv.setXY(i, (cx + uv.getX(i)) / 4, 1 - (cy + 1 - uv.getY(i)) / 8);
       const m = new THREE.Matrix4().compose(new THREE.Vector3(xf, a.y - 0.2 - h / 2 + 0.05, zc), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), sx > 0 ? Math.PI / 2 : -Math.PI / 2), new THREE.Vector3(1, 1, 1));
@@ -328,6 +333,15 @@ export function buildShopSigns(scene, city) {
   }
   const mat = prep(new THREE.MeshStandardMaterial({ map: t, emissiveMap: t, emissive: 0xffffff, emissiveIntensity: 0.0, roughness: 0.55, metalness: 0.0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 }), 'shopsign');
   if (k) { const mesh = new THREE.Mesh(b.build(), mat); mesh.receiveShadow = true; scene.add(mesh); }
+  if (!CYBER && kreg.length) { // 1.5 m cells over the signed shop rows; the shader samples the cell under each 2-bay unit's centre
+    let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const [x, za, zb] of kreg) { x0 = Math.min(x0, x - 3); x1 = Math.max(x1, x + 3); z0 = Math.min(z0, za); z1 = Math.max(z1, zb); }
+    const ext = Math.max(x1 - x0, z1 - z0, 1); const cell = Math.max(1.5, ext / 1000); const N = Math.ceil(ext / cell) + 2; const d = new Uint8Array(N * N * 4);
+    for (const [x, za, zb, kk] of kreg) for (let zz = za; zz <= zb; zz += cell * 0.5) for (let xx = x - 3; xx <= x + 3; xx += cell * 0.5) {
+      const i = Math.floor((xx - x0) / cell), j = Math.floor((zz - z0) / cell); if (i < 0 || j < 0 || i >= N || j >= N) continue; const o = (j * N + i) * 4; d[o] = kk[0] + 1; d[o + 1] = kk[1] + 1; d[o + 3] = 255; }
+    const tex = new THREE.DataTexture(d, N, N); tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+    SHOPK.tex.value = tex; SHOPK.box.value.set(x0, z0, 1 / (cell * N), 0);
+    city.shopKinds = kreg; // (debug / shot plans: [x0, z0, z1, [kind, variant]])
+  }
   // night light spill from shop windows + coloured neon onto the sidewalk (additive ground decals)
   const pg = new GeoBucket();
   for (const a of city.awnings) {
