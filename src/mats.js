@@ -687,7 +687,7 @@ float bkRut(float bu, float z) {
   float tread = step(0.5, fract(z * 3.2 + (dd > 0.0 ? 0.0 : 0.5) + rr * 3.0));
   return -bks(0.17, 0.1, rr) * (0.75 + 0.25 * tread) + bks(0.24, 0.17, rr) * bks(0.1, 0.17, rr) * 0.25; }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
-float vSandY = vSandW.y; float wetS = bks(-0.62, -0.93, vSandY);
+float vSandY = vSandW.y; float wetS = bks(-0.6, -0.9, vSandY);
 float bkZ = vSandW.z, bkAZ = abs(bkZ);
 float bkOff = bks(380.0, 540.0, bkAZ) * (18.0 * sin(bkZ * 0.0047) + 10.0 * sin(bkZ * 0.013 + 1.3) - 6.0);
 float bu = vSandW.x - 335.0 - bkOff; float onB = step(0.0, bu) * step(bkAZ, 1440.0);
@@ -696,7 +696,7 @@ if (onB > 0.5) {
   float dn = vnoise(vSandW.xz * 0.03) * 0.6 + vnoise(vSandW.xz * 0.13) * 0.4; diffuseColor.rgb *= mix(0.95, 1.04, dn);
   // damp high-tide line (sharp landward edge) + wrack strip just above it
   float wl = -0.6 + (vnoise(vec2(bkZ * 0.07, 3.0)) - 0.5) * 0.1 + (vnoise(vec2(bkZ * 0.6, 9.0)) - 0.5) * 0.025;
-  float damp = bks(wl + 0.012, wl - 0.012, vSandY); diffuseColor.rgb *= mix(vec3(1.0), vec3(0.7, 0.68, 0.65), damp);
+  float damp = bks(wl + 0.012, wl - 0.012, vSandY); diffuseColor.rgb *= mix(vec3(1.0), vec3(0.6, 0.57, 0.52), damp); // a_sandfix: 0.7 -> 0.6 (damp band read flat after ACES)
   float band = bks(0.045, 0.0, abs(vSandY - wl - 0.035));
   float weed = band * bks(0.42, 0.72, vnoise(vSandW.xz * vec2(1.4, 0.35)) * 0.7 + vnoise(vSandW.xz * 6.0) * 0.3);
   diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.17, 0.12, 0.05), vec3(0.32, 0.24, 0.09), vnoise(vSandW.xz * 9.0)), weed * 0.85);
@@ -712,20 +712,20 @@ if (onB > 0.5) {
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.84, 0.8), clamp(sw, 0.0, 1.0) * 0.5 * bks(0.4, 0.1, bkPW));
   bkGloss += bks(-0.88, -0.97, vSandY);
   // tyre ruts (firm sand) + footprints, as albedo and as a normal tilt
-  float ruF = bks(0.5, 0.15, bkPW) * (1.0 - bks(1380.0, 1420.0, bkAZ));
+  float ruF = bks(0.7, 0.2, bkPW) * (1.0 - bks(1380.0, 1420.0, bkAZ));
   if (ruF > 0.0) { float r0 = bkRut(bu, bkZ), rx = bkRut(bu + 0.03, bkZ), rz = bkRut(bu, bkZ + 0.03);
-    diffuseColor.rgb *= 1.0 + r0 * 0.13 * ruF; bkN.xz += vec2(rx - r0, rz - r0) / 0.03 * 0.035 * ruF; }
-  float fpF = bks(0.09, 0.035, bkPW) * (1.0 - bks(-0.8, -0.93, vSandY));
+    diffuseColor.rgb *= 1.0 + r0 * 0.3 * ruF; bkN.xz += vec2(rx - r0, rz - r0) / 0.03 * 0.05 * ruF; } // a_sandfix: albedo 0.13 -> 0.3, tilt 0.035 -> 0.05
+  float fpF = bks(0.12, 0.045, bkPW) * (1.0 - bks(-0.8, -0.93, vSandY));
   if (fpF > 0.0) { float trail = bks(0.5, 0.85, vnoise(vec2(bkZ * 0.06, bu * 0.012) + 4.0));
     float dens = (0.05 + 0.3 * trail + 0.12 * bks(0.1, 0.0, abs(bu - 57.0) / 20.0)) * bks(1.0, 4.0, bu);
     float f0 = bkFoot(vSandW.xz, dens), fx = bkFoot(vSandW.xz + vec2(0.02, 0.0), dens), fz = bkFoot(vSandW.xz + vec2(0.0, 0.02), dens);
-    float wetF = damp; diffuseColor.rgb *= 1.0 + f0 * (0.1 + 0.12 * wetF) * fpF;
-    bkN.xz += vec2(fx - f0, fz - f0) / 0.02 * (0.02 + 0.015 * wetF) * fpF; }
+    float wetF = damp; diffuseColor.rgb *= 1.0 + f0 * (0.22 + 0.16 * wetF) * fpF; // a_sandfix: 0.1+0.12 -> 0.22+0.16
+    bkN.xz += vec2(fx - f0, fz - f0) / 0.02 * (0.03 + 0.02 * wetF) * fpF; }
 }
-diffuseColor.rgb *= mix(1.0, onB > 0.5 ? 0.62 : 0.55, wetS);`)
+diffuseColor.rgb *= mix(1.0, onB > 0.5 ? 0.5 : 0.55, wetS); // a_sandfix: beach wet sand 0.62 -> 0.5`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 if (onB > 0.5) normal = normalize(normal + (viewMatrix * vec4(-bkN.x, 0.0, -bkN.z, 0.0)).xyz);`)
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, onB > 0.5 ? 0.5 : 0.3, wetS); roughnessFactor = mix(roughnessFactor, 0.14, clamp(bkGloss, 0.0, 1.0));');
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, onB > 0.5 ? 0.4 : 0.3, wetS); roughnessFactor = mix(roughnessFactor, 0.14, clamp(bkGloss, 0.0, 1.0));');
   });
   }
   const grass = texSet(T, 'grass', 1); for (const t of [grass.map, grass.normalMap, grass.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
