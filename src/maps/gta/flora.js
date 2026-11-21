@@ -364,7 +364,7 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
       s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vDW;\nfloat dh2(vec2 p){ p = fract(p * vec2(0.1031, 0.1030)); p += dot(p, p.yx + 33.33); return fract((p.x + p.y) * p.x); }')
         .replace('#include <color_fragment>', `{ vec2 cI = floor(vDW * 3.0); float n = dh2(cI) * 0.5 + dh2(floor(vDW * 0.9)) * 0.5; // clumpy cover: tint breaks into tufts up close
   float fw = length(fwidth(vDW)); float k = mix(clamp(0.35 + n * 1.1, 0.0, 1.0), 1.0, smoothstep(0.15, 0.8, fw));
-  diffuseColor.rgb *= mix(vec3(1.0), vColor, k); }`);
+  diffuseColor.rgb *= mix(vec3(1.0), vColor.rgb, k); }`);
     });
     for (const sg of [1, -1]) for (const g of duneApron(city, sg)) { const me = new THREE.Mesh(g, duneMat); me.receiveShadow = true; me.castShadow = true; me.userData.flora = 'duneApron'; scene.add(me); out.push(me); stats.duneApron = (stats.duneApron || 0) + g.index.count / 3; }
     if (BW.geo) { // program reuse: front-sided + instanced (1 identity instance) + 'flWood' key = same program as the hammock wood; both faces are baked into the geometry instead of DoubleSide
