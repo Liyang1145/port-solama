@@ -12,7 +12,7 @@ import { box, polyCap, prismWalls, rect } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL, RUST } from './kit.js';
 import { grime, sidewalk, hangingSign, laundryLine, streak } from './dress.js';
-import { crownKind, plantDeck, crownScreen, roofBillboard, mastExtras, ladder, railRect, RED, STROBE } from './crown.js';
+import { crownKind, topEst, HELI_MIN, plantDeck, crownScreen, roofBillboard, mastExtras, ladder, railRect, RED, STROBE } from './crown.js';
 
 // --------------------------------------------------------------- shop street ----
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
@@ -106,7 +106,7 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
   // rooftop billboard / mast ladders + platforms + guy wires / aviation lights — see crown.js)
   const T = tiers[tiers.length - 1]; const H = T.y1; const v = W.b('vcol', cx, cz), nb = W.b('neon', cx, cz);
   const crown = rng(); let ck = ctx.pseed != null ? crownKind(ctx.pseed) : crown < 0.4 ? 'heli' : crown < 0.68 ? 'mast' : 'spire';
-  if (ck === 'heli' && !(tx > 9 && tz > 9)) ck = 'mast';
+  if (ck === 'heli' && !(ctx.pseed != null ? topEst(pw, pd, tall)[2] > HELI_MIN && tx > HELI_MIN && tz > HELI_MIN : tx > 9 && tz > 9)) ck = 'mast';
   let bmuOk = true;
   if (ck === 'heli') helipad(W, cx, H, cz, Math.min(tx, tz) - 0.5, v, nb, rooftop, ctx, T);
   else if (ck === 'mast') { plantDeck(W, T.X0, T.Z0, T.X1, T.Z1, H, [[cx - 3.2, cz - 3.2, cx + 3.2, cz + 3.2]]); const mh = rand(28, 52); mast(v, nb, cx, H, cz, mh); mastExtras(W, cx, H + 3, cz, mh, 1.8, 0.3, T, H); }

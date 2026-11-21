@@ -23,6 +23,11 @@ export function crownKind(seed) {
   return h < 0.32 ? 'heli' : h < 0.56 ? 'mast' : h < 0.75 ? 'bill' : h < 0.88 ? 'screen' : 'spire';
 }
 
+// approximate top-tier half extents of the megatower built on a parcel (pw = p.d along the facing, pd = p.w; 3–5 m setbacks)
+// -> [tx, tz, worst-case min]; the near tower and the far impostor both gate the helipad on the worst case so they agree
+export function topEst(d, w, tall) { const nT = tall > 150 ? 4 : 3; const a = Math.min(d - 7, 46) / 2, b = Math.min(w - 7, 46) / 2; return [a - (nT - 1) * 4, b - (nT - 1) * 4, Math.min(a, b) - (nT - 1) * 5]; }
+export const HELI_MIN = 6.5;
+
 // ------------------------------------------------------------------ small kit ----
 // vertical ladder at (x, z) from y0 to y1, rungs along (sx, sz); cage hoops above 2.4 m when cage
 export function ladder(d, x, z, y0, y1, sx, sz, cage = false, ox = 0, oz = 0) {
@@ -208,9 +213,9 @@ export function farCrown(W, P, p, top, sx, sz) {
   const kind = crownKind(p.seed); const v = W.b('vcol', p.x, p.z), nb = W.b('neon', p.x, p.z);
   const ob = (b, a0, b0, a1, b1, y0, y1, col) => { const q = [P(a0, b1), P(a1, b1), P(a1, b0), P(a0, b0)]; prismWalls(b, q, y0, y1, null, col); polyCap(b, q, y1, {}, col); };
   const lt = (a, b, y, s, col) => ob(nb, a - s, b - s, a + s, b + s, y - s, y + s, col);
-  const m = Math.min(sx, sz); const k = (p.seed >>> 4) % 97 / 97;
+  const m = Math.min(sx, sz); const k = (p.seed >>> 4) % 97 / 97; const [ex, ez, emin] = topEst(p.d, p.w, p.h);
   for (const [a, b] of [[-sx, -sz], [sx, -sz], [sx, sz], [-sx, sz]]) lt(a * 0.95, b * 0.95, top + 1.2, 0.55, RED);
-  if (kind === 'heli' && m > 9) { const r = Math.min(m - 0.5, 11); const y = top + 3.2; const oct = []; for (let i = 0; i < 8; i++) { const t = (i + 0.5) / 8 * Math.PI * 2; oct.push(P(Math.cos(t) * r, -Math.sin(t) * r)); }
+  if (kind === 'heli' && emin > HELI_MIN) { const r = Math.min(Math.min(ex, ez) - 0.5, 11, m); const y = top + 3.2; const oct = []; for (let i = 0; i < 8; i++) { const t = (i + 0.5) / 8 * Math.PI * 2; oct.push(P(Math.cos(t) * r, -Math.sin(t) * r)); }
     prismWalls(v, oct, y - 0.5, y, null, [0.3, 0.31, 0.32]); polyCap(v, oct, y, {}, [0.22, 0.23, 0.24]);
     for (let i = 0; i < 8; i++) { const t = (i + 0.5) / 8 * Math.PI * 2; lt(Math.cos(t) * r, -Math.sin(t) * r, y + 0.2, 0.45, [0.2, 1.0, 0.35]); }
     const hs = r * 0.3, mc = [0.92, 0.9, 0.82]; ob(v, -hs, -hs * 0.8, -hs + 0.9, hs * 0.8, y, y + 0.06, mc); ob(v, hs - 0.9, -hs * 0.8, hs, hs * 0.8, y, y + 0.06, mc); ob(v, -hs, -0.45, hs, 0.45, y, y + 0.06, mc);
@@ -218,7 +223,7 @@ export function farCrown(W, P, p, top, sx, sz) {
   else if (kind === 'mast' || kind === 'heli') { const mh = 28 + k * 24; ob(v, -2.6, -2.6, 2.6, 2.6, top, top + 3, [0.3, 0.31, 0.33]);
     ob(v, -0.9, -0.9, 0.9, 0.9, top + 3, top + 3 + mh * 0.5, [0.55, 0.57, 0.6]); ob(v, -0.45, -0.45, 0.45, 0.45, top + 3 + mh * 0.5, top + 3 + mh + 10, [0.6, 0.62, 0.64]);
     lt(0, 0, top + 3 + mh * 0.5, 0.6, RED); lt(0, 0, top + 3 + mh + 10.3, 0.75, STROBE); }
-  else if (kind === 'bill') { const bw = Math.min(2 * sz - 2, 34), ph = Math.min(12, Math.max(7, bw * 0.38)); const xf = sx - 1.2, yb = top + 4; const col = NEONC[p.seed % NEONC.length];
+  else if (kind === 'bill') { const bw = Math.min(2 * Math.min(ez, sz) - 2, 34), ph = Math.min(12, Math.max(7, bw * 0.38)); const xf = Math.min(ex, sx) - 1.2, yb = top + 4; const col = NEONC[p.seed % NEONC.length];
     ob(v, xf - 4, -bw / 2, xf - 0.4, bw / 2, top, yb, [0.2, 0.21, 0.23]); ob(v, xf - 0.4, -bw / 2 - 0.3, xf, bw / 2 + 0.3, yb, yb + ph, [0.07, 0.07, 0.08]);
     ob(nb, xf, -bw / 2, xf + 0.05, bw / 2, yb + 0.3, yb + ph - 0.3, col.map((q) => q * 0.45 + 0.04)); ob(nb, xf + 0.05, -bw / 2 + 1, xf + 0.08, -bw / 2 + bw * 0.38, yb + ph * 0.25, yb + ph * 0.75, col);
     ob(nb, xf + 0.05, -bw / 2 + bw * 0.45, xf + 0.08, bw / 2 - 1.5, yb + ph * 0.62, yb + ph * 0.72, [0.95, 0.95, 0.9]); }
