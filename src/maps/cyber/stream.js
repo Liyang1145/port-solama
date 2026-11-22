@@ -11,6 +11,7 @@ import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies } from './city.js';
 import { CLUT_CTX } from './clutcap.js'; // b_clutter
+import { PY_OFF, yardContainers } from './portyard.js'; // r6.4 b_portyard
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
@@ -75,6 +76,7 @@ function port(ctx, p) {
     for (let z = -hz + 6; z < hz - 4; z += 10) box(v, hx + 0.02, 0.05, z - 2, hx + 0.08, 4.8, z + 2, {}, [0.75, 0.34, 0.18]);
     return;
   }
+  if (!PY_OFF) { yardContainers(v, p); return; } // r6.4 b_portyard: same draws, detailed boxes (portyard.js)
   const CC = [[0.62, 0.16, 0.12], [0.12, 0.32, 0.55], [0.85, 0.55, 0.12], [0.2, 0.45, 0.3], [0.55, 0.55, 0.55], [0.75, 0.75, 0.72], [0.45, 0.2, 0.35]];
   for (let x = -hx + 2; x < hx - 2.4; x += 3) for (let z = -hz + 1; z < hz - 12; z += 13.2) { const n = randi(1, 4); for (let k = 0; k < n; k++) { const c = pick(CC); box(v, x, 0.05 + k * 2.6, z, x + 2.44, 0.05 + (k + 1) * 2.6, z + 12.2, {}, c, false);
     for (let r = 1; r < 12; r++) box(v, x - 0.05, 0.15 + k * 2.6, z + r * 1.0, x + 2.49, 2.5 + k * 2.6, z + r * 1.0 + 0.08, {}, c.map((q) => q * 0.72)); } }

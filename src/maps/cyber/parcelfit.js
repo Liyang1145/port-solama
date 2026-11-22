@@ -24,6 +24,7 @@
 // Test switch ?noparcelfit: nothing replaced or added (the log is still drained).
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { PARCEL_COLS, FOOT_LOG } from './city.js';
+import { yardExtras } from './portyard.js'; // r6.4 b_portyard
 
 const OFF = typeof location !== 'undefined' && /[?&]noparcelfit\b/.test(location.search);
 const TOL = 0.3, SHOP = 0.3;
@@ -74,6 +75,7 @@ export function predict(p) {
       let zc = withSeed((p.seed ^ 0x9e37) >>> 0, () => { rng(); return rand(-hz + 9, hz - 9); }); if (gy && gy.zc !== null) zc = gy.zc; const xL = -hx - 1.4, xR = hx + 1.4;
       for (const x of [xL, xR]) o.extra.push(rp(x - 0.7, zc - 6, x + 0.7, zc + 6, 1.2)); // crane sill beams / bogies
       for (const [x, z] of (gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]])) o.extra.push(rp(x - 0.25, z - 0.25, x + 0.25, z + 0.25, 22)); // light masts
+      for (const q of yardExtras(p, rp)) o.extra.push(q); // b_portyard: fence runs, gate, booth, vehicles, inner masts, lashing bands
     }
   }
   return o;

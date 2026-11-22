@@ -21,6 +21,7 @@ import { StorefrontLayer } from './storefront.js';
 import { ParcelFit } from './parcelfit.js'; // r6.4 b_parcelfit
 import { ClutterCols } from './clutter.js'; // r6.4 b_clutter
 import { CLUT_CTX } from './clutcap.js';
+import { yardFurniture } from './portyard.js'; // r6.4 b_portyard
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -209,6 +210,7 @@ function portExtras(W, p, warehouse) {
   for (const x of [xL, xR]) for (const s of [-1, 1]) put(nb, G.ball, x, Hc - 2, zc + s * 2.2 + s * 0.5, 0.18, 0.18, 0.18, [1, 0.08, 0.05]);
   cone(cb, tx, Hc - 2.9, zc + 4.2, Hc - 3, 3, wh);
   for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) cone(cb, x, 21.8, z, 21.7, 7, [0.6, 0.58, 0.5]);
+  yardFurniture(v, nb, cb, p, { kg, beam, tube, put }, cone); // r6.4 b_portyard: fence, gate, vehicles, inner masts (no rng; p.py)
 }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 function _ry(b, g, x, y, z, sx, sy, sz, col) { _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2); _s.set(sx, sy, sz); _p.set(x, y, z); _m.compose(_p, _q, _s); b.geom(g, _m, {}, col); }

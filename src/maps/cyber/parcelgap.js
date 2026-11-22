@@ -24,6 +24,7 @@ import { prep } from '../../mats.js';
 import { U } from '../../env.js';
 import { ROOF_LOG, PARCEL_COLS } from './city.js';
 import { predict } from './parcelfit.js'; // b_overlayfit: the drawn footprint of a lot (pure replay of the generator's draws)
+import { PY_OFF, isYard } from './portyard.js'; // r6.4 b_portyard
 
 // b_overlayfit test switch: ?nooverlayfit plans the slots exactly as before this lane
 const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
@@ -188,6 +189,11 @@ export class ParcelGapLayer {
     if (!OF_OFF && this.footOf(side > 0 ? g.p : g.q)) { f = null; for (let t = 0; t <= Math.min(4, g.D - 0.5) + 1e-6; t += 0.05) { const a = this.offAt(g, t, side), b = this.offAt(g, t + 0.3, side); if (a !== null && b !== null && Math.abs(a - b) < 0.03) { f = t; break; } } if (f === null) f = 0; }
     return (g[k] = f); }
   fsOf(g) { return Math.max(this.fsS(g, 1), this.fsS(g, -1)); } // the mouth: where both walls run straight
+  // r6.4 b_portyard: a container yard has rows of boxes behind its own perimeter fence, not a wall on the slot. Slots next to a yard
+  // keep every draw (same order) but lay nothing on the yard side and nothing that spans the slot (closures, back panels, baffles,
+  // cable bundles, light boxes); the warehouse-side wall fixtures, the floor and the mouth heap stay. ?noportyard: as before.
+  ys(g, side) { if (PY_OFF) return false; const k = side > 0 ? 'yP' : 'yQ'; if (g[k] === undefined) g[k] = isYard(side > 0 ? g.p : g.q); return g[k]; }
+  yAny(g) { return this.ys(g, 1) || this.ys(g, -1); }
   wall(g, t, side) { const o = this.offAt(g, Math.max(t, this.fsS(g, side)), side); return this.wall0(g, t, side) + side * g.sd * (o || 0); } // side +1: wall of p, −1: wall of q
   gwT(g, t) { return Math.abs(this.wall(g, t, 1) - this.wall(g, t, -1)); }
   xcT(g, t) { return (this.wall(g, t, 1) + this.wall(g, t, -1)) / 2; }
@@ -200,17 +206,18 @@ export class ParcelGapLayer {
     if (g.narrow) { this.stats.narrow++;
       L.type = g.g0 < 0.4 ? 'plate' : pick(['shutter', 'shutter', 'gate', 'gate', 'fence']);
       L.t1 = Math.min(Math.max(g.D * 0.3, 2.2), 5, g.D - 0.6);
-      { const fs = this.fsOf(g); this.obb(g, this.xcT(g, fs), fs + 0.08, (this.gwT(g, fs) + 2.0) / 2, 0.15, 3.5); }               // mouth (b_overlayfit: at the podium front)
-      this.obb(g, this.xcT(g, g.D - 0.1), g.D - 0.1, (this.gwT(g, g.D) + 2.0) / 2, 0.15, 3.5);           // back end
+      if (!this.yAny(g)) /* b_portyard: no closure next to a yard */ { const fs = this.fsOf(g); this.obb(g, this.xcT(g, fs), fs + 0.08, (this.gwT(g, fs) + 2.0) / 2, 0.15, 3.5); }               // mouth (b_overlayfit: at the podium front)
+      if (!this.yAny(g)) this.obb(g, this.xcT(g, g.D - 0.1), g.D - 0.1, (this.gwT(g, g.D) + 2.0) / 2, 0.15, 3.5);           // back end
     } else { this.stats.wide++;
       L.type = pick(['open', 'open', 'up', 'up', 'none']);
       if (g.D >= 7.5) { this.stats.baffled++; L.t1 = Math.min(Math.max(g.D * 0.4, 3.5), 7); L.t2 = L.t1 + 1.3; L.sA = rng() < 0.5 ? 1 : -1; L.ow = this.gw(g, L.t1) < 1.75 ? 0.85 : 0.9;
         for (const [t, side] of [[L.t1, L.sA], [L.t2, -L.sA]]) { const w0 = this.wall(g, t, side), w1 = this.wall(g, t, -side); const dir = Math.sign(w1 - w0); const a = w0 - dir * 0.3, b = w1 - dir * L.ow;
-          L['b' + t] = [a, b]; this.obb(g, (a + b) / 2, t, Math.abs(b - a) / 2, 0.08, 4); } }
+          if (this.yAny(g)) continue; /* b_portyard */ L['b' + t] = [a, b]; this.obb(g, (a + b) / 2, t, Math.abs(b - a) / 2, 0.08, 4); } }
       const lim = L.t1 ? L.t1 - 1.2 : g.D - 1; const gm = Math.min(this.gw(g, 1), this.gw(g, lim));
       if (gm >= 2.0 && lim > 2.2) { const side = L.sA || (rng() < 0.5 ? 1 : -1); /* on the baffle-1 wall: the opening (and the way through) is on the other side */ const t0 = rand(0.9, Math.max(1.0, lim - 1.4)), t1 = Math.min(lim, t0 + rand(0.9, 1.6)); const tm = (t0 + t1) / 2;
         const fw = this.fsS(g, side); const so = fw ? Math.max(0, fw + 0.1 - t0) : 0; // b_overlayfit: start where that wall runs straight (podium front / end of the curve)
         const w = this.wall(g, tm + so, side); const dir = Math.sign(this.wall(g, tm + so, -side) - w); L.cl = { side, t0: t0 + so, t1: t1 + so, w, dir, dep: 0.5 };
+        if (this.ys(g, side)) { L.clMute = true; this.stats.py = (this.stats.py || 0) + 1; } else /* b_portyard */
         this.obb(g, w + dir * 0.25, tm + so, 0.25 + 0.05, (t1 - t0) / 2, 1.3); } // collider is rotated: across = 0.3 half, along depth = half span
     }
     // mouth heap in front of the closure (on the setback strip), small collider
@@ -224,7 +231,8 @@ export class ParcelGapLayer {
     let mute = false; const push = (k, mat) => { if (mute) return; _w.multiplyMatrices(g.GM, mat); (inst[k] || (inst[k] = [])).push(..._w.elements); tris += this.triOf[k]; };
     // b_overlayfit: walking-height wall fixtures of a walkable slot (gap frame: across x from the wall face w toward dir, depth t,
     // half length along t, top y) -> thin colliders once the slot is first planned (narrow slots are sealed at the mouth already)
-    const FIT = !OF_OFF; const FX = []; const fix = (w, dir, reach, t, hl, top) => { if (FIT && !g.narrow) FX.push([w, dir, reach, t, hl, top]); };
+    const FIT = !OF_OFF; const FX = []; const fix = (w, dir, reach, t, hl, top) => { if (FIT && !g.narrow && !mute) FX.push([w, dir, reach, t, hl, top]); };
+    const YA = this.yAny(g), YS = (side) => this.ys(g, side); const M0 = (c, f) => { const m0 = mute; if (c) mute = true; f(); mute = m0; }; // b_portyard
     const P = (k, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0) => { _e.set(0, ry, 0); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, z); push(k, _m.compose(_p, _q, _s)); };
     const seg = (k, a, b, w, h = w) => { _a.set(...a); _b.set(...b); const len = _a.distanceTo(_b); if (len < 0.01) return; _b.sub(_a).normalize(); _q.setFromUnitVectors(_Y, _b); _s.set(w, len, h); _p.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2); push(k, _m.compose(_p, _q, _s)); };
     if (FIT) { g.of = 0; if (this.footOf(g.p) || this.footOf(g.q)) g.of |= 4; } const tEnd = g.narrow ? L.t1 : D; const g0 = g.g0; const fs = this.fsOf(g), zf = -fs, gM = this.gwT(g, fs); const x0 = this.xcT(g, fs); // b_overlayfit: mouth = podium front
@@ -232,37 +240,40 @@ export class ParcelGapLayer {
     P('floor', this.xcT(g, tEnd / 2), 0.03, -tEnd / 2, Math.max(this.gwT(g, 0), this.gwT(g, tEnd)) + 0.1, 0.05, tEnd);
     // ---- closure at the mouth
     const hc = L.type === 'shutter' ? 2.9 : L.type === 'gate' ? 2.4 : 2.5;
+    M0(YA && L.type !== 'open', () => {
     if (L.type === 'plate') { P('steel', x0, 1.9, zf + -0.05, gM + 0.24, 3.8, 0.05); for (let y = 0.4; y < 3.7; y += 0.9) P('steel', x0, y, zf + -0.02, gM + 0.26, 0.05, 0.02); }
     else if (L.type === 'shutter') { P(rng() < 0.35 ? 'shutterR' : 'shutter', x0, 0, zf + -0.1, gM, hc, 1); P('steel', x0, hc + 0.22, zf + -0.16, gM + 0.12, 0.44, 0.42);
       for (const s of [1, -1]) P('steel', x0 + s * (gM / 2 - 0.02), hc / 2, zf + -0.1, 0.05, hc, 0.08); }
     else if (L.type === 'gate') { P('gate', x0, 0, zf + -0.06, gM, hc, 1); P('steel', x0, hc + 0.05, zf + -0.06, gM + 0.1, 0.08, 0.1); P('jbox', x0 + gM * 0.3, 1.05, zf + -0.02, 0.18, 0.18, 0.4); } // + padlock
     else if (L.type === 'fence') { P('fence', x0, 0, zf + -0.05, gM, hc, 1); for (const s of [1, -1]) seg('post', [x0 + s * (gM / 2 - 0.03), 0, zf - 0.05], [x0 + s * (gM / 2 - 0.03), hc + 0.3, zf - 0.05], 0.03);
       seg('post', [x0 - gM / 2, hc, zf - 0.05], [x0 + gM / 2, hc, zf - 0.05], 0.022); P('razor', x0, hc + 0.18, zf + -0.05, gM, 1, 1); }
-    else if (L.type === 'open') { for (const side of [1, -1]) { const w = this.wall(g, 0.6 + fs, side); const dir = Math.sign(this.wall(g, 0.6 + fs, -side) - w); const so = this.fsS(g, side); P('gate', w + dir * 0.06, 0, -g0 / 4 - 0.15 - so, g0 / 2, 2.4, 1, Math.PI / 2); fix(w, dir, 0.11, g0 / 4 + 0.15 + so, g0 / 4, 2.4); } }
+    else if (L.type === 'open') { for (const side of [1, -1]) { const w = this.wall(g, 0.6 + fs, side); const dir = Math.sign(this.wall(g, 0.6 + fs, -side) - w); const so = this.fsS(g, side); M0(YS(side), () => { P('gate', w + dir * 0.06, 0, -g0 / 4 - 0.15 - so, g0 / 2, 2.4, 1, Math.PI / 2); fix(w, dir, 0.11, g0 / 4 + 0.15 + so, g0 / 4, 2.4); }); } }
     else if (L.type === 'up') { P('steel', x0, 3.2, zf + -0.16, gM + 0.12, 0.5, 0.45); for (const s of [1, -1]) P('steel', x0 + s * (gM / 2 - 0.02), 1.5, zf + -0.1, 0.05, 3.0, 0.08); }
-    if (L.type !== 'plate' && L.type !== 'none' && rng() < 0.75) P('bulb', x0 + rand(-0.2, 0.2) * gM, Math.min(H - 0.3, hc + 0.7), zf + -0.25); // lamp under the lintel, facing out
+    });
+    if (L.type !== 'plate' && L.type !== 'none' && rng() < 0.75) M0(YA, () => P('bulb', x0 + rand(-0.2, 0.2) * gM, Math.min(H - 0.3, hc + 0.7), zf + -0.25)); // lamp under the lintel, facing out
     // ---- back panel (narrow) / staggered baffles (wide)
-    if (g.narrow) { const t = L.t1; P('back', this.xcT(g, t), H / 2, -t, this.gwT(g, t) + 0.6, H, 0.12); }
-    else if (L.t1) for (const t of [L.t1, L.t2]) { const [a, b] = L['b' + t]; P('back', (a + b) / 2, H / 2, -t, Math.abs(b - a), H, 0.14);
+    if (g.narrow) { const t = L.t1; if (!YA) P('back', this.xcT(g, t), H / 2, -t, this.gwT(g, t) + 0.6, H, 0.12); }
+    else if (L.t1) for (const t of [L.t1, L.t2]) { if (!L['b' + t]) continue; /* b_portyard */ const [a, b] = L['b' + t]; P('back', (a + b) / 2, H / 2, -t, Math.abs(b - a), H, 0.14);
       P('steel', b, H / 2, -t, 0.08, H, 0.2); } // steel edge on the opening
     // ---- pipes / conduits / cable drops up the walls
     const hp2 = Math.min(H - 0.2, 16); const tP = Math.max(0.6, tEnd - 0.3);
     for (let i = 0, n = randi(1, g0 < 0.5 ? 2 : 3); i < n; i++) { const side = rng() < 0.5 ? 1 : -1; const t = ((q, o) => (o ? Math.max(q, o + 0.15) : q))(rand(0.35, tP), this.fsS(g, side)); const r = g0 < 0.5 ? rand(0.035, 0.06) : rand(0.05, 0.11); const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
-      const x = w + dir * (r + 0.02); const top = rand(Math.min(5, hp2), hp2); const k = pick(['pipeGrey', 'pipeRust', 'pipeBlack']);
-      seg(k, [x, 0.05, -t], [x, top, -t], r); seg(k, [x, top, -t], [w, top + 0.25, -t], r); for (let y = 1.2; y < top; y += rand(1.8, 2.6)) P('steel', x, y, -t, r * 2 + 0.08, 0.05, 0.05); fix(w, dir, 2 * r + 0.06, t, Math.max(r, 0.03), top); }
+      const x = w + dir * (r + 0.02); const top = rand(Math.min(5, hp2), hp2); const k = pick(['pipeGrey', 'pipeRust', 'pipeBlack']); const m1 = mute; if (YS(side)) mute = true; // b_portyard
+      seg(k, [x, 0.05, -t], [x, top, -t], r); seg(k, [x, top, -t], [w, top + 0.25, -t], r); for (let y = 1.2; y < top; y += rand(1.8, 2.6)) P('steel', x, y, -t, r * 2 + 0.08, 0.05, 0.05); fix(w, dir, 2 * r + 0.06, t, Math.max(r, 0.03), top); mute = m1; }
     for (let i = 0, n = randi(1, 2); i < n; i++) { const side = rng() < 0.5 ? 1 : -1; const t = ((q, o) => (o ? Math.max(q, o + 0.4) : q))(rand(0.3, Math.min(tP, 3)), this.fsS(g, side)); const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
+      const m2 = mute; if (YS(side)) mute = true; // b_portyard
       let nj = 0; for (let j = 0; j < randi(1, 3); j++) { const x = w + dir * (0.03 + j * 0.035); seg('pipeBlack', [x, 0.6, -t - j * 0.03], [x, hp2, -t - j * 0.03], 0.016); nj = j + 1; }
       if (nj) fix(w, dir, 0.03 + (nj - 1) * 0.035 + 0.02, t + (nj - 1) * 0.015, 0.02 + (nj - 1) * 0.015, hp2);
-      if (g0 > 0.5 || rng() < 0.5) { const yj = rand(1.2, 1.8); const tj = OF_OFF ? t - 0.12 : Math.max(t - 0.12, this.fsOf(g) + 0.3); if (FIT && tj !== t - 0.12) g.of |= 8; /* b_overlayfit: the box (±0.24 m) poked out past the mouth / through the closure */ P('jbox', w, yj, -tj, 1, 1, 1, dir * Math.PI / 2); fix(w, dir, 0.21, tj, 0.24, yj + 0.34); } }
+      if (g0 > 0.5 || rng() < 0.5) { const yj = rand(1.2, 1.8); const tj = OF_OFF ? t - 0.12 : Math.max(t - 0.12, this.fsOf(g) + 0.3); if (FIT && tj !== t - 0.12) g.of |= 8; /* b_overlayfit: the box (±0.24 m) poked out past the mouth / through the closure */ P('jbox', w, yj, -tj, 1, 1, 1, dir * Math.PI / 2); fix(w, dir, 0.21, tj, 0.24, yj + 0.34); } mute = m2; }
     // ---- cable bundles across the slot (near the mouth and deeper)
     for (let i = 0, n = randi(1, g0 < 0.6 ? 2 : 3); i < n; i++) { const t = i === 0 ? rand(0.15, 0.6) + fs : Math.max(rand(0.6, Math.min(tEnd, 7)), fs ? fs + 0.15 : 0); const y = rand(Math.min(4.2, H - 0.6), Math.min(H - 0.4, 10)); const sp = this.gwT(g, t) + 0.1;
-      P('cable', this.xcT(g, t), y, -t, sp, Math.max(0.12, sp * 0.18) / 0.5, 1); }
+      M0(YA, () => P('cable', this.xcT(g, t), y, -t, sp, Math.max(0.12, sp * 0.18) / 0.5, 1)); }
     // ---- small light box hung at the mouth, facing the street
-    if (g0 >= 0.6 && rng() < 0.7) { const wb = Math.min(g0 - 0.2, rand(0.8, 1.4)), hb = rand(0.42, 0.7); const y = Math.min(H - 0.6, rand(3.5, 4.8)) - (L.type === 'shutter' ? 0 : 0.3); const z = zf - 0.22;
+    if (g0 >= 0.6 && rng() < 0.7) { const m3 = mute; if (YA) mute = true; /* b_portyard */ const wb = Math.min(g0 - 0.2, rand(0.8, 1.4)), hb = rand(0.42, 0.7); const y = Math.min(H - 0.6, rand(3.5, 4.8)) - (L.type === 'shutter' ? 0 : 0.3); const z = zf - 0.22;
       const kc = pick(['lbC', 'lbM', 'lbA']); P('lbBody', x0, y, z, wb, hb, 0.16); P(kc, x0, y, z + 0.085, wb * 0.9, hb * 0.8, 0.01);
       const nch = randi(2, 3); for (let j = 0; j < nch; j++) { const cx = x0 - wb * 0.3 + j * wb * 0.6 / Math.max(1, nch - 1); P('lbBody', cx, y, z + 0.092, wb * 0.05, hb * 0.5, 0.005); P('lbBody', cx, y + hb * 0.05, z + 0.093, wb * 0.18, hb * 0.05, 0.005); }
       for (const s of [-0.4, 0.4]) seg('pipeBlack', [x0 + s * wb, y + hb / 2, z], [x0 + s * wb, y + hb / 2 + 0.55, z - 0.05], 0.008);
-      P('cable', x0, y + hb / 2 + 0.6, z - 0.05, gM + 0.1, 0.2 / 0.5, 1); }
+      P('cable', x0, y + hb / 2 + 0.6, z - 0.05, gM + 0.1, 0.2 / 0.5, 1); mute = m3; }
     // ---- clutter against one wall (wide) and the heap in front of the closure
     // b_overlayfit (same draws, in the same order): bags sat on their flattened bottom 8–10 cm in the air (the unit bag's lowest
     // point is +0.079 m) -> grounded; boxes / crates stand on the ground (mouth heap, 0 m) or on the slot's wet floor slab (top
@@ -285,10 +296,10 @@ export class ParcelGapLayer {
         for (const b of C.query(hb.cx, hb.cz, 2, [])) { if (!(b.tag === 'clut' || b.tag === 'shop' || b.tag === 'trim') || (b.pk !== g.p && b.pk !== g.q)) continue; if (obbHit(hb, b)) { off = true; break; } }
         if (off) { C.remove(L.heapBox); L.heapBox = null; L.heapOff = true; this.stats.of.heapOff = (this.stats.of.heapOff || 0) + 1; } }
       mute = !!L.heapOff; if (mute) g.of |= 16; heap(hp.x, hp.z, hp.r, false, [hp.x - hp.r, hp.x + hp.r, hp.z - 0.32, hp.z + 0.32], 0.0); mute = false; }
-    if (L.cl) { const c = L.cl; const cxw = c.w + c.dir * 0.25; const rc = [cxw - 0.3, cxw + 0.3, -c.t1, -c.t0]; for (let t = c.t0; t < c.t1 - 0.3; t += 0.6) heap(c.w + c.dir * 0.27, -t - 0.25, 0.22, true, rc, 0.055); }
+    if (L.cl) M0(L.clMute, () => { const c = L.cl; const cxw = c.w + c.dir * 0.25; const rc = [cxw - 0.3, cxw + 0.3, -c.t1, -c.t0]; for (let t = c.t0; t < c.t1 - 0.3; t += 0.6) heap(c.w + c.dir * 0.27, -t - 0.25, 0.22, true, rc, 0.055); });
     // ---- wall lamp inside wide slots
     if (!g.narrow && rng() < 0.7) { const tq = rand(1.0, Math.max(1.1, (L.t1 || D) - 0.6)); const side = rng() < 0.5 ? 1 : -1; const t = this.fsS(g, side) ? Math.max(tq, this.fsS(g, side) + 0.3) : tq; const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
-      P('bulb', w, 2.7, -t, 1, 1, 1, dir * Math.PI / 2); }
+      M0(YS(side), () => P('bulb', w, 2.7, -t, 1, 1, 1, dir * Math.PI / 2)); }
     // b_overlayfit: the fixtures' colliders, once per slot (a re-plan after the chunk reloads draws the same fixtures)
     if (FX.length && !g.wcol && this.city.col && this.city.col.addOBB) { g.wcol = true; this.stats.of.wallGaps++;
       for (const [w, dir, reach, t, hl, top] of FX) { this.obb(g, w + dir * reach / 2, t, reach / 2, hl, top); this.stats.colliders--; this.stats.of.wallCols++; } }
