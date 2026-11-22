@@ -175,8 +175,10 @@ function portExtras(W, p, warehouse) {
   }
   // container yard: rail-mounted gantry crane over the stacks + flood-light masts
   const cy = pick([[0.95, 0.68, 0.08], [0.9, 0.35, 0.1], [0.2, 0.45, 0.75]]); const xL = -hx - 1.4, xR = hx + 1.4, Hc = 19;
-  for (const x of [xL, xR]) beam(v, [x, 0.06, -hz], [x, 0.06, hz], 0.25, [0.25, 0.25, 0.26], 0.12); // rails
-  const zc = rand(-hz + 9, hz - 9);
+  const gy = p.gf && p.gf.yard; // r6.4 b_genfit: yards whose rails / masts / crane would stand on the sidewalk (genfit.js); others unchanged
+  if (!gy) for (const x of [xL, xR]) beam(v, [x, 0.06, -hz], [x, 0.06, hz], 0.25, [0.25, 0.25, 0.26], 0.12); // rails
+  else [xL, xR].forEach((x, i) => beam(v, [x, 0.06, gy.rail[i][0]], [x, 0.06, gy.rail[i][1]], 0.25, [0.25, 0.25, 0.26], 0.12));
+  let zc = rand(-hz + 9, hz - 9); if (gy && gy.zc !== null) zc = gy.zc; // the draw is still made (rng order unchanged)
   for (const x of [xL, xR]) {
     for (const s of [-1, 1]) beam(v, [x, 0.6, zc + s * 5], [x, Hc, zc + s * 2.2], 0.9, cy, 0.9);
     box(v, x - 0.7, 0.1, zc - 6, x + 0.7, 1.2, zc + 6, {}, cy.map((q) => q * 0.8)); // sill beam / bogies
@@ -190,7 +192,7 @@ function portExtras(W, p, warehouse) {
   const ys = rand(9, 13); for (const [ox, oz] of [[-1.2, -2.5], [1.2, -2.5], [-1.2, 2.5], [1.2, 2.5]]) tube(v, [tx + ox * 0.6, Hc + 1.8, zc + oz * 0.6], [tx + ox, ys + 0.6, zc + oz], 0.03, DARK, G.tube4);
   box(v, tx - 1.3, ys, zc - 6.1, tx + 1.3, ys + 0.6, zc + 6.1, {}, cy.map((q) => q * 0.85)); // spreader
   if (rng() < 0.6) box(v, tx - 1.22, ys - 2.6, zc - 6.1, tx + 1.22, ys, zc + 6.1, {}, pick([[0.62, 0.16, 0.12], [0.12, 0.32, 0.55], [0.2, 0.45, 0.3]])); // a lifted box
-  for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) { put(v, G.cyl8, x, 11, z, 0.25, 22, 0.25, STEEL); box(v, x - 1.6, 22, z - 0.25, x + 1.6, 22.3, z + 0.25, {}, DARK);
+  for (const [x, z] of (gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]])) { put(v, G.cyl8, x, 11, z, 0.25, 22, 0.25, STEEL); box(v, x - 1.6, 22, z - 0.25, x + 1.6, 22.3, z + 0.25, {}, DARK);
     for (const o of [-1.1, 0, 1.1]) put(nb, G.box, x + o, 21.85, z, 0.7, 0.12, 0.4, [0.95, 0.9, 0.75]); }
   put(nb, G.ball, tx, Hc + 3.9, zc, 0.2, 0.2, 0.2, [1, 0.5, 0.05]);
   // r6.2b night read: sodium work lights under both box girders, red obstruction lights on the girder ends + leg tops,

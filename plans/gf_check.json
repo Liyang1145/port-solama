@@ -1,0 +1,23 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&nowater",
+ "reset": false,
+ "shots": [
+  {
+   "name": "prog",
+   "noshot": true,
+   "keep": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); const B=__G.neon.bldg, F=B.fit, ps=F.city.parcels; const P=(X,Z)=>ps.find(p=>Math.abs(p.x-X)<0.3&&Math.abs(p.z-Z)<0.3); const W=(p,lx,lz)=>[p.x+lx*Math.cos(p.ang)-lz*Math.sin(p.ang), p.z+lx*Math.sin(p.ang)+lz*Math.cos(p.ang)]; const S=()=>({gf:ps.filter(p=>p.gf).map(p=>[p.style,+p.x.toFixed(1),+p.z.toFixed(1)]), checked:F.stats.checked, mismatch:F.stats.mismatch, mis:F.mis||null, clut:B.clut.stats.move, loaded:__G.stream.stats.loaded, progs:__G.renderer.info.programs.length}); { const p=P(-539.6,-199.4); const w=W(p,22,-22); g.tp(w[0],w[1],0); __G.step(2); __G.streamSync(); __G.step(2); __G.streamSync(); __G.neon.update(1,0); __G.step(1); __G.render(); } __G.render(); const R=__G.renderer; const ks=R.info.programs.map(p=>p.cacheKey); let h=(s)=>{let x=0; for(const c of s) x=(x*31+c.charCodeAt(0))>>>0; return x.toString(36);}; JSON.stringify({programs:R.info.programs.length, keys:ks.map(h).sort()})"
+  },
+  {
+   "name": "check",
+   "noshot": true,
+   "keep": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); const B=__G.neon.bldg, F=B.fit, ps=F.city.parcels; const P=(X,Z)=>ps.find(p=>Math.abs(p.x-X)<0.3&&Math.abs(p.z-Z)<0.3); const W=(p,lx,lz)=>[p.x+lx*Math.cos(p.ang)-lz*Math.sin(p.ang), p.z+lx*Math.sin(p.ang)+lz*Math.cos(p.ang)]; const S=()=>({gf:ps.filter(p=>p.gf).map(p=>[p.style,+p.x.toFixed(1),+p.z.toFixed(1)]), checked:F.stats.checked, mismatch:F.stats.mismatch, mis:F.mis||null, clut:B.clut.stats.move, loaded:__G.stream.stats.loaded, progs:__G.renderer.info.programs.length}); { const p=P(-539.6,-199.4); const w=W(p,22,-22); g.tp(w[0],w[1],0); __G.step(2); __G.streamSync(); __G.step(2); __G.streamSync(); __G.neon.update(1,0); __G.step(1); __G.render(); } const r={mansion:S()}; { const p=P(-1326.3,-895.8); const w=W(p,22,26); g.tp(w[0],w[1],0); __G.step(2); __G.streamSync(); __G.step(2); __G.streamSync(); __G.neon.update(1,0); __G.step(1); __G.render(); } r.port=S(); JSON.stringify(r)"
+  },
+  {
+   "name": "mansion",
+   "keep": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); const B=__G.neon.bldg, F=B.fit, ps=F.city.parcels; const P=(X,Z)=>ps.find(p=>Math.abs(p.x-X)<0.3&&Math.abs(p.z-Z)<0.3); const W=(p,lx,lz)=>[p.x+lx*Math.cos(p.ang)-lz*Math.sin(p.ang), p.z+lx*Math.sin(p.ang)+lz*Math.cos(p.ang)]; const S=()=>({gf:ps.filter(p=>p.gf).map(p=>[p.style,+p.x.toFixed(1),+p.z.toFixed(1)]), checked:F.stats.checked, mismatch:F.stats.mismatch, mis:F.mis||null, clut:B.clut.stats.move, loaded:__G.stream.stats.loaded, progs:__G.renderer.info.programs.length}); const p=P(-539.6,-199.4); const cp=W(p,23,-21), ct=W(p,15.8,-15.4); g.tp(cp[0],cp[1],0); __G.step(3); g.player.root.visible=false; __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); __G.streamSync(); const c=__G.camera; c.far=160; for(let k=0;k<4;k++){ __G.streamSync(); __G.step(2); g.player.root.visible=false; c.position.set(cp[0],1.7,cp[1]); c.lookAt(ct[0],0.9,ct[1]); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.neon.update(__G.U.uNight.value,0); } 0"
+  }
+ ]
+}

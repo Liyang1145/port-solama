@@ -41,12 +41,16 @@ function villa(ctx, p, big) {
   polyCap(v, [D, C, B, A], y0 - 0.05, {}, tile.map((c) => c * 0.6), true); // eave soffit
   // front porch / entrance canopy on slim columns, garage door, garden wall + gate piers, pool deck at the side
   const pw = Math.min(5, hz); box(v, hx, 2.9, -pw / 2, hx + 2.4, 3.15, pw / 2, {}, wall.map((c) => Math.min(1, c * 1.08)), false);
-  for (const zz of [-pw / 2 + 0.2, pw / 2 - 0.2]) box(v, hx + 2.0, 0.05, zz - 0.15, hx + 2.3, 2.9, zz + 0.15, {}, [0.95, 0.94, 0.9]);
+  [-pw / 2 + 0.2, pw / 2 - 0.2].forEach((zz, i) => { if (!(p.gf && p.gf.villa && p.gf.villa.porch.includes(i))) box(v, hx + 2.0, 0.05, zz - 0.15, hx + 2.3, 2.9, zz + 0.15, {}, [0.95, 0.94, 0.9]); }); // b_genfit
   box(v, hx + 0.01, 0.05, hz - 5.5, hx + 0.06, 2.6, hz - 1.0, {}, [0.86, 0.85, 0.82]); // garage door
   for (let k = 0; k < 5; k++) box(v, hx + 0.06, 0.4 + k * 0.45, hz - 5.5, hx + 0.08, 0.43 + k * 0.45, hz - 1.0, {}, [0.7, 0.7, 0.68]);
   const gw = [0.93, 0.91, 0.86]; const fx = hx + 5.2;
-  box(v, fx - 0.15, 0.05, -hz, fx + 0.15, 1.0, -pw / 2 - 1.2, {}, gw); box(v, fx - 0.15, 0.05, pw / 2 + 1.2, fx + 0.15, 1.0, hz - 6.5, {}, gw);
-  for (const zz of [-pw / 2 - 1.2, pw / 2 + 1.2, hz - 6.5]) box(v, fx - 0.25, 0.05, zz - 0.25, fx + 0.25, 1.35, zz + 0.25, {}, gw);
+  const g = p.gf && p.gf.villa; // r6.4 b_genfit: lots whose garden wall / piers would stand on the sidewalk (genfit.js); others unchanged
+  if (!g) { box(v, fx - 0.15, 0.05, -hz, fx + 0.15, 1.0, -pw / 2 - 1.2, {}, gw); box(v, fx - 0.15, 0.05, pw / 2 + 1.2, fx + 0.15, 1.0, hz - 6.5, {}, gw);
+    for (const zz of [-pw / 2 - 1.2, pw / 2 + 1.2, hz - 6.5]) box(v, fx - 0.25, 0.05, zz - 0.25, fx + 0.25, 1.35, zz + 0.25, {}, gw); }
+  else { if (g.za !== null) box(v, fx - 0.15, 0.05, g.za, fx + 0.15, 1.0, -pw / 2 - 1.2, {}, gw); box(v, fx - 0.15, 0.05, pw / 2 + 1.2, fx + 0.15, 1.0, g.zb, {}, gw);
+    [-pw / 2 - 1.2, pw / 2 + 1.2, g.zb].forEach((zz, i) => { if (!g.drop.includes(i)) box(v, fx - 0.25, 0.05, zz - 0.25, fx + 0.25, 1.35, zz + 0.25, {}, gw); });
+    if (g.endPier !== null) box(v, fx - 0.25, 0.05, g.endPier - 0.25, fx + 0.25, 1.35, g.endPier + 0.25, {}, gw); }
   // driveway + front lawn edging
   polyCap(ctx.W.b('pavers', 0, 0), rect(hx, hz - 6, fx + 0.3, hz - 0.5), 0.02);
   if (big || rng() < 0.5) { // pool on the back lawn

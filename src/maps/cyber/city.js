@@ -6,6 +6,7 @@ import { ColliderGrid, rng, rand, randi, pick, clamp } from '../../util.js';
 import { ROADS, landAt, beachX, BEACH_Z, DECO_CORE } from './mapdata.js';
 import { buildGraph } from './roadgraph.js';
 import { genParcels } from './parcels.js';
+import { planGenfit } from './genfit.js'; // b_genfit
 import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
 import { megatower, tenement, shopStreet, CORE_SHOP_LOG } from './arch.js';
@@ -193,6 +194,7 @@ export function buildCity(scene, mats, T) {
   const graph = buildGraph(ROADS, legacyRoads);
   buildRegion({ ...bld, palms, trees, shrubs }, graph);
   const parcels = genParcels(graph);
+  planGenfit(parcels, graph); // r6.4 b_genfit: kerb fit of garden walls / yard rails / masts / crane over the sidewalk (no rng use)
   const wild = wildField(graph); // v4.5 草原 / 雨林 height field (src/nature.js)
   for (const p of parcels) {
     if (p.far) continue; PARCEL_COLS.set(p, obbCollider(col, p.x, p.z, p.d / 2, p.w / 2, p.ang, p.h));

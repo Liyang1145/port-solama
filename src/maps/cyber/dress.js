@@ -207,7 +207,7 @@ export function sidewalk(W, F, y0, grit = 0.5, opts = {}) {
   // b_clutter: each item group is bracketed (clutSnap … grab): clutcap.js fits its collider footprint and, on a streamed lot, moves
   // a group that overruns the kerb / stands on a lamp or palm back toward the facade (or hides it when there is no room); the
   // storefront.js footprint log entries of the group follow the move. No rng use.
-  const grab = (s0, n0, k, cap) => { const r = clutGrab(W, s0, F, y0, k); if (r && r.hid) lg.length = n0; else if (r && r.sh) for (let i = n0; i < lg.length; i++) { lg[i].d0 -= r.sh; lg[i].d1 -= r.sh; }
+  const grab = (s0, n0, k, cap) => { const r = clutGrab(W, s0, F, y0, k); if (r && r.hid) lg.length = n0; else if (r && (r.sh || r.sa)) for (let i = n0; i < lg.length; i++) { lg[i].d0 -= r.sh; lg[i].d1 -= r.sh; lg[i].a0 += r.sa; lg[i].a1 += r.sa; } // b_genfit: + slide along
     if (cap && cap.s && !(r && r.hid)) clutGrab(W, cap.s, F, y0, 'carton', true); return r; };
   while (a < L - 1.2) {
     const r = rng(); const s0 = lg && clutSnap(W), n0 = lg ? lg.length : 0;

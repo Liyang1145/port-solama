@@ -56,10 +56,12 @@ export function predict(p) {
   if (st === 'deco' || st === 'mid') o.band.push(o.R ? rp(hx - o.R, -hz + 1, hx + SHOP, hz - 1, 4.0) : rp(hx - 0.05, -hz, hx + SHOP, hz, 4.0));
   else if (st === 'downtown') o.band.push(rp(hx - 1.05, -hz + 1, hx - 1 + SHOP, hz - 1, 4.0));
   else if (st === 'canal' || st === 'villa' || st === 'mansion') { // villa(): porch columns, garden wall + gate piers (no colliders before)
-    const pw = Math.min(5, hz); const fx = hx + 5.2;
-    for (const zz of [-pw / 2 + 0.2, pw / 2 - 0.2]) o.extra.push(rp(hx + 2.0, zz - 0.15, hx + 2.3, zz + 0.15, 2.9));
-    o.extra.push(rp(fx - 0.15, -hz, fx + 0.15, -pw / 2 - 1.2, 1.0)); if (hz - 6.5 > pw / 2 + 1.2) o.extra.push(rp(fx - 0.15, pw / 2 + 1.2, fx + 0.15, hz - 6.5, 1.0));
-    for (const zz of [-pw / 2 - 1.2, pw / 2 + 1.2, hz - 6.5]) o.extra.push(rp(fx - 0.25, zz - 0.25, fx + 0.25, zz + 0.25, 1.35));
+    const pw = Math.min(5, hz); const fx = hx + 5.2; const g = p.gf && p.gf.villa; // b_genfit: kerb-fitted walls / piers (genfit.js)
+    [-pw / 2 + 0.2, pw / 2 - 0.2].forEach((zz, i) => { if (!(g && g.porch.includes(i))) o.extra.push(rp(hx + 2.0, zz - 0.15, hx + 2.3, zz + 0.15, 2.9)); });
+    const za = g ? g.za : -hz, zb = g ? g.zb : hz - 6.5;
+    if (za !== null) o.extra.push(rp(fx - 0.15, za, fx + 0.15, -pw / 2 - 1.2, 1.0)); if (zb > pw / 2 + 1.2) o.extra.push(rp(fx - 0.15, pw / 2 + 1.2, fx + 0.15, zb, 1.0));
+    [-pw / 2 - 1.2, pw / 2 + 1.2, zb].forEach((zz, i) => { if (!(g && g.drop.includes(i))) o.extra.push(rp(fx - 0.25, zz - 0.25, fx + 0.25, zz + 0.25, 1.35)); });
+    if (g && g.endPier !== null) o.extra.push(rp(fx - 0.25, g.endPier - 0.25, fx + 0.25, g.endPier + 0.25, 1.35));
   } else if (st === 'port') {
     const wh = withSeed(p.seed, () => rng() < 0.45); // same draw as port() / bldglayer.js portExtras
     if (wh) { const yp = p.h - 2.2; // portExtras: two drop pipes on the front + the ground-to-catwalk ladder
@@ -68,9 +70,10 @@ export function predict(p) {
     } else { o.kind = 'yard'; o.polys = []; o.rows = [];
       let xl = null; for (let x = -hx + 2; x < hx - 2.4; x += 3) xl = x; // container columns (port())
       for (let z = -hz + 1; z < hz - 12; z += 13.2) o.rows.push(rp(-hx + 2 - 0.05, z, xl + 2.49, z + 12.2, p.h));
-      const zc = withSeed((p.seed ^ 0x9e37) >>> 0, () => { rng(); return rand(-hz + 9, hz - 9); }); const xL = -hx - 1.4, xR = hx + 1.4;
+      const gy = p.gf && p.gf.yard; // b_genfit: kerb-fitted crane position / masts (genfit.js)
+      let zc = withSeed((p.seed ^ 0x9e37) >>> 0, () => { rng(); return rand(-hz + 9, hz - 9); }); if (gy && gy.zc !== null) zc = gy.zc; const xL = -hx - 1.4, xR = hx + 1.4;
       for (const x of [xL, xR]) o.extra.push(rp(x - 0.7, zc - 6, x + 0.7, zc + 6, 1.2)); // crane sill beams / bogies
-      for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) o.extra.push(rp(x - 0.25, z - 0.25, x + 0.25, z + 0.25, 22)); // light masts
+      for (const [x, z] of (gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]])) o.extra.push(rp(x - 0.25, z - 0.25, x + 0.25, z + 0.25, 22)); // light masts
     }
   }
   return o;

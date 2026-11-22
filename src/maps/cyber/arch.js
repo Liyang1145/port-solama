@@ -38,7 +38,7 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     // r6.4 b_storefront: streamed parcels (stub collider, no query) log each bay for storefront.js — no rng use, geometry unchanged
     if (LOG) LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, aw, sw: swl, i, n });
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1, !!swl);
-    if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); const s0 = swl && clutSnap(W); for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } if (swl) clutGrab(W, s0, F, y0, 'vend'); }
+    if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); const s0 = swl && clutSnap(W), n0 = swl ? swl.length : 0; for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } if (swl) { const r = clutGrab(W, s0, F, y0, 'vend'); if (r && r.hid) swl.length = n0; else if (r && (r.sh || r.sa)) for (let q = n0; q < swl.length; q++) { swl[q].d0 -= r.sh; swl[q].d1 -= r.sh; swl[q].a0 += r.sa; swl[q].a1 += r.sa; } } } // b_genfit: log follows the move
   }
   // r6.3: hanging light-box signs on wall arms over the pavement (every couple of bays) + sidewalk dressing (bins, trash, crates,
   // food stalls, umbrella tables, puddles, ground pipes) weighted by how gritty the street is
