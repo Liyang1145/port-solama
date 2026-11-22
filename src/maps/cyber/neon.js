@@ -8,6 +8,7 @@ import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
 import { BldgLayer } from './bldglayer.js';
 import { cnText, cnReady, cnWhenReady } from './cnglyph.js';
+import { PortQuay } from './port.js';
 
 const WORDS_V = [['霓', '港'], ['鲸', '歌', '电', '子'], ['夜', '航'], ['零', '点', '茶'], ['海', '妖', '酒', '吧'], ['蓝', '晶', '诊', '所'], ['极', '光'], ['数', '字', '海']];
 const WORDS_H = [['SOLA//NET', '索拉纳网络'], ['潮汐 VR', 'DIVE DEEP'], ['白鲸 AI', '24H ONLINE'], ['双月光学', 'TWIN MOON'], ['回声电台', '101.7 FM'], ['拉面 24H', 'RAMEN'], ['珊瑚银行', 'CORAL BANK'], ['Ψ-ARC', '义体工坊'],
@@ -128,8 +129,11 @@ export function buildNeon(scene, city) {
     const b = new THREE.Mesh(beamG, m); b.position.set(p.x, p.h + 1, p.z); b.renderOrder = 7; b.userData = { ph: R() * 6.28, sp: 0.15 + R() * 0.2, tilt: 0.28 + R() * 0.2 }; b.frustumCulled = false; scene.add(b); out.beams.push(b); out.meshes.push(b); }
   // r6.2: street-structure layer (harbor cranes / pipes / catwalks, skyways, sky bridges, cross-street cables), chunk-streamed
   out.bldg = city.stream ? new BldgLayer(scene, city.stream.mats, city) : null;
+  // r6.4 (b_port): 货柜港 south quay — STS cranes, container yard (instanced), berthed box ship, quay ground + props
+  out.port = city.stream ? new PortQuay(scene, city.stream.mats, city) : null;
   out.update = (night, time) => {
     if (out.bldg) out.bldg.sync();
+    if (out.port) out.port.sync();
     const on = night > 0.02;
     for (const m of out.meshes) m.visible = on;
     if (!on) return;
