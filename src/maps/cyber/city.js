@@ -329,7 +329,8 @@ export function volume(ctx, poly, y0, y1, opts) {
   polyCap(W.b('roof', cx, cz), poly, y1);
   if (opts.collide !== false) {
     const xs = poly.map((p) => p[0]), zs = poly.map((p) => p[1]);
-    col.add(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), y1, 'bld');
+    const bx = col.add(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), y1, 'bld');
+    if (bx && !streamed(ctx)) bx.poly = poly; // b_coreflow: the real footprint, for storefront.js exactCore() (no rng use, box unchanged here)
   }
 }
 function chamfer(x0, z0, x1, z1, c) {

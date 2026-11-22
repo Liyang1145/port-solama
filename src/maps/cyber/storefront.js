@@ -57,6 +57,8 @@ const TW = TYPES.reduce((s, t) => s + t[2], 0);
 const SIGN_TYPE = ['ramen', 'bbq', 'repair', 'pharm', 'hard', 'barber', 'conv', 'tea', 'repair', 'repair', 'conv', 'tea', 'netcafe', 'laundry', 'paidang', 'hard', 'ramen', 'bbq'];
 const TYPE_BY_ID = Object.fromEntries(TYPES.map((t) => [t[0], t]));
 const NOAVOID = typeof location !== 'undefined' && /[?&]shopnoavoid/.test(location.search); // test switch: b_storefront placement (no sidewalk avoidance)
+// b_coreflow test switch: ?nocoreflow builds the same geometry without this lane's collider changes (before/after in one build)
+const COREFLOW_OFF = typeof location !== 'undefined' && /[?&]nocoreflow/.test(location.search);
 function pickType() { let r = rng() * TW; for (const t of TYPES) { r -= t[2]; if (r <= 0) return t; } return TYPES[0]; }
 
 // ------------------------------------------------------------------ unit geometries ----
@@ -165,6 +167,11 @@ const BUCK = ['vcolD', 'neon'];
 
 const _nm = new THREE.Matrix3(), _v = new THREE.Vector3(), _n = new THREE.Vector3();
 const _m = new THREE.Matrix4(), _w = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
+// b_coreflow: bay-frame bounds of one piece [x0, x1, y0, z1, ybottom] (x0, x1 along the facade, z1 outermost, y bottom)
+const _bv = new THREE.Vector3();
+function bayBox(k, mat) { const g = geos()[KINDS[k][0]]; if (!g.boundingBox) g.computeBoundingBox(); const bb = g.boundingBox; let x0 = 1e9, x1 = -1e9, z1 = -1e9, yb = 1e9;
+  for (let c = 0; c < 8; c++) { _bv.set(c & 1 ? bb.max.x : bb.min.x, c & 2 ? bb.max.y : bb.min.y, c & 4 ? bb.max.z : bb.min.z).applyMatrix4(mat); x0 = Math.min(x0, _bv.x); x1 = Math.max(x1, _bv.x); z1 = Math.max(z1, _bv.z); yb = Math.min(yb, _bv.y); }
+  return [x0, x1, 0, z1, yb]; }
 const BAYB = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)); // bay frame (x along the facade, z out) -> parcel frame
 
 export class StorefrontLayer {
@@ -216,7 +223,7 @@ export class StorefrontLayer {
       bs.street++;
       const F0 = new THREE.Matrix4().makeBasis(new THREE.Vector3(e.dx, 0, e.dz), new THREE.Vector3(0, 1, 0), new THREE.Vector3(ox, 0, oz)).setPosition(e.p[0], 0, e.p[1]);
       // existing street furniture with colliders on the outside-clutter strip (lamps, palms, poles, signs, benches …) -> sidewalk spans
-      const sw = []; { const m = P(e.len / 2, 1); for (const b of col.query(m[0], m[1], e.len / 2 + 2, [])) { if (b.tag === 'bld' || b.tag === 'shop' || b.tag === 'gap') continue;
+      const sw = []; { const m = P(e.len / 2, 1); for (const b of col.query(m[0], m[1], e.len / 2 + 2, [])) { if (b.tag === 'bld' || b.tag === 'shop' || b.tag === 'gap' || b.tag === 'trim') continue;
         let a0 = 1e9, a1 = -1e9, d0 = 1e9, d1 = -1e9; for (const [x, z] of [[b.minX, b.minZ], [b.maxX, b.minZ], [b.minX, b.maxZ], [b.maxX, b.maxZ]]) { const dx = x - e.p[0], dz = z - e.p[1]; const a = dx * e.dx + dz * e.dz, d = dx * ox + dz * oz; a0 = Math.min(a0, a); a1 = Math.max(a1, a); d0 = Math.min(d0, d); d1 = Math.max(d1, d); }
         if (a1 < -0.5 || a0 > e.len + 0.5 || d1 < 0 || d0 > 2.4) continue; sw.push({ k: b.tag, a0, a1, d0, d1 }); bs.swItems++; } }
       const n = Math.max(1, Math.round(e.len / e.sw)), cw = e.len / n; const shops = [];
@@ -238,7 +245,7 @@ export class StorefrontLayer {
     const bs = this.stats.bySrc[src]; bs.shops++; bs.types[type] = (bs.types[type] || 0) + 1;
     if (synced) this.stats.signSync++; else if (r.sg === 1) this.stats.signOther++;
     const shop = { type, src, inst: {}, tris: 0, cost: 0, uniq: [] }; const hw = w / 2; const gz = r.core ? 0.14 : 0.236; // glass plane (core: the facade shader wall, no storefront kit)
-    const push = (k, mat) => { _w.multiplyMatrices(BM, mat); (shop.inst[k] || (shop.inst[k] = [])).push(..._w.elements); shop.tris += this.triOf[k]; shop.cost += this.triOf[k] * (KC[k].b ? 3 : 2); };
+    const SL = []; const push = (k, mat) => { if (mat.elements[14] > 0.3) SL.push(bayBox(k, mat)); _w.multiplyMatrices(BM, mat); (shop.inst[k] || (shop.inst[k] = [])).push(..._w.elements); shop.tris += this.triOf[k]; shop.cost += this.triOf[k] * (KC[k].b ? 3 : 2); };
     const P0 = (k, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0) => { _e.set(0, ry, rz, 'YXZ'); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, z); push(k, _m.compose(_p, _q, _s)); };
     // b_recess: in the core the glazing plane (door, window cards, screens, stickers: z 0.075–0.2) moves 6.5 cm back to the wall,
     // so it sits at the back of the new 0.34 m deep surround
@@ -257,14 +264,14 @@ export class StorefrontLayer {
     if (!NOAVOID) for (const b of sw) busy.push([b[0], b[1]]);
     const groups = [];
     // ---- shutter: existing (from the log) or one of ours on bare bays
-    let yb = yt; // lowest point of a curtain over the opening (yt = none)
+    let yb = yt; let rails = false, railsF = false, poleX = null; // lowest point of a curtain over the opening (yt = none); b_coreflow: core shutter rails out at z 0.455
     if (r.kind === 'shut') yb = y0 + (yt - y0) * r.open;
     else if (r.kind === 'plain' && rng() < 0.45) { const half = rng() < 0.6; const op = half ? rand(0.4, 0.65) : 0.95; yb = y0 + (yt - y0) * op; if (half) this.stats.shutterHalf++; else this.stats.shutterUp++;
       const k = rng() < 0.3 ? 'shutterR' : 'shutter';
-      if (r.core) { const yo = yt - 0.24, zs = 0.42; if (yb > yo - 0.05) yb = Math.min(yb, yo - 0.05); // b_recess: surface-mounted on the surround (box under the ledge, rails outside the casings)
+      if (r.core) { const yo = yt - 0.24, zs = 0.42; rails = true; if (yb > yo - 0.05) yb = Math.min(yb, yo - 0.05); // b_recess: surface-mounted on the surround (box under the ledge, rails outside the casings)
         if (yo - yb > 0.1) P0(k, 0, yb, zs, w + 0.3, yo - yb, 1); P0('steel', 0, yt - 0.02, zs + 0.13, w + 0.36, 0.44, 0.3); for (const s of [-1, 1]) P0('steel', s * (hw + 0.17), (y0 + yo) / 2, zs, 0.07, yo - y0, 0.07); }
       else { if (yt - yb > 0.1) P(k, 0, yb, 0.31, w, yt - yb, 1);
-        P('steel', 0, yt + 0.22, 0.36, w + 0.2, 0.44, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); } }
+        P('steel', 0, yt + 0.22, 0.36, w + 0.2, 0.44, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); railsF = true; } }
     const vTop = Math.min(ytr - 0.05, yb - 0.05); const open = vTop > ys + 0.6; // window still visible below the curtain
     // b_corner: core bays have only the shader glass + piers -> door frame, glass leaf and push bar of our own
     if (r.core) { const yd = Math.min(ytr, yb); for (const x of [dx0, dx1]) P('frame', x, (y0 + yd) / 2, 0.1, 0.08, yd - y0, 0.1); P('frame', dcx, yd, 0.1, dx1 - dx0 + 0.08, 0.08, 0.1);
@@ -284,7 +291,14 @@ export class StorefrontLayer {
         const gx0 = -xi, gx1 = xi; Q('frame', gx0, gx1, ytr - 0.035, ytr + 0.035, 0.02, 0.09);  // transom bar (glazing at the wall)
         if (wx1 - wx0 > 0.4) { Q('frame', wx0 - 0.06, wx1 + 0.06, ys - 0.03, ys + 0.03, 0.02, 0.1); Q('board', wx0 - 0.06, wx1 + 0.06, y0 + 0.05, ys - 0.03, 0.01, 0.06); // sill + kick panel
           if (wx1 - wx0 > 1.7) Q('frame', wcx - 0.03, wcx + 0.03, ys + 0.03, ytr - 0.035, 0.02, 0.09); }
-        this.stats.recess.shops++; this.stats.recess.tris += shop.tris - n0; } }
+        this.stats.recess.shops++; this.stats.recess.tris += shop.tris - n0;
+        // b_coreflow: the jamb casings (and the pier between two bays, 0.2 m deep, never had a collider either) stand at walking
+        // height 0.34–0.38 m (shutter rails 0.455 m) proud of the flat building collider -> one thin oriented box per side, from the
+        // dark lining on the inner casing face (hw − 0.07) to the pier centre (hw + 0.2, where the neighbour's box takes over), wall to casing face.
+        // The door opening between the casings stays free up to the wall (the head and the ledge are overhead: no box).
+        if (!COREFLOW_OFF && this.city.col && this.city.col.addOBB) { const zd = rails ? 0.47 : 0.39; const u = new THREE.Vector3(1, 0, 0).transformDirection(BM);
+          for (const sg of [-1, 1]) { const c = new THREE.Vector3(sg * (hw + 0.065), 0, zd / 2).applyMatrix4(BM);
+            this.city.col.addOBB(c.x, c.z, u.x, u.z, 0.135, zd / 2, yo, 'trim'); this.stats.trimCols = (this.stats.trimCols || 0) + 1; } } } }
     // ---- 门头 light box in the transom: dark case + lit shop-name face (cnFace, merged World)
     { const wl = Math.min(w - 0.3, 3.4), hl = 0.55; let yl = Math.max(ytr + 0.3, Math.min(yh - 0.3, ytr + 0.32)); const lz = r.core ? 0.26 : 0.44; // b_recess: core box sits in the recess, under the soffit
       if (r.core) yl = Math.min(yl, yt - 0.25 - hl / 2); P0('lbBody', 0, yl, lz, wl, hl, 0.18);
@@ -297,7 +311,10 @@ export class StorefrontLayer {
       P(k, x, y, gz, rand(0.12, 0.2), rand(0.08, 0.13), 0.006, 0, rand(-0.25, 0.25)); P('ink', x, y - 0.012, gz + 0.004, 0.07, 0.022, 0.003); } };
     // ---- outside clutter group: x span [ox0, ox1], z ≤ oz; kept off the door and off the storefront's own clutter
     const free = (x0, x1) => x0 >= -hw - 0.05 && x1 <= hw + 0.05 && !(x1 > dx0 - 0.1 && x0 < dx1 + 0.1) && !busy.some((b) => x1 > b[0] && x0 < b[1]);
-    const out = { x0: 1e9, x1: -1e9, z: 0 }; const claim = (x0, x1, z) => { out.x0 = Math.min(out.x0, x0); out.x1 = Math.max(out.x1, x1); out.z = Math.max(out.z, z); busy.push([x0, x1]); groups.push([x0, x1, z]); };
+    const out = { x0: 1e9, x1: -1e9, z: 0 }; let sl0 = 0; const claim = (x0, x1, z) => { out.x0 = Math.min(out.x0, x0); out.x1 = Math.max(out.x1, x1); out.z = Math.max(out.z, z); busy.push([x0, x1]);
+      // b_coreflow: the group's standing pieces (pushed since the last claim, out past z 0.45, starting below 1 m) give its tight box
+      let t = null; for (let i = sl0; i < SL.length; i++) { const b = SL[i]; if (b[3] < 0.45 || b[4] > y0 + 1.0) continue; t = t ? [Math.min(t[0], b[0]), Math.max(t[1], b[1]), Math.max(t[2], b[3])] : [b[0], b[1], b[3]]; } sl0 = SL.length;
+      groups.push([x0, x1, z, t]); };
     const spot = (wd) => { for (let i = 0; i < 6; i++) { const x = rand(-hw + wd / 2, hw - wd / 2); if (free(x - wd / 2, x + wd / 2)) return x; } return null; };
     const stoolK = () => pick(['stoolR', 'stoolR', 'stoolB', 'stoolG']);
     const noren = (k) => { if (yb < ytr) return; P(k, dcx, ytr - 0.02, 0.33, dx1 - dx0 + 0.04, rand(0.55, 0.8), 1); };
@@ -346,7 +363,7 @@ export class StorefrontLayer {
       const x = spot(0.9); if (x !== null) { P(stoolK(), x - 0.22, y0, 0.6); P(stoolK(), x + 0.24, y0, 0.62, 1, 1, 1, 1.1); P('bucketB', x + 0.24, y0 + 0.6, 0.62, 0.42, 0.28, 0.32); claim(x - 0.45, x + 0.45, 0.8); }
     } else if (type === 'barber') {
       if (open && card('litW', wx0, wx1, ys + 0.05, vTop)) { const n = Math.max(1, Math.floor(ww / 0.8)); for (let i = 0; i < n; i++) { const x = wx0 + (i + 0.5) * ww / n; ink(x, ys + 1.2, 0.5, 0.65); ink(x, ys + 0.45, 0.3, 0.5); ink(x, ys + 0.75, 0.55, 0.12); } } // mirrors + chairs
-      const xp = left ? dx1 + 0.2 : dx0 - 0.2; if (Math.abs(xp) < hw - 0.05) { const yc = y0 + 2.0; P('pole', xp, yc, 0.42, 0.16, 0.7, 0.16); for (let i = 0; i < 3; i++) { P('bandR', xp, yc - 0.27 + i * 0.22, 0.42, 0.17, 0.6, 0.17); P('bandB', xp, yc - 0.16 + i * 0.22, 0.42, 0.17, 0.6, 0.17); }
+      const xp = left ? dx1 + 0.2 : dx0 - 0.2; if (Math.abs(xp) < hw - 0.05) { const yc = y0 + 2.0; poleX = xp; P('pole', xp, yc, 0.42, 0.16, 0.7, 0.16); for (let i = 0; i < 3; i++) { P('bandR', xp, yc - 0.27 + i * 0.22, 0.42, 0.17, 0.6, 0.17); P('bandB', xp, yc - 0.16 + i * 0.22, 0.42, 0.17, 0.6, 0.17); }
         for (const s of [-1, 1]) P('steel', xp, yc + s * 0.38, 0.42, 0.2, 0.06, 0.2); P('steel', xp, yc, 0.3, 0.05, 0.05, 0.22); }
       stickers(randi(0, 2));
     } else if (type === 'bbq') { // 烧烤: grill trough with coals + skewers under a stainless hood (duct up the wall), skewer rack
@@ -414,9 +431,25 @@ export class StorefrontLayer {
     this.stats.swItems += sw.length; this.stats.outGroups += groups.length;
     for (const gp of groups) if (sw.some((b) => gp[1] > b[0] + 0.1 && gp[0] < b[1] - 0.1 && gp[2] > b[2] && 0.3 < b[3])) this.stats.outOverlap++;
     // ---- one collider for the outside clutter (oriented with the facade)
-    if (out.x1 > out.x0 && this.city.col && this.city.col.addOBB) { const zc = (0.3 + out.z) / 2; const c = new THREE.Vector3((out.x0 + out.x1) / 2, 0, zc).applyMatrix4(BM); const u = new THREE.Vector3(1, 0, 0).transformDirection(BM);
-      this.city.col.addOBB(c.x, c.z, u.x, u.z, (out.x1 - out.x0) / 2, (out.z - 0.3) / 2, y0 + 1.0, 'shop'); this.stats.colliders++; shop.col = { x: c.x, z: c.z, hl: (out.x1 - out.x0) / 2, hw: (out.z - 0.3) / 2 }; }
-    const c0 = new THREE.Vector3(0, 0, 0).applyMatrix4(BM); shop.cx = c0.x; shop.cz = c0.z;
+    // b_coreflow: one tight box per clutter group instead of one box over the union of all groups — the union
+    // spanned the door (groups sit on both sides of it) and the empty sidewalk between them: blocked, nothing there. Plus the small
+    // pieces that stood at walking height with no box: the barber pole (bottom bracket at 1.6 m, 0.5 m out) and the rails of the
+    // roll shutters this layer adds on streamed bays (z 0.27–0.35).
+    if (out.x1 > out.x0 && this.city.col && this.city.col.addOBB) { const u = new THREE.Vector3(1, 0, 0).transformDirection(BM); const C = this.city.col;
+      const box = (x0, x1, z0, z1, h, tag) => { const c = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(BM); C.addOBB(c.x, c.z, u.x, u.z, (x1 - x0) / 2, (z1 - z0) / 2, h, tag); this.stats.colliders++; };
+      if (COREFLOW_OFF) box(out.x0, out.x1, 0.3, out.z, y0 + 1.0, 'shop');
+      else { const gs = groups.map((q) => (q[3] ? [Math.max(q[0], q[3][0]), Math.min(q[1], q[3][1]), Math.min(q[2], q[3][2] + 0.02)] : q.slice(0, 3))).filter((q) => q[1] > q[0]).sort((a, b) => a[0] - b[0]); const mg = [];
+        for (const q of gs) mg.push(q); // not merged: two overlapping groups of different depth would leave an empty corner blocked
+        for (const q of mg) box(q[0], q[1], 0.3, q[2], y0 + 1.0, 'shop'); this.stats.outBoxes = (this.stats.outBoxes || 0) + mg.length; }
+      const zc = (0.3 + out.z) / 2; const c = new THREE.Vector3((out.x0 + out.x1) / 2, 0, zc).applyMatrix4(BM); shop.col = { x: c.x, z: c.z, hl: (out.x1 - out.x0) / 2, hw: (out.z - 0.3) / 2 }; }
+    if (!COREFLOW_OFF && this.city.col && this.city.col.addOBB) { const u = new THREE.Vector3(1, 0, 0).transformDirection(BM); const C = this.city.col;
+      const box = (x0, x1, z0, z1, h) => { const c = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(BM); C.addOBB(c.x, c.z, u.x, u.z, (x1 - x0) / 2, (z1 - z0) / 2, h, 'trim'); this.stats.smallCols = (this.stats.smallCols || 0) + 1; };
+      if (poleX !== null) box(poleX - 0.11, poleX + 0.11, 0.2, 0.53, y0 + 2.45);
+      if (railsF) for (const sg of [-1, 1]) box(sg * hw - 0.05, sg * hw + 0.05, 0.2, 0.36, yt);
+      // a half-pulled shutter whose bottom bar hangs below head height (1.75 m) closes the opening to walking (core: surface-mounted
+      // at z 0.42 between the casings; streamed: z 0.31 across the bay)
+      if ((rails || railsF) && yb < y0 + 1.75) { if (rails) box(-hw + 0.05, hw - 0.05, 0.2, 0.46, yt); else box(-hw, hw, 0.2, 0.36, yt); this.stats.shutCols = (this.stats.shutCols || 0) + 1; } }
+    const c0 = new THREE.Vector3(0, 0, 0).applyMatrix4(BM); shop.cx = c0.x; shop.cz = c0.z; shop.y0 = y0; shop.hw = hw;
     const fwd = new THREE.Vector3(0, 0, 1).transformDirection(BM), al = new THREE.Vector3(1, 0, 0).transformDirection(BM); shop.n = [fwd.x, fwd.z]; shop.u = [al.x, al.z]; shop.w = w; shop.shut = yb < yt - 0.1;
     return shop;
   }
@@ -473,7 +506,7 @@ export class StorefrontLayer {
     this.world = W.build(this.group, this.mats, { cnsign: { cast: false } });
   }
   sync(cam) {
-    if (!cam) return; this.frame++; if (!this.coreDone) this.planCore();
+    if (!cam) return; this.frame++; if (!this.coreDone) { this.planCore(); if (!COREFLOW_OFF) this.exactCore(); }
     const p = cam.position; const L = this.last; const st = this.stream; let on = 0;
     if (st) for (const ch of this.chunks.values()) { const c = st.chunks.get(ch.key); if (c && c.near) on++; }
     const moved = !L || Math.hypot(p.x - L.x, p.z - L.z) > 8 || Math.abs(p.y - L.y) > 6;
@@ -481,6 +514,32 @@ export class StorefrontLayer {
   }
   tris() { let n = 0; for (const m of this.meshes) if (m && m.visible) n += m.geometry.drawRange.count / 3; for (const m of this.world) n += m.geometry.index ? m.geometry.index.count / 3 : m.geometry.attributes.position.count / 3; return Math.round(n); }
   calls() { let n = 0; for (const m of this.meshes) if (m && m.visible) n++; return n + this.world.length; }
+  // b_coreflow: hand-built core buildings with a non-rectangular footprint (Deco hotels' rounded front corners) collide as their
+  // axis-aligned bounding box (city.js volume()), which juts up to ~0.9 m onto the sidewalk at each rounded corner, invisible.
+  // After the core shops are planned (planCore reads those boxes), each such box is swapped for the exact footprint: per edge an
+  // oriented box whose outer face is the edge (reaching D inward) + the bounding box shrunk by D (convex footprints: together they
+  // cover the polygon and nothing outside it). Same height and tag; geometry unchanged.
+  exactCore() {
+    const col = this.city.col; if (!col || !col.addOBB || !col.remove) return; const st = this.stats.exact = { boxes: 0, pieces: 0 };
+    for (const b of col.boxes.slice()) { if (b.tag !== 'bld' || !b.poly || b.o) continue; const P = b.poly; const n = P.length;
+      const rect = n === 4 && P.every((p, i) => { const q = P[(i + 1) % n]; return Math.abs(p[0] - q[0]) < 1e-6 || Math.abs(p[1] - q[1]) < 1e-6; }); if (rect) continue;
+      let ar = 0; for (let i = 0; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; ar += p[0] * q[1] - q[0] * p[1]; } const sg = ar > 0 ? 1 : -1; // winding -> inward side
+      const D = Math.min(3.5, (b.maxX - b.minX) / 2 - 0.05, (b.maxZ - b.minZ) / 2 - 0.05); if (D < 0.3) continue;
+      col.remove(b); st.boxes++; const add = (x) => { x.poly = P; st.pieces++; };
+      for (let i = 0; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; const dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz); if (L < 0.02) continue;
+        const ux = dx / L, uz = dz / L; const ix = -uz * sg, iz = ux * sg; // inward normal (CCW in x-right / z-up: left of the edge)
+        add(col.addOBB((p[0] + q[0]) / 2 + ix * D / 2, (p[1] + q[1]) / 2 + iz * D / 2, ux, uz, L / 2, D / 2, b.h, 'bld')); }
+      add(col.add(b.minX + D, b.minZ + D, b.maxX - D, b.maxZ - D, b.h, 'bld')); }
+  }
+  // b_coreflow test helper: the walking-height pieces of a shop as boxes in the shop frame (x along u, z out along n, from the
+  // facade centre) — [kind, x0, x1, z0, z1, y0, y1] from the instance matrices and the unit geometries' bounds
+  solids(s) { const G = geos(); const o = []; const v = new THREE.Vector3(), M = new THREE.Matrix4();
+    for (const k in s.inst) { const g = G[KINDS[k][0]]; if (!g.boundingBox) g.computeBoundingBox(); const bb = g.boundingBox; const L = s.inst[k];
+      for (let j = 0; j < L.length; j += 16) { M.fromArray(L, j); let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, y0 = 1e9, y1 = -1e9;
+        for (let c = 0; c < 8; c++) { v.set(c & 1 ? bb.max.x : bb.min.x, c & 2 ? bb.max.y : bb.min.y, c & 4 ? bb.max.z : bb.min.z).applyMatrix4(M);
+          const dx = v.x - s.cx, dz = v.z - s.cz; const a = dx * s.u[0] + dz * s.u[1], d = dx * s.n[0] + dz * s.n[1]; x0 = Math.min(x0, a); x1 = Math.max(x1, a); z0 = Math.min(z0, d); z1 = Math.max(z1, d); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); }
+        o.push([k, x0, x1, z0, z1, y0, y1]); } }
+    return o; }
   // test helper: all planned shops (world centre at the facade, outward normal, along-facade axis)
   list() { const o = []; for (const ch of this.chunks.values()) for (const s of ch.shops) o.push(s); return o; }
 }
