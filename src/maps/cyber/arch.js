@@ -27,15 +27,15 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
   for (let i = 0; i < n; i++) {
     const a0 = i * cw + 0.2, a1 = (i + 1) * cw - 0.2; const r = rng();
     const yt = y0 + ground * 0.78;
-    let kind = 'plain', open = 1, cl = null, sg = 0, sk = -1;
+    let kind = 'plain', open = 1, cl = null, sg = 0, sk = -1, aw = null;
     if (r < 0.32) { const o = pick([0, 0, 0.35, 0.6]); if (o > 0) cl = storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, o); kind = 'shut'; open = o; }
-    else if (r < 0.62) { cl = storefront(W, F, a0, a1, y0, yt); awning(W, F, a0, a1, yt + 0.05, rand(1.3, 2.0)); kind = 'awn'; }
+    else if (r < 0.62) { cl = storefront(W, F, a0, a1, y0, yt); const ao = rand(1.3, 2.0); awning(W, F, a0, a1, yt + 0.05, ao); aw = { y: yt + 0.05, out: ao }; kind = 'awn'; } // b_recess: log the awning (same rng order)
     else if (r < 0.75) { cl = storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, 0.92); kind = 'up'; open = 0.92; } // open shop: shutter rolled up into the housing
     else cl = storefront(W, F, a0, a1, y0, yt);
     // r6.4 b_street2: about half the shop boards are Chinese light boxes (invented names); stickers / condensers / wiring per bay
     if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) { sk = cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); sg = 1; } else { signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); sg = 2; } }
     // r6.4 b_storefront: streamed parcels (stub collider, no query) log each bay for storefront.js — no rng use, geometry unchanged
-    if (LOG) LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, sw: swl, i, n });
+    if (LOG) LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, aw, sw: swl, i, n });
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } }
   }

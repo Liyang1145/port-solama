@@ -45,7 +45,8 @@ import { cnFace } from './street2.js';
 // b_corner: the budget is per *frame*: the frame draws 'neon' + names 3x (half-res water / wet-street mirror, main, GTAO G-buffer)
 // and 'vcolD' 2x (it skips the mirror pass, see mesh()) -> cost = 2·vcolD + 3·neon triangles. 29k keeps the whole-frame increase
 // ≤ 30k even where no shop was drawn before (Deco core); b_storefront/b_signsync drew ~15k layer tris 3x = ~45k.
-const CH = 160, RMAX = 120, BUDGET = 29000;
+// b_recess: core shops carry ~300 cost of recess pieces each -> 29k + ~5.5k so the same shops still pack (whole-frame delta ≤ 20k)
+const CH = 160, RMAX = 120, BUDGET = 34500;
 // shop types: [id, sign cells (street2.js SIGN_TXT), weight]
 export const TYPES = [['ramen', [16, 0], 1.2], ['tea', [21, 7, 11], 1.0], ['conv', [6, 10], 1.2], ['repair', [18, 9, 2, 8], 1.1], ['pharm', [3], 0.8],
   ['hard', [4, 15], 0.8], ['laundry', [13], 0.7], ['barber', [5], 0.6], ['clinic', [22, 23], 0.7], ['bbq', [1, 17], 0.9], ['paidang', [14], 0.8], ['netcafe', [12], 0.8]];
@@ -139,6 +140,9 @@ const MDEF = {
   // b_corner
   inox: [0x9aa0a6, 0.35, 0.8], soot: [0x26221e, 0.9, 0.2], coal: [0x2a0a02, 0.8, 0.0, 0xff5a12, 'lamp'], meat: [0x7a2a14, 0.7, 0.0], veg: [0x3d7a26, 0.7, 0.0],
   stick: [0xb89060, 0.8, 0.0], tableR: [0xd8d8d0, 0.5, 0.0], dstoolR: [0xb01a22, 0.5, 0.0], dstoolB: [0x1d4f9c, 0.5, 0.0], pvc: [0x8fa8a6, 0.25, 0.0],
+  // b_recess: core shop surround (门套) trims, recess lining / soffit, threshold stone
+  trimK: [0x202226, 0.5, 0.3], trimB: [0x4a3826, 0.5, 0.5], trimS: [0x6a6f76, 0.4, 0.6], trimT: [0x173c3e, 0.5, 0.3], trimW: [0xa8a296, 0.7, 0.0], trimR: [0x4a1414, 0.6, 0.2],
+  rev: [0x0b0c0e, 0.8, 0.1], soffit: [0x141518, 0.8, 0.1], sill: [0x34363a, 0.8, 0.0],
   monF: [0x101114, 0.4, 0.3], scrB: [0x0a1020, 0.3, 0.0, 0x5a8cff, 'lit'], scrP: [0x180a20, 0.3, 0.0, 0xc060ff, 'lit'], chair: [0x18181c, 0.6, 0.1], chairR: [0x601014, 0.6, 0.1],
 };
 const GLOW = { lit: [0.35, 1.7], lamp: [0.4, 2.4], stk: [0.06, 0.45] }; // emissiveIntensity = a + uNight * b
@@ -172,6 +176,7 @@ export class StorefrontLayer {
     for (const t of TYPES) this.stats.types[t[0]] = 0;
     this.stats.bySrc = { front: { shops: 0, types: {} }, side: { rows: 0, bays: 0, shops: 0, types: {} }, core: { edges: 0, street: 0, bays: 0, shops: 0, types: {}, swItems: 0 } };
     this.coreDone = false; this.sideCache = new WeakMap();
+    this.stats.recess = { shops: 0, tris: 0 }; this.stats.duct = { bbq: 0, awn: 0, sign: 0, rerouted: 0, hoodLow: 0, coreClamp: 0, hitOld: 0, hitNew: 0, hoodOld: 0, hoodNew: 0, signOld: 0, signNew: 0 };
     SHOP_LOG.length = 0; // nothing from before the layer existed belongs to a streamed parcel we will see again
     if (this.stream) { const prev = this.stream.onParcel; this.stream.onParcel = (c, p, m) => { this.onParcel(c, p, m); if (prev) prev(c, p, m); }; }
   }
@@ -234,8 +239,13 @@ export class StorefrontLayer {
     if (synced) this.stats.signSync++; else if (r.sg === 1) this.stats.signOther++;
     const shop = { type, src, inst: {}, tris: 0, cost: 0, uniq: [] }; const hw = w / 2; const gz = r.core ? 0.14 : 0.236; // glass plane (core: the facade shader wall, no storefront kit)
     const push = (k, mat) => { _w.multiplyMatrices(BM, mat); (shop.inst[k] || (shop.inst[k] = [])).push(..._w.elements); shop.tris += this.triOf[k]; shop.cost += this.triOf[k] * (KC[k].b ? 3 : 2); };
-    const P = (k, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0) => { _e.set(0, ry, rz, 'YXZ'); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, z); push(k, _m.compose(_p, _q, _s)); };
-    const seg = (k, a, b, wd, h = wd) => { _a.set(...a); _b.set(...b); const L = _a.distanceTo(_b); if (L < 0.01) return; _b.sub(_a).normalize(); _q.setFromUnitVectors(_Y, _b); _s.set(wd, L, h); _p.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2); push(k, _m.compose(_p, _q, _s)); };
+    const P0 = (k, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0) => { _e.set(0, ry, rz, 'YXZ'); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, z); push(k, _m.compose(_p, _q, _s)); };
+    // b_recess: in the core the glazing plane (door, window cards, screens, stickers: z 0.075–0.2) moves 6.5 cm back to the wall,
+    // so it sits at the back of the new 0.34 m deep surround
+    const ZB = (z) => (r.core && z >= 0.075 && z < 0.2 ? z - 0.065 : z);
+    const P = (k, x, y, z, sx, sy, sz, ry, rz) => P0(k, x, y, ZB(z), sx, sy, sz, ry, rz);
+    const Q = (k, x0, x1, ya, yb2, z0, z1) => { if (x1 - x0 > 0.005 && yb2 - ya > 0.005 && z1 - z0 > 0.005) P0(k, (x0 + x1) / 2, (ya + yb2) / 2, (z0 + z1) / 2, x1 - x0, yb2 - ya, z1 - z0); }; // box by extents, unshifted
+    const seg = (k, a, b, wd, h = wd) => { a = [a[0], a[1], ZB(a[2])]; b = [b[0], b[1], ZB(b[2])]; _a.set(...a); _b.set(...b); const L = _a.distanceTo(_b); if (L < 0.01) return; _b.sub(_a).normalize(); _q.setFromUnitVectors(_Y, _b); _s.set(wd, L, h); _p.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2); push(k, _m.compose(_p, _q, _s)); };
     const y0 = r.y0, yt = r.yt, ys = y0 + 0.45, yh = yt - 0.06, ytr = Math.min(yh - 0.35, y0 + 2.6);
     // door (kit.js storefront: 1 m leaf at a = da) and the clutter span it left on the sidewalk, in bay x
     const da = r.cl && r.cl.da !== undefined ? r.cl.da : r.a0 + 0.15; const dx0 = Math.max(-hw, da - ac), dx1 = Math.min(hw, dx0 + 1.0); const dcx = (dx0 + dx1) / 2;
@@ -250,15 +260,35 @@ export class StorefrontLayer {
     let yb = yt; // lowest point of a curtain over the opening (yt = none)
     if (r.kind === 'shut') yb = y0 + (yt - y0) * r.open;
     else if (r.kind === 'plain' && rng() < 0.45) { const half = rng() < 0.6; const op = half ? rand(0.4, 0.65) : 0.95; yb = y0 + (yt - y0) * op; if (half) this.stats.shutterHalf++; else this.stats.shutterUp++;
-      const k = rng() < 0.3 ? 'shutterR' : 'shutter'; if (yt - yb > 0.1) P(k, 0, yb, 0.31, w, yt - yb, 1);
-      P('steel', 0, yt + 0.22, 0.36, w + 0.2, 0.44, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); }
+      const k = rng() < 0.3 ? 'shutterR' : 'shutter';
+      if (r.core) { const yo = yt - 0.24, zs = 0.42; if (yb > yo - 0.05) yb = Math.min(yb, yo - 0.05); // b_recess: surface-mounted on the surround (box under the ledge, rails outside the casings)
+        if (yo - yb > 0.1) P0(k, 0, yb, zs, w + 0.3, yo - yb, 1); P0('steel', 0, yt - 0.02, zs + 0.13, w + 0.36, 0.44, 0.3); for (const s of [-1, 1]) P0('steel', s * (hw + 0.17), (y0 + yo) / 2, zs, 0.07, yo - y0, 0.07); }
+      else { if (yt - yb > 0.1) P(k, 0, yb, 0.31, w, yt - yb, 1);
+        P('steel', 0, yt + 0.22, 0.36, w + 0.2, 0.44, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); } }
     const vTop = Math.min(ytr - 0.05, yb - 0.05); const open = vTop > ys + 0.6; // window still visible below the curtain
     // b_corner: core bays have only the shader glass + piers -> door frame, glass leaf and push bar of our own
     if (r.core) { const yd = Math.min(ytr, yb); for (const x of [dx0, dx1]) P('frame', x, (y0 + yd) / 2, 0.1, 0.08, yd - y0, 0.1); P('frame', dcx, yd, 0.1, dx1 - dx0 + 0.08, 0.08, 0.1);
-      if (yd - y0 > 1.2) { P('glass', dcx, (y0 + yd) / 2, 0.08, dx1 - dx0 - 0.06, yd - y0 - 0.04, 0.02); P('steel', dcx, y0 + 1.05, 0.13, dx1 - dx0 - 0.2, 0.04, 0.04); } }
+      if (yd - y0 > 1.2) { P('glass', dcx, (y0 + yd) / 2, 0.08, dx1 - dx0 - 0.06, yd - y0 - 0.04, 0.02); P('steel', dcx, y0 + 1.05, 0.13, dx1 - dx0 - 0.2, 0.04, 0.04); }
+      // b_recess: the core bay reads as a recessed shopfront, not a door stuck on the wall: a deep surround (门套) projecting 0.34 m
+      // (head box under the transom ledge + two jamb casings over the piers), a dark lining on the inner jamb faces and a dark soffit
+      // with a lit downlight strip, a stone threshold, and the glazing (door, cards, stickers — shifted back, see ZB) at the wall with
+      // its own sill / transom bars, kick panel and a mid mullion. The parallax room of the facade shader shows through behind.
+      // Geometry only: the building collider stays the flat wall (the surround is inside the pier / ledge depth + 0.14 m).
+      { const D = 0.34, yo = yt - 0.2, tk = pick(['trimK', 'trimK', 'trimB', 'trimS', 'trimT', 'trimW', 'trimR']); const xi = hw - 0.07, xc = hw + 0.12; const n0 = shop.tris;
+        Q(tk, -xc, xc, yo, yt + 0.04, 0.0, D + 0.04);                                        // head (soffit face underneath is dark: below)
+        Q('soffit', -xi, xi, yo - 0.02, yo, 0.0, D);                                         // soffit
+        Q('litW', -xi + 0.25, xi - 0.25, yo - 0.035, yo - 0.02, D - 0.1, D - 0.05);           // downlight strip
+        for (const s of [-1, 1]) { const a = s < 0 ? [-xc, -hw + 0.04] : [hw - 0.04, xc], l = s < 0 ? [-hw + 0.04, -xi] : [xi, hw - 0.04];
+          Q(tk, a[0], a[1], y0, yo, 0.16, D + 0.04); Q('rev', Math.min(l[0], l[1]), Math.max(l[0], l[1]), y0, yo - 0.02, 0.0, D); }   // jamb casing + dark lining
+        Q('sill', -xc + 0.02, xc - 0.02, y0 - 0.03, y0 + 0.05, 0.0, D + 0.1);                  // threshold step
+        const gx0 = -xi, gx1 = xi; Q('frame', gx0, gx1, ytr - 0.035, ytr + 0.035, 0.02, 0.09);  // transom bar (glazing at the wall)
+        if (wx1 - wx0 > 0.4) { Q('frame', wx0 - 0.06, wx1 + 0.06, ys - 0.03, ys + 0.03, 0.02, 0.1); Q('board', wx0 - 0.06, wx1 + 0.06, y0 + 0.05, ys - 0.03, 0.01, 0.06); // sill + kick panel
+          if (wx1 - wx0 > 1.7) Q('frame', wcx - 0.03, wcx + 0.03, ys + 0.03, ytr - 0.035, 0.02, 0.09); }
+        this.stats.recess.shops++; this.stats.recess.tris += shop.tris - n0; } }
     // ---- 门头 light box in the transom: dark case + lit shop-name face (cnFace, merged World)
-    { const wl = Math.min(w - 0.3, 3.4), hl = 0.55, yl = Math.max(ytr + 0.3, Math.min(yh - 0.3, ytr + 0.32)); P('lbBody', 0, yl, 0.44, wl, hl, 0.18);
-      const c = new THREE.Vector3(0, yl, 0.536).applyMatrix4(BM); const n = new THREE.Vector3(0, 0, 1).transformDirection(BM);
+    { const wl = Math.min(w - 0.3, 3.4), hl = 0.55; let yl = Math.max(ytr + 0.3, Math.min(yh - 0.3, ytr + 0.32)); const lz = r.core ? 0.26 : 0.44; // b_recess: core box sits in the recess, under the soffit
+      if (r.core) yl = Math.min(yl, yt - 0.25 - hl / 2); P0('lbBody', 0, yl, lz, wl, hl, 0.18);
+      const c = new THREE.Vector3(0, yl, lz + 0.096).applyMatrix4(BM); const n = new THREE.Vector3(0, 0, 1).transformDirection(BM);
       const nk = synced ? r.sk : pick(T[1]); shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
     // ---- window display card (lit panel + dark strokes) in front of the parallax room, behind the glass
     const card = (k, x0, x1, ya, yb2) => { if (yb2 - ya < 0.15 || x1 - x0 < 0.2) return false; P(k, (x0 + x1) / 2, (ya + yb2) / 2, 0.12, x1 - x0, yb2 - ya, 0.02); return true; };
@@ -324,8 +354,30 @@ export class StorefrontLayer {
       if (open) { const ya = Math.max(ys + 0.35, vTop - 1.0); if (card('litW', wx0 + 0.05, wx1 - 0.05, ya, vTop)) { const rows = Math.max(2, Math.floor((vTop - ya) / 0.2));
         for (let i = 0; i < rows; i++) { const y = ya + (i + 0.6) * (vTop - ya) / (rows + 0.4); ink(wcx - ww * 0.12, y, ww * 0.5, 0.035); ink(wx1 - 0.25, y, 0.18, 0.035); } } }
       const x = spot(1.35); if (x !== null) { const z = 0.78; P('grill', x, y0, z); P('coal', x, y0 + 0.79, z, 1.12, 0.06, 0.22); P('skew', x, y0 + 0.875, z, 1.08, 1, 1); P('meatS', x, y0 + 0.875, z, 1.08, 1, 1);
-        const yh0 = y0 + 2.0; P('hood', x, yh0, 0.66, 1.35, 0.42, 0.82); const yd = Math.min(yt + 1.4, yh0 + 2.6); // duct: up from the hood, then into the wall
-        P('inox', x, (yh0 + 0.42 + yd) / 2, 0.66, 0.22, yd - yh0 - 0.42, 0.22); P('inox', x, yd, 0.45, 0.22, 0.22, 0.44); P('soot', x, yh0 - 0.03, 0.66, 1.2, 0.02, 0.7);
+        // b_recess: the duct used to go straight up from the hood (and into the wall) — through the awning of 'awn' bays and through
+        // the signboard over the bay. Now, under an awning or a signboard, it runs sideways under the awning braces to the gap
+        // between bays and rises there; in the core it stops under the ground-floor canopy. The hood drops if the awning is low.
+        const hz = 0.66; let yh0 = y0 + 2.0; const yd0 = Math.min(yt + 1.4, yh0 + 2.6); const D = this.stats.duct; D.bbq++;
+        const oldR = [[x - 0.11, x + 0.11, yh0 + 0.42, yd0, hz - 0.11, hz + 0.11], [x - 0.11, x + 0.11, yd0 - 0.11, yd0 + 0.11, 0.23, 0.67]], oldH = [x - 0.675, x + 0.675, yh0, yh0 + 0.42, 0.25, 1.07];
+        const obs = [], obsS = []; const aw = r.core ? null : r.aw; // awning parts + signboard, as boxes in bay frame [x0, x1, y0, y1, z0, z1]
+        if (aw) { const yl = aw.y - 0.45 * aw.out, ya = (z) => aw.y - (z - 0.2) / (aw.out - 0.2) * 0.45 * aw.out; D.awn++;
+          for (let i = 0; i < 12; i++) { const za = 0.2 + (aw.out - 0.2) * i / 12, zb = 0.2 + (aw.out - 0.2) * (i + 1) / 12; obs.push([-hw, hw, ya(zb) - 0.025, ya(za), za, zb]); }
+          obs.push([-hw, hw, yl - 0.32, yl, aw.out - 0.01, aw.out + 0.01]);
+          for (const bx of [-hw + 0.1, hw - 0.1]) for (let i = 0; i < 8; i++) { const za = 0.2 + (aw.out - 0.25) * i / 8, zb = 0.2 + (aw.out - 0.25) * (i + 1) / 8; obs.push([bx - 0.015, bx + 0.015, yl - 0.315 + 0.3 * i / 8, yl - 0.285 + 0.3 * (i + 1) / 8, za, zb]); } }
+        const sgn = !r.core && r.sg > 0; if (sgn) { D.sign++; const ys0 = y0 + 0.8 * r.ground + 0.18; obsS.push([-hw + 0.1, hw - 0.1, ys0, ys0 + 0.95, 0.18, 0.52]); }
+        const hit = (B, O = obs) => B.some((b) => O.some((o) => b[0] < o[1] - 0.003 && b[1] > o[0] + 0.003 && b[2] < o[3] - 0.003 && b[3] > o[2] + 0.003 && b[4] < o[5] - 0.003 && b[5] > o[4] + 0.003));
+        if (aw && hit(oldR)) D.hitOld++; if (aw && hit([oldH])) D.hoodOld++; if (sgn && hit(oldR, obsS)) D.signOld++;
+        let R2; let yd = yd0;
+        if (aw || sgn) { D.rerouted++; const s = x >= 0 ? 1 : -1, xg = s * (hw + 0.15); let hr = yh0 + 0.42 + 0.13;
+          if (aw) { const yl = aw.y - 0.45 * aw.out; const ybr = yl - 0.3 + (hz - 0.1 - 0.2) / (aw.out - 0.25) * 0.3 - 0.055; hr = Math.min(hr, ybr - 0.13); // run passes under the braces (brace height at the run's near edge, minus margin)
+            if (hr - 0.11 - 0.42 < yh0) { yh0 = Math.max(y0 + 1.55, hr - 0.11 - 0.42); D.hoodLow++; } }
+          R2 = [[x - 0.1, x + 0.1, yh0 + 0.42, hr + 0.1, hz - 0.1, hz + 0.1], [Math.min(x, xg) - 0.1, Math.max(x, xg) + 0.1, hr - 0.1, hr + 0.1, hz - 0.1, hz + 0.1],
+            [xg - 0.1, xg + 0.1, hr - 0.1, yd, hz - 0.1, hz + 0.1], [xg - 0.1, xg + 0.1, yd - 0.1, yd + 0.1, 0.0, hz + 0.1]];
+        } else { if (r.core) { const yc = y0 + r.ground - 0.25; if (yd > yc) { yd = yc; D.coreClamp++; } } // core: stay under the ground-floor canopy
+          R2 = [[x - 0.11, x + 0.11, yh0 + 0.42, yd, hz - 0.11, hz + 0.11], [x - 0.11, x + 0.11, yd - 0.11, yd + 0.11, 0.23, 0.67]]; }
+        for (const b of R2) Q('inox', ...b);
+        if (aw && hit(R2)) D.hitNew++; if (sgn && hit(R2, obsS)) D.signNew++; if (aw && hit([[x - 0.675, x + 0.675, yh0, yh0 + 0.42, 0.25, 1.07]])) D.hoodNew++;
+        P('hood', x, yh0, 0.66, 1.35, 0.42, 0.82); P('soot', x, yh0 - 0.03, 0.66, 1.2, 0.02, 0.7);
         claim(x - 0.65, x + 0.65, 1.1);
         const x2 = spot(0.8); if (x2 !== null) { P('srack', x2, y0, 0.55); for (const [yy, k] of [[0.45, 'meatS'], [0.8, 'vegS'], [1.15, 'meatS']]) { P('skew', x2, y0 + yy + 0.035, 0.55, 0.64, 1, 0.7); P(k, x2, y0 + yy + 0.035, 0.55, 0.64, 1, 0.7); } claim(x2 - 0.4, x2 + 0.4, 0.75); }
         else { const x3 = spot(0.4); if (x3 !== null) { const n = randi(2, 4); for (let i = 0; i < n; i++) P(stoolK(), x3, y0 + i * 0.075, 0.55, 1, 1, 1, rand(0, 6.28)); claim(x3 - 0.2, x3 + 0.2, 0.75); } } }
