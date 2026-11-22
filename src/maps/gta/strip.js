@@ -400,7 +400,7 @@ export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam &
   if (p.y > 140) { if (m.visible) { m.visible = false; tm.visible = false; K.last = null; K.lastT = null; } return; }
   // text decals: signs inside their own radius; a_stripfix: over the last TFADE m each rect drops out at its own hashed threshold
   // (an ordered rect-level dissolve on the existing decal program, matching the boxes' dissolve instead of a hard cut)
-  if (!K.lastT || Math.hypot(p.x - K.lastT[0], p.z - K.lastT[1]) > TMOVE) { K.lastT = [p.x, p.z]; K.ensureNear(p.x, p.z, Math.max(RAD, TXT_RL) + 5); // a_stripfix: bands built on approach const M = tm.instanceMatrix.array, Cc = tm.instanceColor.array; let n = 0; const list = [];
+  if (!K.lastT || Math.hypot(p.x - K.lastT[0], p.z - K.lastT[1]) > TMOVE) { K.lastT = [p.x, p.z]; K.ensureNear(p.x, p.z, Math.max(RAD, TXT_RL) + 5); /* a_stripfix: bands built on approach */ const M = tm.instanceMatrix.array, Cc = tm.instanceColor.array; let n = 0; const list = [];
     K.sg.near(p.x - TXT_RL, p.z - TXT_RL, p.x + TXT_RL, p.z + TXT_RL, (s) => { const d = Math.hypot(s.x - p.x, s.z - p.z); if (d < s.R) list.push([d, s]); return false; }); list.sort((a, b) => a[0] - b[0]);
     for (const [d, s] of list) { if (n + s.n > TCAP) break; const f = sstep(s.R - TFADE, s.R, d); const sh0 = s.x * 0.0131 + s.z * 0.0071; let ri = 0; for (const it of s.L) { const { rs, o, r, u, n: nn, px, py } = it;
         for (const [x, y, w, h, ci] of rs.rects) { if (f > 0 && f > ((ri++ * 0.6180339887 + sh0) % 1 + 1) % 1) continue; const cx = (x + w / 2 - rs.W / 2) * px, cy = (rs.H / 2 - (y + h / 2)) * py, sw = w * px, sh = h * py, j = n * 16;
