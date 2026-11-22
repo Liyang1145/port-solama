@@ -20,7 +20,6 @@
 //  &nostrip switches the layer off, &stripaudit counts / checks everything eagerly (region.stripAudit).
 import * as THREE from 'three';
 import { fabKit, LOTZ, OLD_ANIGHT } from './fabric.js';
-import { POI } from './mapdata.js';
 import { prep } from '../../mats.js';
 import { U } from '../../env.js';
 import { raster, FONT } from './raster.js';
@@ -391,35 +390,28 @@ export function attachStrip(K, scene) { if (!K) return null; const { box: G, bod
   const tm = new THREE.InstancedMesh(quadGeo(), prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.05 }), 'fabCar'), TCAP);
   tm.instanceMatrix.setUsage(THREE.DynamicDrawUsage); tm.setColorAt(0, new THREE.Color(1, 1, 1)); tm.instanceColor.setUsage(THREE.DynamicDrawUsage); tm.frustumCulled = false; tm.castShadow = false; tm.receiveShadow = true;
   tm.instanceMatrix.array.fill(0, 0, 16); tm.count = 1; scene.add(tm); K.tmesh = tm;
-  // a_nightcheck: night light pools for fixtures that lit nothing: the lot poles' twin heads (filled as bands are built) and the
-  // Ferris wheel's bulb rings (static). One instanced mesh on the fabric street-lamp pool material (same fabGlow program, its own
-  // instance colour is unused: the material colour * per-instance scale of the unit flat; colour per kind rides in the matrix
-  // scale y, which the flat ignores) -> +1 draw call at night, 0 programs. ?oldanight: not created.
-  { const { flat: GF, glow: GM } = fabKit(); if (!OLD_ANIGHT && GF && GM) { K.wheelY = K.wheelY || 0;
+  // a_nightcheck: night light pools under the lot poles' twin heads (they lit nothing): one instanced mesh on the fabric street-lamp
+  // pool material (same object -> same fabGlow program), filled by nightPools() -> +1 draw call near a strip at night, 0 programs.
+  // ?oldanight: not created.
+  { const { flat: GF, glow: GM } = fabKit(); if (!OLD_ANIGHT && GF && GM) {
       const mk = (cap) => { const m = new THREE.InstancedMesh(GF, GM, cap); m.renderOrder = 2; m.castShadow = false; m.receiveShadow = false; m.count = 0; m.visible = false; scene.add(m); return m; };
-      K.pm = mk(256); K.pm.userData.at = null; K.pw = mk(WHEEL.length); } }
+      K.pm = mk(256); K.pm.userData.at = null; } }
   K.last = null; K.lastT = null; K.info = { units: 0, boxes: 0, tris: 0, rects: 0 }; K.stats.attachMs = Math.round(performance.now() - T0); return K; }
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attributes.aK.array, sg = K.segs; let lo = 1e9, hi = -1; K.lastF = [p.x, p.z];
   for (let k = 0; k < sg.length; k += 5) { const dd = Math.hypot(sg[k + 2] - p.x, sg[k + 3] - p.z); const f = Math.max(sstep(RAD - FADE, RAD, dd), sg[k + 4] ? sstep(NEAR - FADE1, NEAR, dd) : 0);
     for (let j = sg[k], e = sg[k] + sg[k + 1]; j < e; j++) { const v = Math.round(A[j * 2]) - 0.45 * f; if (fresh || v !== A[j * 2]) { A[j * 2] = v; if (j < lo) lo = j; if (j > hi) hi = j; } } }
   if (hi >= lo && !fresh) { const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(lo * 2, (hi - lo + 1) * 2); ga.needsUpdate = true; } }
-// a_nightcheck: lot pools 22 m under each lot pole (both heads); the wheel: an ellipse along its rim plane (bulb rings, ~3 m above the
-// sand at the bottom) plus a tighter pool at the boarding deck. The fabGlow falloff reads the unit flat's position.xz, so the instance
-// scale only sizes / stretches a pool; every pool shares the fabric lamp colour (FAB_GLOW).
-const LOT_D = 22, WHEEL = [[0, 0, 36, 22], [0, -3.4, 12, 10]];
-// both meshes keep frustum culling (bounding sphere of what they hold): the lot mesh holds only the pools within LOT_R of the
-// camera (refilled every 25 m moved), so away from the strips it is empty / hidden and no view draws (or compiles) it for nothing.
-const LOT_R = 420;
+// a_nightcheck: night pools under the lot poles' twin heads (22 m, the fabric lamp colour FAB_GLOW; the fabGlow falloff reads the unit
+// flat's position.xz, so the instance scale only sizes a pool). The mesh keeps frustum culling and holds only the pools within LOT_R of
+// the camera (refilled every 25 m moved), so away from the strips it is empty / hidden and no view draws (or compiles) it for nothing.
+const LOT_D = 22, LOT_R = 420;
 function putPool(A, k, x, z, a, sx, sz, y) { const c = Math.cos(a), s = Math.sin(a), j = k * 16; A.fill(0, j, j + 16); A[j] = c * sx; A[j + 2] = -s * sx; A[j + 5] = 1; A[j + 8] = s * sz; A[j + 10] = c * sz; A[j + 12] = x; A[j + 13] = y; A[j + 14] = z; A[j + 15] = 1; }
-function nightPools(K, p) { const night = U.uNight.value > 0.03, pw = K.pw, pm = K.pm;
-  if (pw.count === 0) { const w = POI.wheel; WHEEL.forEach(([dx, dz, sx, sz], k) => putPool(pw.instanceMatrix.array, k, w.x + dx, w.z + dz, 0, sx, sz, K.wheelY + 0.16)); /* clears the sand ripple */
-    pw.count = WHEEL.length; pw.instanceMatrix.needsUpdate = true; pw.computeBoundingSphere(); }
-  pw.visible = night;
-  const L = K.lotPools, at = pm.userData.at; if (!at || at[2] !== L.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length]; let k = 0; const A = pm.instanceMatrix.array;
+function nightPools(K, p) { const pm = K.pm, L = K.lotPools, at = pm.userData.at;
+  if (!at || at[2] !== L.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length]; let k = 0; const A = pm.instanceMatrix.array;
     for (let i = 0; i + 2 < L.length && k < 256; i += 3) if (Math.hypot(L[i] - p.x, L[i + 1] - p.z) < LOT_R) putPool(A, k++, L[i], L[i + 1], L[i + 2], LOT_D, LOT_D, 0.07);
     pm.count = k; if (k) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); } }
-  pm.visible = night && pm.count > 0; }
+  pm.visible = U.uNight.value > 0.03 && pm.count > 0; }
 export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh, tm = K.tmesh;
   if (K.pm) nightPools(K, p);
   if ((m.userData.warm & 3) !== 3) return;

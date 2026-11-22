@@ -125,7 +125,10 @@ export function buildProps(scene, city, T) {
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position,1.0); }',
     fragmentShader: 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length(vUv-0.5)*2.0; float a = pow(max(1.0-d,0.0),2.2); gl_FragColor = vec4(uCol * a * uNight * 0.55, 1.0); }',
   });
-  const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length); pools.renderOrder = 2;
+  // a_nightcheck (map A, ?oldanight = off): the 「海风之眼」 wheel's bulb rings lit nothing below -> two extra instances of this pool
+  // (same draw, same program): an ellipse along the rim plane and a tighter one at the boarding deck (landmarks(): x 384, z 352)
+  const xPools = CYBER || /[?&]oldanight\b/.test(typeof location !== 'undefined' ? location.search : '') ? [] : [[384, 352, 36, 22], [384, 348.6, 12, 10]];
+  const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length + xPools.length); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   const lampM = [];
   lamps.forEach((l, i) => {
@@ -135,6 +138,7 @@ export function buildProps(scene, city, T) {
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
     m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
+  xPools.forEach(([x, z, sx, sz], k) => { m4.compose(new THREE.Vector3(x, Math.max(0, city.groundH(x, z)) + 0.16, z), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); pools.setMatrixAt(lamps.length + k, m4); }); // + 0.16: clears the sand ripple
   // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
   // the lamp head, fading toward its rim (view-facing ratio) and the ground; warm sodium/LED white on 索拉纳港, the cyan/magenta
   // lamp tints on 霓港 (denser, rain-hazed air). One instanced draw, no depth reads.
