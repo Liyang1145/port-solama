@@ -62,7 +62,7 @@ const TINT_APPLY = `{ vec3 hsv = rgb2hsv(diffuseColor.rgb);
 
 function hueMat(src, key) {
   if (!OLDNPC && src.userData.nu) { // b_corenpc: same program, tint switched on by uniform
-    const m = src.clone(); const u = m.userData.nu; u.uTint.value = 1; u.uSkin.value = /Outfit/.test(src.name) ? 0 : 1; m.userData.tint = u; return m; // clone() keeps the shared hooks (npcClone)
+    const m = src.clone(); m.__npcDepth = src.__npcDepth; const u = m.userData.nu; u.uTint.value = 1; u.uSkin.value = /Outfit/.test(src.name) ? 0 : 1; m.userData.tint = u; return m; // clone() keeps the shared hooks (npcClone)
   }
   // clothing / hair / skin-tone tint: rotates hue / scales saturation + value (per-character uniforms)
   const m = src.clone();
@@ -85,7 +85,11 @@ let PH = null; // shared 1x1 placeholders
 const px1 = (r, g, b, srgb) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true; return t; };
 function npcCullWrap(renderer) { // originally single-sided character materials: back-face culling restored after three's setMaterial
   const st = renderer.state; if (st.__npcCull) return; st.__npcCull = true; const gl = renderer.getContext(); const orig = st.setMaterial;
-  st.setMaterial = function (material, frontFaceCW, ...rest) { orig.call(this, material, frontFaceCW, ...rest); if (material.userData.npcCull === 1) { st.enable(gl.CULL_FACE); st.setFlipSided(!!frontFaceCW); } };
+  st.setMaterial = function (material, frontFaceCW, ...rest) {
+    orig.call(this, material, frontFaceCW, ...rest); const c = material.userData.npcCull;
+    if (c === 1) { st.enable(gl.CULL_FACE); st.setFlipSided(!!frontFaceCW); } // main pass: FrontSide
+    else if (c === 2) { st.enable(gl.CULL_FACE); st.setFlipSided(!frontFaceCW); } // shadow depth: BackSide (three's default for FrontSide)
+  };
 }
 export const npcMatStats = { mats: 0, ph: 0, cull: 0, blend: 0 };
 function npcMat(m) {
@@ -99,7 +103,11 @@ function npcMat(m) {
   if (!m.metalnessMap) { m.metalnessMap = PH.lin; npcMatStats.ph++; }
   const opq = !m.transparent; if (opq) m.blending = THREE.NoBlending; else { m.forceSinglePass = true; npcMatStats.blend++; }
   if (!(m.alphaTest > 0)) m.alphaTest = 0.001;
-  if (m.side !== THREE.DoubleSide) { m.shadowSide = m.side === THREE.BackSide ? THREE.FrontSide : THREE.BackSide; m.side = THREE.DoubleSide; m.userData.npcCull = 1; npcMatStats.cull++; }
+  // shadow depth: one program too. Each source material gets its own MeshDepthMaterial (Object3D.customDepthMaterial, set per mesh in
+  // Character; three copies map / alphaTest onto it every pass), drawn DoubleSide in the program with the old culling restored.
+  const dm = new THREE.MeshDepthMaterial(); dm.onBeforeCompile = (s, r) => npcCullWrap(r); dm.customProgramCacheKey = NPC_DKEY; m.__npcDepth = dm;
+  if (m.side !== THREE.DoubleSide) { m.side = THREE.DoubleSide; m.userData.npcCull = 1; dm.userData.npcCull = 2; npcMatStats.cull++; }
+  m.shadowSide = THREE.DoubleSide;
   m.userData.nu = { uTint: { value: 0 }, uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: 0 }, uOpq: { value: opq ? 1 : 0 } };
   prep(m, 'npc'); const base = m.onBeforeCompile;
   m.onBeforeCompile = function (s, r) {
@@ -113,7 +121,7 @@ function npcMat(m) {
 }
 // Material.clone() does not carry onBeforeCompile / customProgramCacheKey: a plain clone (the tint, world.js tintPlayer) would fall
 // back to a stock program. The hook reads its uniforms from this.userData.nu (deep-copied by clone), so sharing the function is safe.
-const NPC_KEY = () => 'npc';
+const NPC_KEY = () => 'npc', NPC_DKEY = () => 'npcd';
 function npcClone() { const c = THREE.MeshStandardMaterial.prototype.clone.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = NPC_KEY; c.clone = npcClone; return c; }
 
 // Cast: MakeHuman-based realistic people (CC0 bodies, CMU mocap clips) exported with ara3d at medium detail; each GLB carries
@@ -251,6 +259,7 @@ export class Character {
     this.mixer.update(0);
     this.root.scale.setScalar(opt.player ? 1 : rand(0.96, 1.04));
     this.lod = 0; this.lodAcc = 0; this.lodMeshes = [];
+    this.model.traverse((o) => { if (o.isMesh && o.material.__npcDepth) o.customDepthMaterial = o.material.__npcDepth; }); // b_corenpc (dress() keeps the map)
     this.model.traverse((o) => { if (o.isMesh) this.lodMeshes.push({ m: o, g: LODG.get(o.geometry), small: /Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name), cast: o.castShadow }); });
   }
   // wardrobe variety: clothing hue / value shifts (never skin), natural hair shades, and a range of skin tones
