@@ -44,14 +44,16 @@ function palmKind(p) { const hsh = Math.abs(Math.sin(p.x * 12.9 + p.z * 78.2)) *
   let vi; if (beach) vi = hsh < 0.5 ? 0 : 1; else if (p.street) vi = hsh < 0.55 ? (hsh < 0.27 ? 2 : 3) : hsh < 0.85 ? 4 : 1; else vi = Math.floor(hsh * 5) % 5; return PK[vi]; }
 // palm trunk section at world y = ground + YH (Euler(lean k, rot, 0) XYZ, scale (s .95 ps, s, s .95 ps), base at ground - 0.05): the trunk
 // is 16 rings of 12 sides, straight between rings; a leaning trunk cut level is an egg (the low side sits deeper in the root flare), so
-// each of 24 surface lines is cut at its own height -> section points, extents (lean axis = world z after the X tilt) -> one box
-export function palmSection(p, g) { const k = palmKind(p), sp = SP[k]; const H = sp.H, s = p.h / (H + sp.shaft), sx = s * 0.95 * (p.s || 1); const a = p.lean * (k === 'coco' ? 1.6 : 0.4), r = p.rot;
-  const ca = Math.cos(a), sa = Math.sin(a), cr = Math.cos(r), sr = Math.sin(r); const cx = (t) => Math.sin(t * Math.PI * 0.5) * sp.curve * (0.6 + t);
-  const at = (yl, ang) => { const u = Math.max(0, Math.min(16, yl / H * 16)), k0 = Math.min(15, Math.floor(u)), f = u - k0, t0 = k0 / 16, t1 = (k0 + 1) / 16; const rad = palmRad(k, t0, H) + (palmRad(k, t1, H) - palmRad(k, t0, H)) * f;
-    const lx = (cx(t0) + (cx(t1) - cx(t0)) * f + Math.cos(ang) * rad) * sx, lz = Math.sin(ang) * rad * sx, ly = yl * s; const x1 = lx * cr + lz * sr, z1 = -lx * sr + lz * cr; return [x1, ly * ca - z1 * sa, ly * sa + z1 * ca]; };
-  const P = []; let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-  for (let j = 0; j < 24; j++) { const ang = j / 24 * Math.PI * 2; let yl = (YH + 0.05) / s, q; for (let it = 0; it < 4; it++) { q = at(yl, ang); yl += (YH + 0.05 - q[1]) / (s * ca); } q = at(yl, ang);
-    const x = p.x + q[0], z = p.z + q[2]; P.push([x, z]); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+// each of 16 surface lines is cut at its own height -> section points, extents (lean axis = world z after the X tilt) -> one box
+const RING = {}; for (const k in SP) { const sp = SP[k], R = [], X = []; for (let i = 0; i <= 16; i++) { const t = i / 16; R.push(palmRad(k, t, sp.H)); X.push(Math.sin(t * Math.PI * 0.5) * sp.curve * (0.6 + t)); } RING[k] = { R, X }; }
+const DIRS = Array.from({ length: 16 }, (_, j) => [Math.cos(j / 16 * Math.PI * 2), Math.sin(j / 16 * Math.PI * 2)]);
+export function palmSection(p, g, poly) { const k = palmKind(p), sp = SP[k], RG = RING[k]; const H = sp.H, s = p.h / (H + sp.shaft), sx = s * 0.95 * (p.s || 1); const a = p.lean * (k === 'coco' ? 1.6 : 0.4), r = p.rot;
+  const ca = Math.cos(a), sa = Math.sin(a), cr = Math.cos(r), sr = Math.sin(r); const y0 = YH + 0.05; let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; const P = poly ? [] : null;
+  for (const [dc, ds] of DIRS) { let yl = y0 / s, wx = 0, wz = 0;
+    for (let it = 0; it < 4; it++) { const u = Math.max(0, Math.min(15.999, yl / H * 16)), k0 = Math.floor(u), f = u - k0; const rad = RG.R[k0] + (RG.R[k0 + 1] - RG.R[k0]) * f;
+      const lx = (RG.X[k0] + (RG.X[k0 + 1] - RG.X[k0]) * f + dc * rad) * sx, lz = ds * rad * sx, ly = yl * s; const xr = lx * cr + lz * sr, zr = -lx * sr + lz * cr;
+      wx = xr; wz = ly * sa + zr * ca; yl += (y0 - (ly * ca - zr * sa)) / (s * ca); }
+    const x = p.x + wx, z = p.z + wz; if (P) P.push([x, z]); if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
   return { x: (x0 + x1) / 2, z: (z0 + z1) / 2, ex: (x1 - x0) / 2, ez: (z1 - z0) / 2, R: Math.max(x1 - x0, z1 - z0) / 2, poly: P, kind: k }; }
 let TV = null; // tree variants: first two tube rings of the trunk (centre at arc-length 0 and 1/3, radius 0.3 -> 0.2667)
 function treeVariants() { if (TV) return TV; TV = [[5, 'oak'], [9, 'grape'], [13, 'oak'], [21, 'grape']].map(([sd, kind]) => { const r = mulberry(sd);
@@ -106,19 +108,23 @@ export function attachPoleCol(city) { const col = city.col; const S = { ms: 0, r
       if (AU) AU.push({ c: 'lamp', fp: [ngon(12, l.x, l.z, Rl, yaw)], old: b ? oldOf(b) : null, nw }); }
   // lamp boxes left over: moved (fixCityProps slid the lamp, not its box) or dropped lamps -> orphans
   for (const b of col.boxes) if (b.tag === 'pole' && !b.o && lampBox(b) && !kill.has(b)) { kill.add(b); S.orphan.lamp++; if (AU) AU.push({ c: 'lampOrphan', fp: [], old: oldOf(b), nw: null }); }
-  for (const p of city.palms || []) { const g = city.groundH(p.x, p.z); const s = palmSection(p, g); const b = own('palm', p.x, p.z); const nw = [s.x, s.z, 1, 0, FIT[0][2] * s.ex, FIT[0][3] * s.ez]; // round-section fit, stretched along the lean
+  S.t = [Math.round(performance.now() - T0)];
+  for (const p of city.palms || []) { const g = city.groundH(p.x, p.z); const s = palmSection(p, g, !!AU); const b = own('palm', p.x, p.z); const nw = [s.x, s.z, 1, 0, FIT[0][2] * s.ex, FIT[0][3] * s.ez]; // round-section fit, stretched along the lean
     if (b) kill.add(b); else S.noBox.palm++; adds.push([nw, Math.max(b ? b.h : 6, g + 6), 'palm', 'palm']); bump('palm');
     if (AU) AU.push({ c: 'palm', k: s.kind, fp: [s.poly], old: b ? oldOf(b) : null, nw }); }
+  S.t.push(Math.round(performance.now() - T0));
   for (const t of city.trees || []) { const g = city.groundH(t.x, t.z); const s = treeSection(t, g); const b = own('tree', t.x, t.z); const nw = fitN(0, s.x, s.z, s.R, 0);
     if (b) kill.add(b); else S.noBox.tree++; adds.push([nw, Math.max(b ? b.h : 6, g + 6), 'tree', 'tree']); bump('tree');
     if (AU) AU.push({ c: t.street ? 'streettree' : 'tree', fp: [ngon(24, s.x, s.z, s.R)], old: b ? oldOf(b) : null, nw }); }
   for (const b of col.boxes) if ((b.tag === 'palm' || b.tag === 'tree') && !b.o && !kill.has(b)) { S.orphan[b.tag]++; if (AU) AU.push({ c: b.tag + 'Orphan', fp: [], old: oldOf(b), nw: null }); } // kept (none expected)
+  S.t.push(Math.round(performance.now() - T0));
   // 2) boxes that are the only record of their object (centre = object position)
   for (const b of col.boxes) { if (kill.has(b)) continue; const K = boxClass(b); if (!K) continue; const [x, z] = b.o ? [b.o.cx, b.o.cz] : cen(b); const nw = K[2] ? K[2](x, z) : null;
     if (nw) { kill.add(b); adds.push([nw, b.h, b.tag, K[0]]); } bump(K[0]); if (AU) AU.push({ c: K[0], fp: K[1](x, z), old: oldOf(b), nw: nw || oldOf(b) }); }
   if (POLE_OFF) { city.poleAudit = AU; S.ms = Math.round(performance.now() - T0); return S; }
+  S.t.push(Math.round(performance.now() - T0));
   // 3) swap: batch removal (cell lists + one in-place compaction of col.boxes), then the fitted boxes
   const c = col.cell; for (const b of kill) for (let ix = Math.floor(b.minX / c); ix <= Math.floor(b.maxX / c); ix++) for (let iz = Math.floor(b.minZ / c); iz <= Math.floor(b.maxZ / c); iz++) { const l = col.map.get(col.key(ix, iz)); if (l) { const j = l.indexOf(b); if (j >= 0) l.splice(j, 1); } }
-  { const B = col.boxes; let j = 0; for (let i = 0; i < B.length; i++) if (!kill.has(B[i])) B[j++] = B[i]; B.length = j; } S.removed = kill.size;
+  { const B = col.boxes; let j = 0; for (let i = 0; i < B.length; i++) if (!kill.has(B[i])) B[j++] = B[i]; B.length = j; } S.removed = kill.size; S.t.push(Math.round(performance.now() - T0));
   for (const [f, h, tag, k] of adds) { const nb = col.addOBB(f[0], f[1], f[2], f[3], f[4], f[5], h, tag); nb.pc = k; } S.added = adds.length;
   if (AU) city.poleAudit = AU; S.ms = Math.round(performance.now() - T0); return S; }
