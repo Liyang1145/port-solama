@@ -274,11 +274,12 @@ export function storefront(W, F, a0, a1, y0, yt) {
   beam(v, V3(F, da + 0.1, d + 0.06, y0 + 1.05), V3(F, da + 0.9, d + 0.06, y0 + 1.05), 0.04, [0.7, 0.7, 0.72]);
   const q = [F.P(a0, d + 0.01), F.P(a1, d + 0.01), F.P(a1, d - 0.01), F.P(a0, d - 0.01)]; prismWalls(g, q, ys, yh, null);
   // sidewalk clutter in front of the bay
-  const c = W.b('vcolD', F.P(a0, 0)[0], F.P(a0, 0)[1]); const G = kg(); const r = rng();
-  if (r < 0.3) { const cc = pick([[0.15, 0.35, 0.6], [0.7, 0.2, 0.15], [0.85, 0.65, 0.1], [0.2, 0.5, 0.3]]); const a = rand(a0 + 0.5, a1 - 0.5); const k = randi(2, 4); // crate stack
+  const c = W.b('vcolD', F.P(a0, 0)[0], F.P(a0, 0)[1]); const G = kg(); const r = rng(); let cl = null; // b_storefront: report the clutter span
+  if (r < 0.3) { const cc = pick([[0.15, 0.35, 0.6], [0.7, 0.2, 0.15], [0.85, 0.65, 0.1], [0.2, 0.5, 0.3]]); const a = rand(a0 + 0.5, a1 - 0.5); const k = randi(2, 4); cl = [a - 0.3, a + 0.85]; // crate stack
     for (let i = 0; i < k; i++) { const p = V3(F, a + (i % 2) * 0.55, 0.7, y0 + 0.17 + Math.floor(i / 2) * 0.32); put(c, G.box, p[0], p[1], p[2], 0.5, 0.3, 0.38, cc, Math.atan2(F.ox, F.oz) + rand(-0.1, 0.1)); } }
-  else if (r < 0.5) { const a = rand(a0 + 0.4, a1 - 0.4); const p = V3(F, a, 0.75, y0 + 0.45); put(c, G.cyl8, p[0], p[1], p[2], 0.17, 0.9, 0.17, pick([[0.15, 0.3, 0.6], [0.9, 0.45, 0.1], [0.75, 0.75, 0.72]])); // gas bottle + stool
+  else if (r < 0.5) { const a = rand(a0 + 0.4, a1 - 0.4); cl = [a - 0.25, a + 0.85]; const p = V3(F, a, 0.75, y0 + 0.45); put(c, G.cyl8, p[0], p[1], p[2], 0.17, 0.9, 0.17, pick([[0.15, 0.3, 0.6], [0.9, 0.45, 0.1], [0.75, 0.75, 0.72]])); // gas bottle + stool
     const s = V3(F, a + 0.6, 0.9, y0 + 0.25); put(c, G.cyl8, s[0], s[1], s[2], 0.17, 0.5, 0.17, [0.75, 0.15, 0.15]); }
-  else if (r < 0.65) { const a = rand(a0 + 0.6, a1 - 0.6); const p = V3(F, a, 1.2, y0 + 0.55); // A-frame menu board
+  else if (r < 0.65) { const a = rand(a0 + 0.6, a1 - 0.6); cl = [a - 0.4, a + 0.4]; const p = V3(F, a, 1.2, y0 + 0.55); // A-frame menu board
     put(c, G.box, p[0], p[1], p[2], 0.6, 0.85, 0.08, [0.08, 0.08, 0.09], Math.atan2(F.ox, F.oz)); const p2 = V3(F, a, 1.32, y0 + 0.62); put(W.b('neon', p2[0], p2[2]), G.box, p2[0], p2[1], p2[2], 0.45, 0.55, 0.02, pick(NEONC).map((x) => x * 0.25), Math.atan2(F.ox, F.oz)); }
+  return { cl, da };
 }

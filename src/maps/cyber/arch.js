@@ -16,18 +16,22 @@ import { cnSignboard, shopBits } from './street2.js';
 
 // --------------------------------------------------------------- shop street ----
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
+export const SHOP_LOG = []; // r6.4 b_storefront: bays of streamed parcels (parcel frame), drained per parcel by storefront.js
 export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
   const W = ctx.W; const F = edge([fx, z1], [fx, z0]); // runs from z1 to z0 -> outward +x
   const n = Math.max(1, Math.round(F.len / sw)); const cw = F.len / n; let vend = 0;
   for (let i = 0; i < n; i++) {
     const a0 = i * cw + 0.2, a1 = (i + 1) * cw - 0.2; const r = rng();
     const yt = y0 + ground * 0.78;
-    if (r < 0.32) { const o = pick([0, 0, 0.35, 0.6]); if (o > 0) storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, o); }
-    else if (r < 0.62) { storefront(W, F, a0, a1, y0, yt); awning(W, F, a0, a1, yt + 0.05, rand(1.3, 2.0)); }
-    else if (r < 0.75) { storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, 0.92); } // open shop: shutter rolled up into the housing
-    else storefront(W, F, a0, a1, y0, yt);
+    let kind = 'plain', open = 1, cl = null, sg = 0;
+    if (r < 0.32) { const o = pick([0, 0, 0.35, 0.6]); if (o > 0) cl = storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, o); kind = 'shut'; open = o; }
+    else if (r < 0.62) { cl = storefront(W, F, a0, a1, y0, yt); awning(W, F, a0, a1, yt + 0.05, rand(1.3, 2.0)); kind = 'awn'; }
+    else if (r < 0.75) { cl = storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, 0.92); kind = 'up'; open = 0.92; } // open shop: shutter rolled up into the housing
+    else cl = storefront(W, F, a0, a1, y0, yt);
     // r6.4 b_street2: about half the shop boards are Chinese light boxes (invented names); stickers / condensers / wiring per bay
-    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); else signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); }
+    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) { cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); sg = 1; } else { signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); sg = 2; } }
+    // r6.4 b_storefront: streamed parcels (stub collider, no query) log each bay for storefront.js — no rng use, geometry unchanged
+    if (ctx.col && !ctx.col.query) SHOP_LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, i, n });
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) vending(W, F, a0 + 0.6 + j * 1.0, y0); }
   }
