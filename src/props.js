@@ -106,25 +106,22 @@ function streetLightGeo2() {
   return mergeG(parts.map((g) => g.index ? g.toNonIndexed() : g));
 }
 
-// a_nightfix: 1.05 m beach bollard (12-sided post, lens gap 0.86..0.97 m, cap) on the street-light material
-function bollardGeo() { const parts = [];
-  const base = new THREE.CylinderGeometry(0.13, 0.135, 0.05, 12); base.translate(0, 0.025, 0); parts.push(base);
-  const post = new THREE.CylinderGeometry(0.1, 0.11, 0.84, 12); post.translate(0, 0.47, 0); parts.push(post);
-  for (const [r, y0, y1] of [[0.112, 0.86, 0.875], [0.112, 0.955, 0.97]]) { const c = new THREE.CylinderGeometry(r, r, y1 - y0, 12); c.translate(0, (y0 + y1) / 2, 0); parts.push(c); }
-  for (let k = 0; k < 4; k++) { const b = new THREE.BoxGeometry(0.02, 0.1, 0.02); b.translate(Math.cos(k * 1.5708) * 0.102, 0.915, Math.sin(k * 1.5708) * 0.102); parts.push(b); }
-  const cap = new THREE.CylinderGeometry(0.09, 0.118, 0.07, 12); cap.translate(0, 1.005, 0); parts.push(cap);
+// a_nightfix: 1.05 m beach bollard (8-sided open post, lens gap 0.875..0.955 m, cap; ~80 triangles) on the street-light material
+function bollardGeo() { const parts = []; const cy = (r0, r1, y0, y1, open) => { const c = new THREE.CylinderGeometry(r1, r0, y1 - y0, 8, 1, open); c.translate(0, (y0 + y1) / 2, 0); parts.push(c); };
+  cy(0.135, 0.13, 0, 0.05, true); cy(0.11, 0.1, 0.05, 0.86, true); cy(0.112, 0.112, 0.86, 0.875, true); cy(0.112, 0.112, 0.955, 0.97, true); // plinth, post, lens rings (lens = lamp-glow band 0.875..0.955)
+  const cap = new THREE.CylinderGeometry(0.09, 0.118, 0.07, 8, 1, false); cap.translate(0, 1.005, 0); parts.push(cap);
   return mergeG(parts.map((g) => g.index ? g.toNonIndexed() : g)); }
 // a_nightfix: where the beach lights stand. Bollards: on the promenade side of the low beach wall (x1 - 0.67, 0.17 m from its inner
 // face) every 15 m, not within 4.5 m of a beach-access stair, a lamp or a tree; two at the foot of every access ramp (z +-2.0, the
 // ramp is +-1.2 wide) on the sand. Lifeguard towers: one lamp under the roof edge over the ramp (water side). Pools: wall bollards
 // spill 4-5 m onto the sand, the ramp pair lights the ramp foot, the tower lamp its ramp and the sand around it; the open sand stays
-// dark. One OBB collider per bollard (12-gon r 0.115: half 0.832 r, a_polecol). Fixed positions: no random draws.
+// dark. One OBB collider per bollard (8-gon r 0.11: half 0.784 r, a_polecol). Fixed positions: no random draws.
 function beachNight(city) { const posts = [], lenses = [], pools = []; const col = city.col; const S = { wall: 0, ramp: 0, towers: 0, skipped: 0 };
   const gh = (x, z) => Math.max(0, city.groundH(x, z));
   const clear = (x, z) => { const l = col.query(x, z, 0.6); for (const b of l) if (b.maxX > x - 0.16 && b.minX < x + 0.16 && b.maxZ > z - 0.16 && b.minZ < z + 0.16 && b.h > 0.3) return false;
     if (city.lamps.some((l) => Math.abs(l.x - x) < 4.5 && Math.abs(l.z - z) < 4.5)) return false;
     for (const L of [city.palms, city.trees]) if (L && L.some((p) => Math.abs(p.x - x) < 1.2 && Math.abs(p.z - z) < 1.2)) return false; return true; };
-  const post = (x, z) => { const y = gh(x, z); posts.push([x, y, z]); lenses.push([x, y + 0.875, z, 0.19, 0.08]); const h = 0.832 * 0.115; col.addOBB(x, z, 1, 0, h, h, 1.05, 'bollard'); };
+  const post = (x, z) => { const y = gh(x, z); posts.push([x, y, z]); lenses.push([x, y + 0.875, z, 0.19, 0.08]); const h = 0.784 * 0.11; col.addOBB(x, z, 1, 0, h, h, 1.05, 'bollard'); };
   for (const b of city.blocks || []) { if (b.area !== 'promenade') continue; const zc = (b.z0 + b.z1) / 2 + 22, xw = b.x1 - 0.67;
     for (let z = b.z0 + 8; z <= b.z1 - 8; z += 15) { if (Math.abs(z - zc) < 4.5) continue; if (!clear(xw, z)) { S.skipped++; continue; } post(xw, z); S.wall++;
       const yp = Math.max(gh(xw, z), gh(b.x1 + 3, z)) + 0.05; pools.push([b.x1 + 0.2, z, 10.5, 8.5, yp]); }
@@ -197,7 +194,7 @@ export function buildProps(scene, city, T) {
   if (BN && BN.posts.length) { // a_nightfix: bollard bodies on the street-light material, lenses / tower lamps on the lamp-glow material (same objects -> same programs)
     const bm = new THREE.InstancedMesh(bollardGeo(), lampMat, BN.posts.length); bm.castShadow = true; bm.receiveShadow = true;
     BN.posts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y, z); bm.setMatrixAt(i, m4); }); bm.computeBoundingSphere(); scene.add(bm);
-    const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 12, 1, false); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, BN.lenses.length);
+    const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, true); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, BN.lenses.length);
     BN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
     out.beachNight = { posts: BN.posts.length, pools: BN.pools.length, lenses: BN.lenses.length, tris: bm.geometry.index ? bm.geometry.index.count / 3 * BN.posts.length : 0 }; }
   for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }

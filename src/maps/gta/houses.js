@@ -372,7 +372,7 @@ export function auditHouses(K) { if (!K) return null; const T0 = performance.now
 // ?oldanight2 (and ?oldanight): not built.
 const NIGHT2_OFF = Q.has('oldanight2') || Q.has('oldanight');
 const LR = 200, LRD = 90, LCAP = 1600, PCAP = 480, LBX = 8; // per light: up to 4 boxes; record: x, z, lit, nBoxes, box[4][LBX], pool [x, z, sx, sz, a, y]
-const LGLASS = [1.0, 0.80, 0.55], LOFF = [0.30, 0.29, 0.27], LMET = [0.10, 0.09, 0.08];
+const LGLASS = [1.55, 1.24, 0.86], LOFF = [0.30, 0.29, 0.27], LMET = [0.10, 0.09, 0.08];
 function frontFrame(LT) { const H = LT.house, C = [H[0], H[2]], w = H[3], d = H[5]; const [U, V] = axes(H[6]); const Y = LT.yard; let nIn = null, E = null;
   if (Y && !Y.gone) { const [, z] = axes(Y[4]); const sg = (C[0] - Y[0]) * z[0] + (C[1] - Y[1]) * z[1] >= 0 ? 1 : -1; nIn = [z[0] * sg, z[1] * sg]; E = [Y[0] + nIn[0] * Y[3] / 2, Y[1] + nIn[1] * Y[3] / 2]; }
   else if (LT.front) { const dx = C[0] - LT.front[0], dz = C[1] - LT.front[1], l = Math.hypot(dx, dz) || 1; nIn = [dx / l, dz / l]; }
@@ -380,7 +380,12 @@ function frontFrame(LT) { const H = LT.house, C = [H[0], H[2]], w = H[3], d = H[
   const faces = [[V, U, d / 2, w / 2], [[-V[0], -V[1]], [-U[0], -U[1]], d / 2, w / 2], [U, [-V[0], -V[1]], w / 2, d / 2], [[-U[0], -U[1]], V, w / 2, d / 2]];
   let fi = 0, best = -2; faces.forEach((f, k) => { const s = -(f[0][0] * nIn[0] + f[0][1] * nIn[1]); if (s > best) { best = s; fi = k; } });
   const [N, T, Df, Lf] = faces[fi]; return { C, N, T, Df, Lf, fa: Math.atan2(-T[1], T[0]), E }; }
-function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { garage: 0, garageLit: 0, rear: 0, rearLit: 0, dock: 0, dockLit: 0 };
+// a wall lantern goes on the gap between two painted window cells (fabBody: cells 3.4 m along fu = xz . (-n.z, n.x) + seed * 37, glass
+// 0.952..2.448 m of the cell -> the gap is centred on fu = 0 mod 3.4, 1.9 m wide), the nearest gap to t0 that ok() accepts, else none
+function gapSnap(seed, Pw, Nw, Tw, t0, ok) { const ft = [-Nw[1], Nw[0]], tf = Tw[0] * ft[0] + Tw[1] * ft[1]; if (Math.abs(tf) < 0.5) return null;
+  const fu = (t) => { const p = Pw(t); return p[0] * ft[0] + p[1] * ft[1] + Math.fround(seed) * 37; }; const f0 = fu(t0); const base = t0 + (3.4 * Math.round(f0 / 3.4) - f0) / tf; let best = null;
+  for (const k of [0, 1, -1, 2, -2]) { const t = base + k * 3.4 / tf; if (ok(t) && (best === null || Math.abs(t - t0) < Math.abs(best - t0))) best = t; } return best; }
+function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { garage: 0, garageLit: 0, garageOver: 0, rear: 0, rearLit: 0, dock: 0, dockLit: 0 };
   const grid = new Grid(64);
   for (const D of K.H) { const u1 = rnd(), u2 = rnd(), u3 = rnd(); const LT = D.LT, H = LT.house; if (!H || H.gone) continue; const seed = H[11]; const F = frontFrame(LT); if (!F) continue;
     const { C, N, T, Df, Lf, fa, E } = F; const P = (t, o) => [C[0] + T[0] * t + N[0] * (Df + o), C[1] + T[1] * t + N[1] * (Df + o)];
@@ -391,11 +396,15 @@ function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { g
     // garage-side lantern (front)
     if (E) { const et = (E[0] - C[0]) * T[0] + (E[1] - C[1]) * T[1], eo = (E[0] - C[0]) * N[0] + (E[1] - C[1]) * N[1] - Df; const gw = hh(seed, 5) < 0.3 ? 2.9 : 2.6;
       if (Math.abs(eo) < 1.2 && Math.abs(et) <= Lf - 0.4) { const tg = Math.max(-Lf + gw / 2 + 0.25, Math.min(Lf - gw / 2 - 0.25, et)); const s = Math.sign(tg || 1); const ts = tg + s * (gw / 2 + 0.42);
-        if (Math.abs(ts) <= Lf - 0.4) { const lit = u1 < 0.55; S.garage++; if (lit) S.garageLit++; const p = P(ts, 0); const q = P(ts - s * 0.6, 1.7);
-          add(p[0], p[1], lit, lantern(ts, 0, 1, 1.84, lit, fa), lit ? [q[0], q[1], 7.5, 7.5, fa, 0.075] : null); } } }
+        const tsn = gapSnap(seed, (t) => P(t, 0), N, T, ts, (t) => Math.abs(t) <= Lf - 0.4 && s * (t - tg) >= gw / 2 + 0.3 && s * (t - tg) <= gw / 2 + 3.2);
+        // no free wall gap beside the door (garage close to the corner): a coach lantern centred over the header band if the eave leaves room
+        const gh = H[4] > 5 ? 2.3 : 2.15, R0 = LT.roof && !LT.roof.gone ? LT.roof : null, top = R0 ? R0[1] - 0.22 : H[4] - 0.05, over = tsn === null && top >= gh + 0.52 + 0.33;
+        if (tsn !== null || over) { const ts = tsn !== null ? tsn : tg; const lit = u1 < 0.55; S.garage++; if (lit) S.garageLit++; if (over) S.garageOver++; const p = P(ts, 0); const q = P(tsn !== null ? ts - s * 0.5 : ts, 1.45);
+          add(p[0], p[1], lit, lantern(ts, over ? 0.07 : 0, 1, over ? gh + 0.54 : 1.84, lit, fa), lit ? [q[0], q[1], 6.4, 6.4, fa, 0.075] : null); } } }
     if (LT.canal) { // back-wall (lanai) lantern facing the canal
-      const tr = (hh(seed, 63) - 0.5) * Math.max(0, Lf - 0.9) * 1.6; const lit = u2 < 0.6; S.rear++; if (lit) S.rearLit++; const p = P(tr, -2 * Df); const q = P(tr, -2 * Df - 2.2);
-      add(p[0], p[1], lit, lantern(tr, -2 * Df, -1, 2.05, lit, fa + Math.PI), lit ? [q[0], q[1], 8.5, 8.5, fa, 0.08] : null);
+      const tr0 = (hh(seed, 63) - 0.5) * Math.max(0, Lf - 0.9) * 1.6; const tr = gapSnap(seed, (t) => P(t, -2 * Df), [-N[0], -N[1]], T, tr0, (t) => Math.abs(t) <= Lf - 0.8);
+      if (tr !== null) { const lit = u2 < 0.6; S.rear++; if (lit) S.rearLit++; const p = P(tr, -2 * Df); const q = P(tr, -2 * Df - 1.6);
+      add(p[0], p[1], lit, lantern(tr, -2 * Df, -1, 2.05, lit, fa + Math.PI), lit ? [q[0], q[1], 6.8, 6.8, fa, 0.08] : null); }
       const Dk = LT.dock; if (Dk && !Dk.gone) { const [du, dv] = axes(Dk[4]); const hl = Dk[2] / 2, hwd = Dk[3] / 2, yd = Dk[8] || 0.35;
         const toH = (C[0] - Dk[0]) * dv[0] + (C[1] - Dk[1]) * dv[1] >= 0 ? 1 : -1; const se = hh(seed, 64) < 0.5 ? -1 : 1; const lit2 = u3 < 0.45; S.dock++; if (lit2) S.dockLit++;
         const x = Dk[0] + du[0] * se * (hl - 0.35) + dv[0] * toH * (hwd - 0.22), z = Dk[1] + du[1] * se * (hl - 0.35) + dv[1] * toH * (hwd - 0.22); const a = Math.atan2(-du[1], du[0]);
