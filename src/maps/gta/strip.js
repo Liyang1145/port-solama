@@ -64,7 +64,7 @@ function frameAt(O, a, flip) { const [U, V] = axes(a); const N = flip ? [-V[0], 
 // ---------------------------------------------------------------- prep (before attachFabric) ----
 export function prepStrip(fab) {
   if (STRIP_OFF || !fab || !fab.strips || !fab.strips.length) return null; const T0 = performance.now();
-  const K = { units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
+  const K = { units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], raise: new Grid(16), stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
   const S = K.stats; const why = (k) => { S.refused[k] = (S.refused[k] || 0) + 1; };
   // test grids from the final records (bodies, trunks, arterial sidewalks, parked cars)
   const G = { body: new Grid(32), trunk: new Grid(16), walk: new Grid(16), car: new Grid(16) };
@@ -109,6 +109,7 @@ export function prepStrip(fab) {
   const addCol = (R, h, k) => { K.cols.push({ x: R.x, z: R.z, a: R.a, hl: R.hl, hw: R.hw, h, k }); };
   const cbF = (fr, seed) => (list, s, t, y0, sx, sy, st, c, kind = 8) => { const p = fr.W(s, t); box(list, p[0], y0, p[1], sx, sy, st, fr.a, c, kind, seed); };
 
+  K.prof = { grid: performance.now() - T0 };
   // -------------------------------------------------------------- 1. strip shops ----
   let tenantNo = 0;
   for (let bi = 0; bi < fab.strips.length; bi++) { const SB = fab.strips[bi]; S.bands++; const B = (x) => SB.bEdge + SB.dir * x; const P = SB.P;
@@ -121,6 +122,7 @@ export function prepStrip(fab) {
       const u = newUnit(C[0], C[1]); u.meta = { k: 'shop', C, N, U: F2.U, L, D, h, band: bi }; const wall = [r[7], r[8], r[9]]; const trim = TRIM[Math.floor(hs(1) * TRIM.length)]; const hw = L / 2;
       const yellow = hs(2) < 0.45; const colC = hs(3) < 0.5 ? mul(wall, 0.97) : trim;
       // walk + kerb, canopy slab + sign-band fascia, coping
+      { const p = F2.W(0, 1.66), R = { x: p[0], z: p[1], a, hl: L / 2 + 0.2, hw: 1.66, y: 0.12 }; K.raise.add(R, ...ext(R)); } // a_stripfix: walk + kerb top for groundH
       cb(u.S, 0, 1.6, 0, L + 0.4, 0.12, 3.2, CONC); cb(u.F, 0, 3.24, 0, L + 0.4, 0.13, 0.16, yellow ? YEL : KERB);
       cb(u.S, 0, 1.55, 3.15, L + 0.5, 0.25, 3.1, [0.90, 0.89, 0.85]); cb(u.S, 0, 2.95, 3.0, L + 0.56, 1.1, 0.3, trim);
       cb(u.F, 0, 3.11, 3.0, L + 0.6, 0.07, 0.04, mul(trim, 0.7)); // drip edge
@@ -244,6 +246,7 @@ export function prepStrip(fab) {
         for (const q of [-1, 1]) cb(u.S, 0, q * 1.25, 8.72, 0.5, 0.18, 0.8, [0.26, 0.25, 0.24], 17);
         addCol(R, 9.0, 'pole'); } }
   }
+  K.prof.bands = performance.now() - T0;
   // drop the cars that stood on the new aprons / lanes (records and the fab.parked snapshot stay in step)
   if (S.carsDropped) { const P0 = fab.parked; const live = []; let i = 0;
     for (const ch of fab.chunks.values()) { const I = ch.I; if (!I) continue; const keep = []; for (const p of I.car) { const k = P0 ? P0[i * 4 + 3] : 0; i++; if (p.dead) continue; keep.push(p); live.push(p[0], p[1], p[2], k); } I.car = keep; }
@@ -257,6 +260,9 @@ export function prepStrip(fab) {
   if (AUDIT) K.audit = auditStrip(K, G, blocked);
   return K; }
 
+// a_stripfix: raised front walks (0.12 m) for city.groundH -> people stand on them instead of sinking 12 cm, cars ride up the kerb
+export function stripGroundH(K, x, z) { if (!K || !K.raise) return undefined; let y; K.raise.near(x, z, x, z, (R) => { const [u, v] = axes(R.a); const dx = x - R.x, dz = z - R.z;
+    if (Math.abs(dx * u[0] + dz * u[1]) <= R.hl && Math.abs(dx * v[0] + dz * v[1]) <= R.hw) { y = R.y; return true; } return false; }); return y; }
 // &stripaudit: every collider against sidewalks / buildings / trunks / parked cars after the drop
 function auditStrip(K, G, blocked) { const R = { cols: K.cols.length, byKind: {}, bad: {} };
   for (const c of K.cols) { R.byKind[c.k] = (R.byKind[c.k] || 0) + 1; const w = blocked({ x: c.x, z: c.z, a: c.a, hl: Math.max(0.02, c.hl - 0.12), hw: Math.max(0.02, c.hw - 0.12) }, { own: null, cars: false });

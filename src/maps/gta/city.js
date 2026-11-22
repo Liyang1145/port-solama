@@ -11,7 +11,7 @@ import { fixFabricProps } from './propfix.js';
 import { fixFabricCars } from './parkfix.js';
 import { curbPass } from './curbfix.js'; // a_curbalign
 import { prepHouses, attachHouses, updateHouses, auditHouses } from './houses.js'; // a_houses
-import { prepStrip, attachStrip, updateStrip } from './strip.js'; // a_strip
+import { prepStrip, attachStrip, updateStrip, stripGroundH } from './strip.js'; // a_strip (a_stripfix: stripGroundH)
 const HOUSE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('houseaudit');
 import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } from './edgewalls.js'; // a_edgewalls (after curbfix / propfix / parkfix: their bake inputs are unchanged)
 const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
@@ -230,7 +230,7 @@ export function buildCity(scene, mats, T) {
     return false;
   };
   const groundH = (x, z) => {
-    { const h = region.groundH(x, z); if (h !== undefined) return h; }
+    { const h = region.groundH(x, z); if (h !== undefined) { if (h === 0 && fab.stripKit) { const r = stripGroundH(fab.stripKit, x, z); if (r !== undefined) return r; } return h; } } // a_stripfix: strip-mall front walks
     if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z), -1.6);
     if (!isLand(x, z)) return L.waterY - 3;
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
