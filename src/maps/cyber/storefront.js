@@ -23,20 +23,37 @@
 // box; outside clutter keeps clear of the frontage's sidewalk dressing / vending machines (arch.js / dress.js log their footprints).
 // Nothing casts shadows. Outside clutter gets one small collider per shop (≤ 1.35 m from the facade, so the
 // sidewalk stays clear); building colliders are untouched.
+// b_corner (2026-11-22): two more sources of bays and three more shop types.
+//  * corner side rows: bldglayer.js 'side' items (a parcel side facing a road at a block corner) build their own shopStreet with
+//    opts.log; the bays come here through onSide() with the side-row matrix (same record as SHOP_LOG, cached per item).
+//  * Deco core (hand-built, real collider grid): city.js shopfront() logs every ground-floor store edge (CORE_SHOP_LOG, world
+//    frame). The first sync() keeps the edges that face a street sidewalk (road graph within reach, no building in front), cuts
+//    them into the same bays as the facade shader / piers (n = round(len / sw)) and plans one shop per bay. The core has no glass
+//    storefront kit, so a core shop also gets a door frame; sidewalk avoidance there reads the collider grid (lamps, palms,
+//    poles, signs, benches) instead of the dress.js log. Core shops live in 'core|' chunks, always eligible (distance-packed).
+//  * new types: 烧烤 bbq (charcoal grill trough with glowing coals + skewers, stainless hood with a duct up the wall, skewer rack),
+//    大排档 dai pai dong (round folding tables + drum stools, wide PVC strip curtain over the open front, a string of red
+//    lanterns), 网吧 net café (glass door, a row of glowing monitors over a desk behind the window, chair backs, lit posters).
+//    Names come from the shop-name cells 夜猫烧烤 / 炭火烧烤, 大排档, 光栅网吧 (SIGN_TXT), so a cnSignboard above sets the type.
+// Same packing as before (vcolD + neon merged meshes + the shop-name World), the triangle budget grows 15k -> 23k.
 import * as THREE from 'three';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { World } from '../../geo.js';
-import { SHOP_LOG } from './arch.js';
+import { SHOP_LOG, CORE_SHOP_LOG } from './arch.js';
 import { cnFace } from './street2.js';
 
-const CH = 160, RMAX = 120, BUDGET = 15000; // layer triangles (the frame draws the layer ~3x: main + extra scene passes)
+// b_corner: the budget is per *frame*: the frame draws 'neon' + names 3x (half-res water / wet-street mirror, main, GTAO G-buffer)
+// and 'vcolD' 2x (it skips the mirror pass, see mesh()) -> cost = 2·vcolD + 3·neon triangles. 29k keeps the whole-frame increase
+// ≤ 30k even where no shop was drawn before (Deco core); b_storefront/b_signsync drew ~15k layer tris 3x = ~45k.
+const CH = 160, RMAX = 120, BUDGET = 29000;
 // shop types: [id, sign cells (street2.js SIGN_TXT), weight]
 export const TYPES = [['ramen', [16, 0], 1.2], ['tea', [21, 7, 11], 1.0], ['conv', [6, 10], 1.2], ['repair', [18, 9, 2, 8], 1.1], ['pharm', [3], 0.8],
-  ['hard', [4, 15], 0.8], ['laundry', [13], 0.7], ['barber', [5], 0.6], ['clinic', [22, 23], 0.7]];
+  ['hard', [4, 15], 0.8], ['laundry', [13], 0.7], ['barber', [5], 0.6], ['clinic', [22, 23], 0.7], ['bbq', [1, 17], 0.9], ['paidang', [14], 0.8], ['netcafe', [12], 0.8]];
 const TW = TYPES.reduce((s, t) => s + t[2], 0);
 // b_signsync: the bay's own cnSignboard name (street2.js SIGN_TXT cell 0..17) decides the shop type, so 门头 light box and the board
 // above carry one name: 面馆/拉面/烧烤/大排档 -> food bar (ramen look), 修机/电器/电子/网吧 -> screens (repair look), …
-const SIGN_TYPE = ['ramen', 'ramen', 'repair', 'pharm', 'hard', 'barber', 'conv', 'tea', 'repair', 'repair', 'conv', 'tea', 'repair', 'laundry', 'ramen', 'hard', 'ramen', 'ramen'];
+// b_corner: 夜猫烧烤 / 炭火烧烤 -> bbq, 光栅网吧 -> netcafe, 大排档 -> paidang (own types now)
+const SIGN_TYPE = ['ramen', 'bbq', 'repair', 'pharm', 'hard', 'barber', 'conv', 'tea', 'repair', 'repair', 'conv', 'tea', 'netcafe', 'laundry', 'paidang', 'hard', 'ramen', 'bbq'];
 const TYPE_BY_ID = Object.fromEntries(TYPES.map((t) => [t[0], t]));
 const NOAVOID = typeof location !== 'undefined' && /[?&]shopnoavoid/.test(location.search); // test switch: b_storefront placement (no sidewalk avoidance)
 function pickType() { let r = rng() * TW; for (const t of TYPES) { r -= t[2]; if (r <= 0) return t; } return TYPES[0]; }
@@ -85,6 +102,25 @@ function geos() {
   // drink crate 0.4 × 0.28 × 0.3 open top
   G.crate = merge([BX(-0.2, 0, -0.15, 0.2, 0.025, 0.15), BX(-0.2, 0, -0.15, 0.2, 0.28, -0.13), BX(-0.2, 0, 0.13, 0.2, 0.28, 0.15), BX(-0.2, 0, -0.13, -0.18, 0.28, 0.13), BX(0.18, 0, -0.13, 0.2, 0.28, 0.13),
     BX(-0.17, 0.025, -0.11, -0.05, 0.24, 0.0), BX(-0.03, 0.025, -0.11, 0.09, 0.24, 0.0), BX(0.05, 0.025, 0.02, 0.17, 0.24, 0.12)]);   // + bottles as blocks
+  // ---- b_corner pieces
+  // drum stool (大排档 round stool): tapered solid drum + seat ring
+  { const d = new THREE.CylinderGeometry(0.15, 0.18, 0.43, 10); d.translate(0, 0.215, 0); const r = new THREE.CylinderGeometry(0.165, 0.165, 0.03, 10); r.translate(0, 0.445, 0); G.dstool = merge([d, r]); }
+  // round folding table ⌀0.9 × 0.72: top + post + cross feet
+  { const t = new THREE.CylinderGeometry(0.45, 0.45, 0.03, 14); t.translate(0, 0.71, 0); G.rtable = merge([t, BX(-0.025, 0, -0.025, 0.025, 0.7, 0.025), BX(-0.32, 0, -0.025, 0.32, 0.04, 0.025), BX(-0.025, 0, -0.32, 0.025, 0.04, 0.32)]); }
+  // charcoal grill trough 1.2 × 0.3, rim at 0.86: 4 legs + bottom + 4 walls (coals are a separate lit box)
+  { const P = []; for (const x of [-0.55, 0.55]) for (const z of [-0.12, 0.12]) P.push(BX(x - 0.02, 0, z - 0.02, x + 0.02, 0.66, z + 0.02));
+    P.push(BX(-0.6, 0.62, -0.15, 0.6, 0.66, 0.15), BX(-0.6, 0.66, -0.15, 0.6, 0.86, -0.13), BX(-0.6, 0.66, 0.13, 0.6, 0.86, 0.15), BX(-0.6, 0.66, -0.13, -0.58, 0.86, 0.13), BX(0.58, 0.66, -0.13, 0.6, 0.86, 0.13));
+    P.push(BX(-0.55, 0.2, -0.12, 0.55, 0.22, 0.12)); G.grill = merge(P); } // + lower shelf
+  // skewers across the trough: 11 sticks (unit width 1 along x, sticks along z, y = 0) and the meat / veg chunks on them
+  { const S = [], M = []; for (let i = 0; i < 11; i++) { const x = -0.5 + (i + 0.5) / 11; S.push(BX(x - 0.006, -0.006, -0.22, x + 0.006, 0.006, 0.2));
+      for (const z of [-0.09, -0.02, 0.05]) M.push(BX(x - 0.022, -0.02, z - 0.028, x + 0.022, 0.024, z + 0.028)); } G.skew = merge(S); G.meat = merge(M); }
+  // stainless hood (油烟罩): square frustum, bottom 1 × 1 (unit), top 0.4, height 1 (scaled) + a lip
+  { const h = new THREE.CylinderGeometry(0.2 * Math.SQRT2, 0.5 * Math.SQRT2, 1, 4, 1, true); h.rotateY(Math.PI / 4); h.translate(0, 0.5, 0); G.hood = merge([h, BX(-0.52, -0.04, -0.52, 0.52, 0.02, -0.48), BX(-0.52, -0.04, 0.48, 0.52, 0.02, 0.52), BX(-0.52, -0.04, -0.48, -0.48, 0.02, 0.48), BX(0.48, -0.04, -0.48, 0.52, 0.02, 0.48)]); }
+  // skewer rack (串架) 0.7 × 1.3 × 0.35: 2 side frames + 3 slanted trays
+  { const P = []; for (const x of [-0.35, 0.35]) for (const z of [-0.15, 0.15]) P.push(BX(x - 0.015, 0, z - 0.015, x + 0.015, 1.3, z + 0.015));
+    for (const y of [0.45, 0.8, 1.15]) { const t = BX(-0.35, -0.01, -0.16, 0.35, 0.01, 0.16); t.rotateX(-0.25); t.translate(0, y, 0); P.push(t, BX(-0.35, y - 0.06, 0.13, 0.35, y + 0.04, 0.15)); } G.srack = merge(P); }
+  // wide PVC strip curtain with gaps (大排档 / 烧烤 open front): 10 strips per unit width, y ∈ [−1, 0]
+  { const P = [BX(-0.52, -0.03, -0.02, 0.52, 0.03, 0.02)]; for (let i = 0; i < 10; i++) { const x = -0.5 + (i + 0.5) / 10; P.push(BX(x - 0.034, -1, (i % 2 ? 0.006 : -0.006) - 0.002, x + 0.034, -0.03, (i % 2 ? 0.006 : -0.006) + 0.002)); } G.pstrip = merge(P); }
   return (GEO = G);
 }
 
@@ -100,6 +136,10 @@ const MDEF = {
   norenR: [0x8a1418, 0.9, 0.0], norenI: [0x1a2a55, 0.9, 0.0], norenW: [0xd8d2c0, 0.9, 0.0], strip: [0x9fb4b8, 0.22, 0.0],
   stoolR: [0xc0222a, 0.5, 0.0], stoolB: [0x1f5fb0, 0.5, 0.0], stoolG: [0x2a8a4a, 0.5, 0.0], crateR: [0xb51e22, 0.5, 0.0], crateB: [0x1f58a8, 0.5, 0.0],
   chest: [0xdfe3e6, 0.4, 0.0], bucketO: [0xd08a20, 0.6, 0.0], bucketB: [0x2a6ab0, 0.6, 0.0], glass: [0x1d2a30, 0.08, 0.3],
+  // b_corner
+  inox: [0x9aa0a6, 0.35, 0.8], soot: [0x26221e, 0.9, 0.2], coal: [0x2a0a02, 0.8, 0.0, 0xff5a12, 'lamp'], meat: [0x7a2a14, 0.7, 0.0], veg: [0x3d7a26, 0.7, 0.0],
+  stick: [0xb89060, 0.8, 0.0], tableR: [0xd8d8d0, 0.5, 0.0], dstoolR: [0xb01a22, 0.5, 0.0], dstoolB: [0x1d4f9c, 0.5, 0.0], pvc: [0x8fa8a6, 0.25, 0.0],
+  monF: [0x101114, 0.4, 0.3], scrB: [0x0a1020, 0.3, 0.0, 0x5a8cff, 'lit'], scrP: [0x180a20, 0.3, 0.0, 0xc060ff, 'lit'], chair: [0x18181c, 0.6, 0.1], chairR: [0x601014, 0.6, 0.1],
 };
 const GLOW = { lit: [0.35, 1.7], lamp: [0.4, 2.4], stk: [0.06, 0.45] }; // emissiveIntensity = a + uNight * b
 const KINDS = {}; // kind -> [geometry, material]
@@ -107,7 +147,9 @@ for (const m in MDEF) KINDS[m] = ['box', m];
 Object.assign(KINDS, { shutter: ['shutter', 'shutter'], shutterR: ['shutter', 'shutterR'], stoolR: ['stool', 'stoolR'], stoolB: ['stool', 'stoolB'], stoolG: ['stool', 'stoolG'],
   table: ['table', 'steel'], tableW: ['table', 'wood'], norenR: ['noren', 'norenR'], norenI: ['noren', 'norenI'], norenW: ['noren', 'norenW'], strip: ['strip', 'strip'],
   lantern: ['lantern', 'lantern'], lcap: ['cap', 'frame'], rack: ['rack', 'steel'], bucketO: ['cyl', 'bucketO'], bucketB: ['cyl', 'bucketB'], pole: ['pole', 'poleW'], bandR: ['band', 'bandR'],
-  bandB: ['band', 'bandB'], ring: ['ring', 'steel'], disc: ['disc', 'glass'], crossG: ['cross', 'litG'], crateR: ['crate', 'crateR'], crateB: ['crate', 'crateB'] });
+  bandB: ['band', 'bandB'], ring: ['ring', 'steel'], disc: ['disc', 'glass'], crossG: ['cross', 'litG'], crateR: ['crate', 'crateR'], crateB: ['crate', 'crateB'],
+  dstoolR: ['dstool', 'dstoolR'], dstoolB: ['dstool', 'dstoolB'], rtable: ['rtable', 'tableR'], grill: ['grill', 'soot'], skew: ['skew', 'stick'], meatS: ['meat', 'meat'], vegS: ['meat', 'veg'],
+  hood: ['hood', 'inox'], srack: ['srack', 'inox'], pstrip: ['pstrip', 'pvc'] });
 // b_signsync: no own materials any more. Every kind bakes into one of two merged meshes on materials the streamed dressing already
 // draws with (same programs): 'vcolD' (vertex colour = the kind's diffuse colour, as dress.js / kit.js clutter) and 'neon' (lit
 // faces: vertex colour = emissive colour scaled so 'neon's (0.25 + 5·uNight) gives the old a + b·uNight at night).
@@ -124,10 +166,12 @@ const BAYB = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THRE
 export class StorefrontLayer {
   constructor(scene, mats, city) {
     this.mats = mats; this.city = city; this.stream = city.stream; this.group = new THREE.Group(); this.group.name = 'storefront'; scene.add(this.group);
-    this.meshes = [null, null]; this.cap = [0, 0]; this.bake = new Map(); this.chunks = new Map(); this.cache = new WeakMap(); this.world = []; this.uKey = ''; this.last = null; this.frame = 0; this.dirty = false;
+    this.meshes = [null, null]; this.cap = [0, 0]; this.nv = [0, 0]; this.bake = new Map(); this.chunks = new Map(); this.cache = new WeakMap(); this.world = []; this.uKey = ''; this.last = null; this.frame = 0; this.dirty = false;
     const G = geos(); this.triOf = {}; for (const k in KINDS) this.triOf[k] = G[KINDS[k][0]].attributes.position.count / 3;
     this.stats = { parcels: 0, bays: 0, shops: 0, closed: 0, narrow: 0, types: {}, shutterHalf: 0, shutterUp: 0, colliders: 0, signSync: 0, signOther: 0, swItems: 0, outGroups: 0, outOverlap: 0, noavoid: NOAVOID, bakes: 0, packed: 0, tris: 0, inst: 0, faces: 0 };
     for (const t of TYPES) this.stats.types[t[0]] = 0;
+    this.stats.bySrc = { front: { shops: 0, types: {} }, side: { rows: 0, bays: 0, shops: 0, types: {} }, core: { edges: 0, street: 0, bays: 0, shops: 0, types: {}, swItems: 0 } };
+    this.coreDone = false; this.sideCache = new WeakMap();
     SHOP_LOG.length = 0; // nothing from before the layer existed belongs to a streamed parcel we will see again
     if (this.stream) { const prev = this.stream.onParcel; this.stream.onParcel = (c, p, m) => { this.onParcel(c, p, m); if (prev) prev(c, p, m); }; }
   }
@@ -142,15 +186,54 @@ export class StorefrontLayer {
     if (!ch) this.chunks.set(c.key, ch = { key: c.key, parcels: new Set(), shops: [] });
     ch.parcels.add(p); for (const s of shops) ch.shops.push(s); this.dirty = true;
   }
+  // b_corner: a corner side row (bldglayer.js 'side' item) was just built for stream chunk `key`: bays in the row frame, matrix m
+  onSide(key, it, bays, m) {
+    let ch = this.chunks.get(key); if (ch && ch.parcels.has(it)) return;
+    let shops = this.sideCache.get(it);
+    if (!shops) { shops = []; const bs = this.stats.bySrc.side; bs.rows++;
+      bays.forEach((r, i) => { this.stats.bays++; bs.bays++; const s = withSeed(((it.p.seed ^ (it.sd > 0 ? 0x2c0e51 : 0x6b1d07)) + i * 7919) >>> 0, () => this.plan(r, m, 'side')); if (s) shops.push(s); });
+      this.sideCache.set(it, shops); }
+    if (!ch) this.chunks.set(key, ch = { key, parcels: new Set(), shops: [] });
+    ch.parcels.add(it); for (const s of shops) ch.shops.push(s); this.dirty = true;
+  }
+  // b_corner: the hand-built Deco core (city.js shopfront log, world frame). Run once, on the first sync (all colliders exist then).
+  planCore() {
+    this.coreDone = true; const E = CORE_SHOP_LOG.splice(0); const col = this.city.col, gr = this.city.graph; const bs = this.stats.bySrc.core; if (!col || !col.query) return;
+    // the core's own street grid (city.roads, half width 7 m + 4.5 m sidewalk; the road graph index does not cover the core)
+    const RD = this.city.roads || []; const nearRoad = (x, z) => RD.some((r) => r.axis === 'z' ? Math.abs(x - r.c) < 14 && z > r.a0 - 2 && z < r.a1 + 2 : Math.abs(z - r.c) < 14 && x > r.a0 - 2 && x < r.a1 + 2)
+      || (gr && (() => { const n = gr.index.near(x, z); return n && n.d < n.e.hw + 7; })());
+    const inBld = (x, z) => col.query(x, z, 0.5, []).some((b) => b.tag === 'bld' && x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ);
+    E.forEach((e, ei) => {
+      bs.edges++; const ox = -e.dz, oz = e.dx; const P = (a, d) => [e.p[0] + e.dx * a + ox * d, e.p[1] + e.dz * a + oz * d];
+      // faces a street sidewalk: a road within reach of the edge middle, and no building right in front (party walls, back yards)
+      let ok = true; for (const t of [0.25, 0.5, 0.75]) { const q = P(e.len * t, 1.5); if (inBld(q[0], q[1])) { ok = false; break; } } if (!ok) { bs.rejBld = (bs.rejBld || 0) + 1; return; }
+      { const q = P(e.len / 2, 1.5); if (!nearRoad(q[0], q[1])) { bs.rejRoad = (bs.rejRoad || 0) + 1; return; } }
+      bs.street++;
+      const F0 = new THREE.Matrix4().makeBasis(new THREE.Vector3(e.dx, 0, e.dz), new THREE.Vector3(0, 1, 0), new THREE.Vector3(ox, 0, oz)).setPosition(e.p[0], 0, e.p[1]);
+      // existing street furniture with colliders on the outside-clutter strip (lamps, palms, poles, signs, benches …) -> sidewalk spans
+      const sw = []; { const m = P(e.len / 2, 1); for (const b of col.query(m[0], m[1], e.len / 2 + 2, [])) { if (b.tag === 'bld' || b.tag === 'shop' || b.tag === 'gap') continue;
+        let a0 = 1e9, a1 = -1e9, d0 = 1e9, d1 = -1e9; for (const [x, z] of [[b.minX, b.minZ], [b.maxX, b.minZ], [b.minX, b.maxZ], [b.maxX, b.maxZ]]) { const dx = x - e.p[0], dz = z - e.p[1]; const a = dx * e.dx + dz * e.dz, d = dx * ox + dz * oz; a0 = Math.min(a0, a); a1 = Math.max(a1, a); d0 = Math.min(d0, d); d1 = Math.max(d1, d); }
+        if (a1 < -0.5 || a0 > e.len + 0.5 || d1 < 0 || d0 > 2.4) continue; sw.push({ k: b.tag, a0, a1, d0, d1 }); bs.swItems++; } }
+      const n = Math.max(1, Math.round(e.len / e.sw)), cw = e.len / n; const shops = [];
+      for (let i = 0; i < n; i++) { const a0 = i * cw + 0.2, a1 = (i + 1) * cw - 0.2; bs.bays++; this.stats.bays++;
+        let h = Math.imul(ei + 0x51ed27, 0x85ebca6b) ^ Math.imul(i + 0x2f, 0xc2b2ae35); h = Math.imul(h ^ (h >>> 15), 0x27d4eb2f); h ^= h >>> 13; // decorrelated per-bay seed
+        const s = withSeed(h >>> 0, () => { const da = rng() < 0.5 ? a0 + 0.15 : a1 - 1.15;
+          return this.plan({ F0, core: true, a0, a1, y0: e.y0, yt: 0.8 * e.ground - 0.04, ground: e.ground, kind: 'plain', open: 1, cl: { da, cl: null }, sg: 0, sk: -1, sw, i, n }, null, 'core'); });
+        if (s) shops.push(s); }
+      for (const s of shops) { const key = 'core|' + Math.floor(s.cx / CH) + ',' + Math.floor(s.cz / CH); let ch = this.chunks.get(key); if (!ch) this.chunks.set(key, ch = { key, core: true, parcels: new Set(), shops: [] }); ch.shops.push(s); }
+    });
+    this.dirty = true;
+  }
   // ---------------------------------------------------------------- one bay -> one shop (bay frame -> world via BM) ----
-  plan(r, M) {
+  plan(r, M, src = 'front') {
     const w = r.a1 - r.a0; if (w < 2.3) { this.stats.narrow++; return null; }
     if (r.kind === 'shut' && r.open === 0) { this.stats.closed++; return null; }
-    const ac = (r.a0 + r.a1) / 2; const BM = new THREE.Matrix4().multiplyMatrices(M, BAYB.clone().setPosition(r.fx, 0, r.z1 - ac));
+    const ac = (r.a0 + r.a1) / 2; const BM = r.F0 ? r.F0.clone().multiply(new THREE.Matrix4().makeTranslation(ac, 0, 0)) : new THREE.Matrix4().multiplyMatrices(M, BAYB.clone().setPosition(r.fx, 0, r.z1 - ac));
     const synced = r.sg === 1 && r.sk >= 0 && r.sk < SIGN_TYPE.length; const T = synced ? TYPE_BY_ID[SIGN_TYPE[r.sk]] : pickType(); const type = T[0]; this.stats.types[type]++; this.stats.shops++;
+    const bs = this.stats.bySrc[src]; bs.shops++; bs.types[type] = (bs.types[type] || 0) + 1;
     if (synced) this.stats.signSync++; else if (r.sg === 1) this.stats.signOther++;
-    const shop = { type, inst: {}, tris: 0, uniq: [] }; const hw = w / 2;
-    const push = (k, mat) => { _w.multiplyMatrices(BM, mat); (shop.inst[k] || (shop.inst[k] = [])).push(..._w.elements); shop.tris += this.triOf[k]; };
+    const shop = { type, src, inst: {}, tris: 0, cost: 0, uniq: [] }; const hw = w / 2; const gz = r.core ? 0.14 : 0.236; // glass plane (core: the facade shader wall, no storefront kit)
+    const push = (k, mat) => { _w.multiplyMatrices(BM, mat); (shop.inst[k] || (shop.inst[k] = [])).push(..._w.elements); shop.tris += this.triOf[k]; shop.cost += this.triOf[k] * (KC[k].b ? 3 : 2); };
     const P = (k, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0) => { _e.set(0, ry, rz, 'YXZ'); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, z); push(k, _m.compose(_p, _q, _s)); };
     const seg = (k, a, b, wd, h = wd) => { _a.set(...a); _b.set(...b); const L = _a.distanceTo(_b); if (L < 0.01) return; _b.sub(_a).normalize(); _q.setFromUnitVectors(_Y, _b); _s.set(wd, L, h); _p.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2); push(k, _m.compose(_p, _q, _s)); };
     const y0 = r.y0, yt = r.yt, ys = y0 + 0.45, yh = yt - 0.06, ytr = Math.min(yh - 0.35, y0 + 2.6);
@@ -160,7 +243,7 @@ export class StorefrontLayer {
     const busy = []; if (r.cl && r.cl.cl) busy.push([r.cl.cl[0] - ac - 0.15, r.cl.cl[1] - ac + 0.15]);
     // b_signsync: existing sidewalk dressing / vending machines of this frontage (dress.js sidewalk, arch.js vending) whose footprint
     // reaches into the outside-clutter strip (d ≤ 1.4 m) of this bay: their x spans become busy, so the outside group moves or is dropped
-    const sw = []; if (r.sw) for (const it of r.sw) { const x0 = it.a0 - ac, x1 = it.a1 - ac; if (x1 < -hw - 0.1 || x0 > hw + 0.1 || it.d0 > 1.4 || it.d1 < 0.3) continue; sw.push([x0 - 0.1, x1 + 0.1, it.d0, it.d1]); }
+    const sw = []; if (r.sw) for (const it of r.sw) { const x0 = it.a0 - ac, x1 = it.a1 - ac; if (x1 < -hw - 0.1 || x0 > hw + 0.1 || it.d0 > (r.core ? 2.4 : 1.4) || it.d1 < 0.3) continue; /* b_corner: core palms / poles stand 1.6–2.2 m out -> keep the gap walkable */ sw.push([x0 - 0.1, x1 + 0.1, it.d0, it.d1]); }
     if (!NOAVOID) for (const b of sw) busy.push([b[0], b[1]]);
     const groups = [];
     // ---- shutter: existing (from the log) or one of ours on bare bays
@@ -170,6 +253,9 @@ export class StorefrontLayer {
       const k = rng() < 0.3 ? 'shutterR' : 'shutter'; if (yt - yb > 0.1) P(k, 0, yb, 0.31, w, yt - yb, 1);
       P('steel', 0, yt + 0.22, 0.36, w + 0.2, 0.44, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); }
     const vTop = Math.min(ytr - 0.05, yb - 0.05); const open = vTop > ys + 0.6; // window still visible below the curtain
+    // b_corner: core bays have only the shader glass + piers -> door frame, glass leaf and push bar of our own
+    if (r.core) { const yd = Math.min(ytr, yb); for (const x of [dx0, dx1]) P('frame', x, (y0 + yd) / 2, 0.1, 0.08, yd - y0, 0.1); P('frame', dcx, yd, 0.1, dx1 - dx0 + 0.08, 0.08, 0.1);
+      if (yd - y0 > 1.2) { P('glass', dcx, (y0 + yd) / 2, 0.08, dx1 - dx0 - 0.06, yd - y0 - 0.04, 0.02); P('steel', dcx, y0 + 1.05, 0.13, dx1 - dx0 - 0.2, 0.04, 0.04); } }
     // ---- 门头 light box in the transom: dark case + lit shop-name face (cnFace, merged World)
     { const wl = Math.min(w - 0.3, 3.4), hl = 0.55, yl = Math.max(ytr + 0.3, Math.min(yh - 0.3, ytr + 0.32)); P('lbBody', 0, yl, 0.44, wl, hl, 0.18);
       const c = new THREE.Vector3(0, yl, 0.536).applyMatrix4(BM); const n = new THREE.Vector3(0, 0, 1).transformDirection(BM);
@@ -178,7 +264,7 @@ export class StorefrontLayer {
     const card = (k, x0, x1, ya, yb2) => { if (yb2 - ya < 0.15 || x1 - x0 < 0.2) return false; P(k, (x0 + x1) / 2, (ya + yb2) / 2, 0.12, x1 - x0, yb2 - ya, 0.02); return true; };
     const ink = (x, y, sx, sy) => P('ink', x, y, 0.135, sx, sy, 0.006);
     const stickers = (n) => { for (let i = 0; i < n; i++) { const x = rand(wx0 + 0.1, wx1 - 0.1), y = rand(ys + 0.15, Math.min(vTop, ys + 1.3)); if (y > vTop) continue; const k = rng() < 0.6 ? 'stkY' : 'stkR';
-      P(k, x, y, 0.236, rand(0.12, 0.2), rand(0.08, 0.13), 0.006, 0, rand(-0.25, 0.25)); P('ink', x, y - 0.012, 0.24, 0.07, 0.022, 0.003); } };
+      P(k, x, y, gz, rand(0.12, 0.2), rand(0.08, 0.13), 0.006, 0, rand(-0.25, 0.25)); P('ink', x, y - 0.012, gz + 0.004, 0.07, 0.022, 0.003); } };
     // ---- outside clutter group: x span [ox0, ox1], z ≤ oz; kept off the door and off the storefront's own clutter
     const free = (x0, x1) => x0 >= -hw - 0.05 && x1 <= hw + 0.05 && !(x1 > dx0 - 0.1 && x0 < dx1 + 0.1) && !busy.some((b) => x1 > b[0] && x0 < b[1]);
     const out = { x0: 1e9, x1: -1e9, z: 0 }; const claim = (x0, x1, z) => { out.x0 = Math.min(out.x0, x0); out.x1 = Math.max(out.x1, x1); out.z = Math.max(out.z, z); busy.push([x0, x1]); groups.push([x0, x1, z]); };
@@ -233,6 +319,40 @@ export class StorefrontLayer {
       const xp = left ? dx1 + 0.2 : dx0 - 0.2; if (Math.abs(xp) < hw - 0.05) { const yc = y0 + 2.0; P('pole', xp, yc, 0.42, 0.16, 0.7, 0.16); for (let i = 0; i < 3; i++) { P('bandR', xp, yc - 0.27 + i * 0.22, 0.42, 0.17, 0.6, 0.17); P('bandB', xp, yc - 0.16 + i * 0.22, 0.42, 0.17, 0.6, 0.17); }
         for (const s of [-1, 1]) P('steel', xp, yc + s * 0.38, 0.42, 0.2, 0.06, 0.2); P('steel', xp, yc, 0.3, 0.05, 0.05, 0.22); }
       stickers(randi(0, 2));
+    } else if (type === 'bbq') { // 烧烤: grill trough with coals + skewers under a stainless hood (duct up the wall), skewer rack
+      if (rng() < 0.5) noren('norenR'); else strip();
+      if (open) { const ya = Math.max(ys + 0.35, vTop - 1.0); if (card('litW', wx0 + 0.05, wx1 - 0.05, ya, vTop)) { const rows = Math.max(2, Math.floor((vTop - ya) / 0.2));
+        for (let i = 0; i < rows; i++) { const y = ya + (i + 0.6) * (vTop - ya) / (rows + 0.4); ink(wcx - ww * 0.12, y, ww * 0.5, 0.035); ink(wx1 - 0.25, y, 0.18, 0.035); } } }
+      const x = spot(1.35); if (x !== null) { const z = 0.78; P('grill', x, y0, z); P('coal', x, y0 + 0.79, z, 1.12, 0.06, 0.22); P('skew', x, y0 + 0.875, z, 1.08, 1, 1); P('meatS', x, y0 + 0.875, z, 1.08, 1, 1);
+        const yh0 = y0 + 2.0; P('hood', x, yh0, 0.66, 1.35, 0.42, 0.82); const yd = Math.min(yt + 1.4, yh0 + 2.6); // duct: up from the hood, then into the wall
+        P('inox', x, (yh0 + 0.42 + yd) / 2, 0.66, 0.22, yd - yh0 - 0.42, 0.22); P('inox', x, yd, 0.45, 0.22, 0.22, 0.44); P('soot', x, yh0 - 0.03, 0.66, 1.2, 0.02, 0.7);
+        claim(x - 0.65, x + 0.65, 1.1);
+        const x2 = spot(0.8); if (x2 !== null) { P('srack', x2, y0, 0.55); for (const [yy, k] of [[0.45, 'meatS'], [0.8, 'vegS'], [1.15, 'meatS']]) { P('skew', x2, y0 + yy + 0.035, 0.55, 0.64, 1, 0.7); P(k, x2, y0 + yy + 0.035, 0.55, 0.64, 1, 0.7); } claim(x2 - 0.4, x2 + 0.4, 0.75); }
+        else { const x3 = spot(0.4); if (x3 !== null) { const n = randi(2, 4); for (let i = 0; i < n; i++) P(stoolK(), x3, y0 + i * 0.075, 0.55, 1, 1, 1, rand(0, 6.28)); claim(x3 - 0.2, x3 + 0.2, 0.75); } } }
+      stickers(randi(0, 2));
+    } else if (type === 'paidang') { // 大排档: wide PVC strip curtain, string of red lanterns, round tables + drum stools
+      if (open) { const ya = Math.max(ys + 0.35, vTop - 1.1); if (card('litY', wx0 + 0.05, wx1 - 0.05, ya, vTop)) { const rows = Math.max(2, Math.floor((vTop - ya) / 0.22));
+        for (let i = 0; i < rows; i++) { const y = ya + (i + 0.6) * (vTop - ya) / (rows + 0.4); ink(wcx - ww * 0.1, y, ww * 0.55, 0.04); ink(wx1 - 0.22, y, 0.16, 0.04); } } }
+      if (yb >= ytr) P('pstrip', 0, ytr - 0.02, 0.36, w - 0.15, ytr - y0 - 0.08, 1);
+      { const yw = ytr + 0.5, zl = 0.78, xa = -hw + 0.2, xb = hw - 0.2; seg('steel', [xa, yw, zl], [xb, yw, zl], 0.012); for (const xx of [xa, xb]) seg('steel', [xx, yw, 0.25], [xx, yw, zl], 0.03);
+        const n = Math.max(2, Math.floor((xb - xa) / 0.85)); for (let i = 0; i < n; i++) { const xx = xa + (i + 0.5) * (xb - xa) / n, yy = yw - 0.3 - (i % 2) * 0.05; P('lantern', xx, yy, zl, 0.28, 0.32, 0.28); P('lcap', xx, yy + 0.2, zl, 0.45, 0.45, 0.45); P('lcap', xx, yy - 0.2, zl, 0.4, 0.4, 0.4); } }
+      let tabs = 0; for (let t = 0; t < 2; t++) { const x = spot(1.5); if (x === null) break; P('rtable', x, y0, 0.85); const n = randi(3, 4);
+        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + rand(-0.3, 0.3); const sx = x + Math.cos(a) * 0.62, sz = Math.min(1.25, Math.max(0.5, 0.85 + Math.sin(a) * 0.45)); P(rng() < 0.6 ? 'dstoolR' : 'dstoolB', sx, y0, sz); }
+        claim(x - 0.8, x + 0.8, 1.32); tabs++; }
+      if (!tabs) { const x = spot(0.4); if (x !== null) { const n = randi(3, 6); for (let i = 0; i < n; i++) P('dstoolR', x, y0 + i * 0.06, 0.55); claim(x - 0.22, x + 0.22, 0.75); } } // stacked drum stools
+      stickers(randi(1, 3));
+    } else if (type === 'netcafe') { // 网吧: glass door, a row of glowing monitors behind the window, chair backs, lit posters
+      if (!r.core && Math.min(ytr, yb) - y0 > 0.6) P('glass', dcx, (y0 + Math.min(ytr, yb)) / 2, 0.25, dx1 - dx0 - 0.1, Math.min(ytr, yb) - y0 - 0.06, 0.015);
+      if (Math.min(ytr, yb) - y0 > 1.4) P('litCy', left ? dx1 - 0.12 : dx0 + 0.12, y0 + 1.1, gz + 0.03, 0.03, 0.6, 0.03); // lit door pull
+      if (open && vTop > ys + 1.15 && card('board', wx0, wx1, ys + 0.05, vTop)) { const n = Math.max(1, Math.floor(ww / 0.55)); const ysc = ys + 0.98;
+        ink(wcx, ys + 0.6, ww, 0.05); // desk edge
+        for (let i = 0; i < n; i++) { const x = wx0 + (i + 0.5) * ww / n; P('frame', x, ysc, 0.128, 0.46, 0.29, 0.006); P(rng() < 0.7 ? 'scrB' : 'scrP', x, ysc, 0.135, 0.42, 0.25, 0.008);
+          P(rng() < 0.75 ? 'chair' : 'chairR', x + rand(-0.06, 0.06), ys + 0.62, 0.17, 0.36, 0.62, 0.03); }
+        if (vTop - ys > 1.6) P('litCy', wcx, vTop - 0.08, 0.135, ww, 0.03, 0.01); } // ceiling light strip
+      for (let i = 0; i < 2; i++) { const x = left ? dx1 + 0.35 + i * 0.5 : dx0 - 0.35 - i * 0.5; if (Math.abs(x) > hw - 0.25) continue; const yp = ys + 1.0; if (yp + 0.32 > vTop) continue;
+        P(pick(['litM', 'litCy', 'litY']), x, yp, gz, 0.42, 0.6, 0.006); ink(x, yp + 0.16, 0.32, 0.06); ink(x, yp - 0.18, 0.26, 0.03); } // posters
+      const x = spot(0.6); if (x !== null) { P('frame', x, y0 + 0.5, 0.72, 0.56, 1.0, 0.08); P(rng() < 0.5 ? 'litM' : 'litCy', x, y0 + 0.55, 0.765, 0.46, 0.78, 0.01); claim(x - 0.3, x + 0.3, 0.85); } // A-board
+      stickers(randi(1, 3));
     } else { // clinic
       if (open) { const k = rng() < 0.5 ? 'litM' : 'litCy'; if (card(k, wx0, wx1, ys + 0.05, vTop)) { const n = Math.max(1, Math.floor(ww / 0.7)); for (let i = 0; i < n; i++) { const x = wx0 + (i + 0.5) * ww / n; // limb / spine diagrams
         seg('ink', [x, ys + 0.3, 0.135], [x + 0.08, ys + 1.0, 0.135], 0.05, 0.006); seg('ink', [x + 0.08, ys + 1.0, 0.135], [x - 0.04, ys + 1.5, 0.135], 0.05, 0.006); for (let y = ys + 0.35; y < ys + 1.45; y += 0.18) ink(x + 0.02, y, 0.16, 0.02); } } }
@@ -268,15 +388,18 @@ export class StorefrontLayer {
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
     if (m) { m.geometry.dispose(); m.geometry = g; return m; }
     m = new THREE.Mesh(g, this.mats[BUCK[i]] || this.mats.vcol); m.castShadow = false; m.receiveShadow = true; m.name = 'shop|' + BUCK[i]; m.visible = false;
+    // b_corner: the clutter mesh stays out of the half-res mirror pass (water / wet street reflection: its camera is not the game
+    // camera) — renderBufferDirect reads drawRange after onBeforeRender, so count 0 skips that draw; lit faces still reflect
+    if (i === 0) { const nv = this.nv; m.onBeforeRender = (r, sc, cam, geo) => { const G = globalThis.__G; geo.drawRange.count = !G || !G.camera || cam === G.camera ? nv[0] : 0; }; }
     this.group.add(m); this.meshes[i] = m; return m;
   }
   repack(cam) {
     const p = cam.position; const st = this.stream; const cand = [];
-    for (const ch of this.chunks.values()) { const c = st && st.chunks.get(ch.key); if (!c || !c.near) continue;
+    for (const ch of this.chunks.values()) { if (!ch.core) { const c = st && st.chunks.get(ch.key); if (!c || !c.near) continue; }
       for (const s of ch.shops) { const d = Math.hypot(s.cx - p.x, s.cz - p.z) + Math.max(0, p.y - 12) * 1.2; if (d < RMAX) cand.push([d, s]); } }
     cand.sort((a, b) => a[0] - b[0]);
     let tris = 0, n = 0, inst = 0; const sel = [];
-    for (const [, s] of cand) { if (tris + s.tris > BUDGET) continue; tris += s.tris; n++; sel.push(s); for (const k in s.inst) inst += s.inst[k].length / 16; }
+    let cost = 0; for (const [, s] of cand) { const c = s.cost + s.uniq.length * 6; if (cost + c > BUDGET) continue; cost += c; tris += s.tris; n++; sel.push(s); for (const k in s.inst) inst += s.inst[k].length / 16; }
     const bakes = sel.map((s) => this.bakeShop(s));
     // bounding sphere of the packed shops (one merged mesh per bucket, frustum-culled as a whole)
     let cx = 0, cz = 0; for (const s of sel) { cx += s.cx; cz += s.cz; } if (sel.length) { cx /= sel.length; cz /= sel.length; }
@@ -285,10 +408,10 @@ export class StorefrontLayer {
       const m = this.mesh(i, nv); const A = m.geometry.attributes; let o = 0;
       for (const b of bakes) { const B = b[i]; if (!B.n) continue; A.position.array.set(B.p, o * 3); A.normal.array.set(B.q, o * 3); A.color.array.set(B.c, o * 3); o += B.n; }
       for (const a of ['position', 'normal', 'color']) { A[a].clearUpdateRanges(); A[a].addUpdateRange(0, nv * 3); A[a].needsUpdate = true; }
-      m.geometry.setDrawRange(0, nv); m.geometry.boundingSphere.center.set(cx, 5, cz); m.geometry.boundingSphere.radius = rad + 5; m.visible = true; }
+      m.geometry.setDrawRange(0, nv); this.nv[i] = nv; m.geometry.boundingSphere.center.set(cx, 5, cz); m.geometry.boundingSphere.radius = rad + 5; m.visible = true; }
     // keep the bakes of the packed shops plus a few recent ones (walking back and forth), drop the rest
     if (this.bake.size > sel.length + 48) { const keep = new Set(sel); for (const k of this.bake.keys()) { if (this.bake.size <= sel.length + 24) break; if (!keep.has(k)) this.bake.delete(k); } }
-    this.stats.packed = n; this.stats.tris = tris; this.stats.inst = inst;
+    this.stats.packed = n; this.stats.tris = tris; this.stats.frameCost = cost; this.stats.inst = inst;
     const key = sel.map((s) => s.cx.toFixed(1) + ':' + s.cz.toFixed(1)).join('|'); if (key !== this.uKey) { this.uKey = key; this.buildUniq(sel); }
   }
   buildUniq(sel) {
@@ -298,7 +421,7 @@ export class StorefrontLayer {
     this.world = W.build(this.group, this.mats, { cnsign: { cast: false } });
   }
   sync(cam) {
-    if (!cam) return; this.frame++;
+    if (!cam) return; this.frame++; if (!this.coreDone) this.planCore();
     const p = cam.position; const L = this.last; const st = this.stream; let on = 0;
     if (st) for (const ch of this.chunks.values()) { const c = st.chunks.get(ch.key); if (c && c.near) on++; }
     const moved = !L || Math.hypot(p.x - L.x, p.z - L.z) > 8 || Math.abs(p.y - L.y) > 6;

@@ -106,8 +106,10 @@ export class BldgLayer {
       if (it.kind === 'port') { const lw = mkWorld(); const wh = withSeed(it.p.seed, () => rng() < 0.45); withSeed((it.p.seed ^ 0x9e37) >>> 0, () => portExtras(lw, it.p, wh));
         const m = parcelMatrix(it.p); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, it.p.x, it.p.z).append(b, m); }
       else if (it.kind === 'side') { const lw = mkWorld(); const p = it.p; const dt = p.style === 'downtown'; const ins = dt ? 1 : 0; const ctx = { W: lw };
-        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6 }));
-        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m); }
+        const bays = []; // b_corner: the side row's bays (same record as SHOP_LOG) -> storefront.js corner shops
+        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6, log: bays }));
+        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m);
+        if (this.shops) this.shops.onSide(key, it, bays, m); }
       else withSeed(it.seed, () => (it.kind === 'walk' ? skyway(W, it) : it.kind === 'bridge' ? skyBridge(W, it) : streetCables(W, it)));
     }
     return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } });

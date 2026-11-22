@@ -16,11 +16,14 @@ import { cnSignboard, shopBits } from './street2.js';
 
 // --------------------------------------------------------------- shop street ----
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
+export const CORE_SHOP_LOG = []; // b_corner: ground-floor store edges of the hand-built Deco core (world frame; city.js shopfront), drained by storefront.js
 export const SHOP_LOG = []; // r6.4 b_storefront: bays of streamed parcels (parcel frame), drained per parcel by storefront.js
 export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
   const W = ctx.W; const F = edge([fx, z1], [fx, z0]); // runs from z1 to z0 -> outward +x
   const n = Math.max(1, Math.round(F.len / sw)); const cw = F.len / n; let vend = 0;
-  const swl = ctx.col && !ctx.col.query ? [] : null; // b_signsync: sidewalk / vending footprints of this frontage (shared by its SHOP_LOG records)
+  // b_corner: opts.log = an explicit bay log (bldglayer.js corner side rows, built with no collider); else streamed parcels -> SHOP_LOG
+  const LOG = opts.log || (ctx.col && !ctx.col.query ? SHOP_LOG : null);
+  const swl = LOG ? [] : null; // b_signsync: sidewalk / vending footprints of this frontage (shared by its SHOP_LOG records)
   for (let i = 0; i < n; i++) {
     const a0 = i * cw + 0.2, a1 = (i + 1) * cw - 0.2; const r = rng();
     const yt = y0 + ground * 0.78;
@@ -32,7 +35,7 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     // r6.4 b_street2: about half the shop boards are Chinese light boxes (invented names); stickers / condensers / wiring per bay
     if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) { sk = cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); sg = 1; } else { signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); sg = 2; } }
     // r6.4 b_storefront: streamed parcels (stub collider, no query) log each bay for storefront.js — no rng use, geometry unchanged
-    if (ctx.col && !ctx.col.query) SHOP_LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, sw: swl, i, n });
+    if (LOG) LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, sw: swl, i, n });
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } }
   }

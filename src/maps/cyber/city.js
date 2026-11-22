@@ -8,7 +8,7 @@ import { buildGraph } from './roadgraph.js';
 import { genParcels } from './parcels.js';
 import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
-import { megatower, tenement, shopStreet } from './arch.js';
+import { megatower, tenement, shopStreet, CORE_SHOP_LOG } from './arch.js';
 import { signFaceMat } from './dress.js';
 import { cnSignMat, steamMat } from './street2.js';
 import { neonGlowMat, neonReflMat } from './neontube.js';
@@ -376,7 +376,9 @@ function relief(ctx, poly, y0, y1, fh, ww, style, wall, lite) {
 }
 // v3.5 shopfront geometry on the ground-floor band: piers between bays, projecting transom / sign ledge, stone kick plate
 function shopfront(ctx, poly, y0, ground, sw, wall) {
-  const b = ctx.W.b('vcol', poly[0][0], poly[0][1]); const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
+  const b = ctx.W.b('vcol', poly[0][0], poly[0][1]);
+  if (!streamed(ctx)) for (let i = 0; i < poly.length; i++) { const E = edgeFrame(poly, i); if (E.len >= 4) CORE_SHOP_LOG.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ground, sw }); } // no rng use
+  const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 2.5) continue; const n = Math.max(1, Math.round(E.len / sw)); const cw = E.len / n;
     for (let k = 0; k <= n; k++) { const a = k * cw; lbox(b, E, Math.max(0, a - 0.17), Math.min(E.len, a + 0.17), -0.02, 0.2, y0, y0 + ground - 0.05, pier); }
