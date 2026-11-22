@@ -371,7 +371,7 @@ export function auditHouses(K) { if (!K) return null; const T0 = performance.now
 // within LR at night only -> +2 draw calls near the houses at night, 0 shader programs, no colliders (wall-mounted; dock posts 0.12 m).
 // ?oldanight2 (and ?oldanight): not built.
 const NIGHT2_OFF = Q.has('oldanight2') || Q.has('oldanight');
-const LR = 200, LRD = 90, LCAP = 1600, PCAP = 480, LBX = 8; // per light: up to 4 boxes; record: x, z, lit, nBoxes, box[4][LBX], pool [x, z, sx, sz, a, y]
+const LR = 200, LRD = 60, LCAP = 1600, PCAP = 480, LBX = 8; // per light: 2-3 boxes; record: x, z, lit, nBoxes, box[4][LBX], pool [x, z, sx, sz, a, y]
 const LGLASS = [1.55, 1.24, 0.86], LOFF = [0.30, 0.29, 0.27], LMET = [0.10, 0.09, 0.08];
 function frontFrame(LT) { const H = LT.house, C = [H[0], H[2]], w = H[3], d = H[5]; const [U, V] = axes(H[6]); const Y = LT.yard; let nIn = null, E = null;
   if (Y && !Y.gone) { const [, z] = axes(Y[4]); const sg = (C[0] - Y[0]) * z[0] + (C[1] - Y[1]) * z[1] >= 0 ? 1 : -1; nIn = [z[0] * sg, z[1] * sg]; E = [Y[0] + nIn[0] * Y[3] / 2, Y[1] + nIn[1] * Y[3] / 2]; }
@@ -391,7 +391,7 @@ function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { g
     const { C, N, T, Df, Lf, fa, E } = F; const P = (t, o) => [C[0] + T[0] * t + N[0] * (Df + o), C[1] + T[1] * t + N[1] * (Df + o)];
     // lantern on a wall: o = outward offset of the wall plane from the front plane (0 front, -2 Df back), og = +1 front / -1 back
     const lantern = (t, ow, og, y, lit, yaw) => { const B = []; const bx = (o, y0, st, sy, so, c, kind) => { const p = P(t, ow + og * o); B.push([p[0], y0, p[1], st, sy, so, yaw, c, kind]); };
-      bx(0.015, y - 0.02, 0.14, 0.32, 0.03, LMET, 7); bx(0.095, y, 0.15, 0.24, 0.13, lit ? LGLASS : LOFF, lit ? 16 : 7); bx(0.095, y + 0.24, 0.19, 0.045, 0.17, LMET, 7); bx(0.095, y - 0.03, 0.12, 0.03, 0.1, LMET, 7); return B; };
+      if (lit) bx(0.015, y - 0.03, 0.13, 0.32, 0.03, LMET, 7); bx(0.095, y, 0.15, 0.24, 0.13, lit ? LGLASS : LOFF, lit ? 16 : 7); bx(0.095, y + 0.24, 0.19, 0.045, 0.17, LMET, 7); return B; }; // lit: plate + lens + cap; dark: lens + cap
     const add = (x, z, lit, B, pool) => { const r = { x, z, lit, B, pool }; L.push(r); grid.add(r, x, z, x, z); };
     // garage-side lantern (front)
     if (E) { const et = (E[0] - C[0]) * T[0] + (E[1] - C[1]) * T[1], eo = (E[0] - C[0]) * N[0] + (E[1] - C[1]) * N[1] - Df; const gw = hh(seed, 5) < 0.3 ? 2.9 : 2.6;
