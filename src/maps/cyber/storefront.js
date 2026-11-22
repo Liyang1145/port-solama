@@ -61,6 +61,8 @@ const NOAVOID = typeof location !== 'undefined' && /[?&]shopnoavoid/.test(locati
 const COREFLOW_OFF = typeof location !== 'undefined' && /[?&]nocoreflow/.test(location.search);
 // b_overlayfit test switch: ?nooverlayfit builds the shops exactly as before this lane (no fit pass, old colliders)
 const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
+// b_core test switch: ?nobcore restores the core curtains' old width
+const BC_OFF = typeof location !== 'undefined' && /[?&]nobcore/.test(location.search);
 function pickType() { let r = rng() * TW; for (const t of TYPES) { r -= t[2]; if (r <= 0) return t; } return TYPES[0]; }
 
 // ------------------------------------------------------------------ unit geometries ----
@@ -187,7 +189,7 @@ export class StorefrontLayer {
     this.mats = mats; this.city = city; this.stream = city.stream; this.group = new THREE.Group(); this.group.name = 'storefront'; scene.add(this.group);
     this.meshes = [null, null]; this.cap = [0, 0]; this.nv = [0, 0]; this.bake = new Map(); this.chunks = new Map(); this.cache = new WeakMap(); this.world = []; this.uKey = ''; this.last = null; this.frame = 0; this.dirty = false;
     const G = geos(); this.triOf = {}; for (const k in KINDS) this.triOf[k] = G[KINDS[k][0]].attributes.position.count / 3;
-    this.stats = { parcels: 0, bays: 0, shops: 0, closed: 0, narrow: 0, types: {}, shutterHalf: 0, shutterUp: 0, colliders: 0, signSync: 0, signOther: 0, swItems: 0, outGroups: 0, outOverlap: 0, noavoid: NOAVOID, bakes: 0, packed: 0, tris: 0, inst: 0, faces: 0 };
+    this.stats = { parcels: 0, bays: 0, shops: 0, closed: 0, narrow: 0, types: {}, shutterHalf: 0, shutterUp: 0, colliders: 0, signSync: 0, signOther: 0, swItems: 0, outGroups: 0, outOverlap: 0, noavoid: NOAVOID, bcore: { curt: 0 }, bakes: 0, packed: 0, tris: 0, inst: 0, faces: 0 };
     for (const t of TYPES) this.stats.types[t[0]] = 0;
     this.stats.bySrc = { front: { shops: 0, types: {} }, side: { rows: 0, bays: 0, shops: 0, types: {} }, core: { edges: 0, street: 0, bays: 0, shops: 0, types: {}, swItems: 0 } };
     this.coreDone = false; this.sideCache = new WeakMap();
@@ -357,8 +359,11 @@ export class StorefrontLayer {
       groups.push([x0, x1, z, t]); for (let i = gS; i < PL.length; i++) if (PL[i].g < 0 && !PL[i].asm) PL[i].g = groups.length - 1; gS = PL.length; };
     const spot = (wd) => { for (let i = 0; i < 6; i++) { const x = rand(-hw + wd / 2, hw - wd / 2); if (free(x - wd / 2, x + wd / 2)) { gS = PL.length; return x; } } return null; };
     const stoolK = () => pick(['stoolR', 'stoolR', 'stoolB', 'stoolG']);
-    const noren = (k) => { if (yb < ytr) return; P(k, dcx, ytr - 0.02, 0.33, dx1 - dx0 + 0.04, rand(0.55, 0.8), 1); };
-    const strip = () => { if (yb < ytr) return; P('strip', dcx, ytr - 0.02, 0.34, dx1 - dx0 + 0.06, ytr - y0 - 0.06, 1); };
+    // b_core: in the core recess the door sits against a jamb, so a curtain 0.02–0.03 m wider than the door ran 0.05–0.1 m into the
+    // dark lining and the jamb casing (z 0.16–0.38) at the recess front: keep it between the linings (x ±(hw − 0.075)).
+    const curt = (ex) => { let a = dx0 - ex, b = dx1 + ex; if (r.core && !BC_OFF) { const xl = hw - 0.075; if (a < -xl || b > xl) { this.stats.bcore.curt++; a = Math.max(a, -xl); b = Math.min(b, xl); } } return [(a + b) / 2, b - a]; };
+    const noren = (k) => { if (yb < ytr) return; const [cx, cw] = curt(0.02); P(k, cx, ytr - 0.02, 0.33, cw, rand(0.55, 0.8), 1); };
+    const strip = () => { if (yb < ytr) return; const [cx, cw] = curt(0.03); P('strip', cx, ytr - 0.02, 0.34, cw, ytr - y0 - 0.06, 1); };
     const seats = (x, z, n) => { P(rng() < 0.6 ? 'table' : 'tableW', x, y0, z, 1, 1, 1, rand(-0.08, 0.08)); for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + rand(-0.3, 0.3); const sx = x + Math.cos(a) * 0.62, sz = Math.min(1.25, Math.max(0.55, z + Math.sin(a) * 0.45)); P(stoolK(), sx, y0, sz, 1, 1, 1, rand(0, 6.28)); } };
     if (type === 'ramen' || type === 'tea') {
       noren(type === 'ramen' ? (rng() < 0.6 ? 'norenR' : 'norenI') : pick(['norenI', 'norenW']));
