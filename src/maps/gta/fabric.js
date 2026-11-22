@@ -759,7 +759,7 @@ function mats(M) {
         g *= (1.0 - post) * (1.0 - wing) * (1.0 - sw) * (1.0 - mul); c = mix(c, vec3(0.62, 0.58, 0.50), drum * step(abs(fy - 2.36), 0.05)); }
       else g *= 1.0 - mul;
       c = mix(c, vec3(0.56, 0.53, 0.48) * (1.0 - 0.3 * step(abs(fy - (vIH - 0.2)), 0.02)), top);
-      c = mix(c, mix(vec3(0.50, 0.46, 0.40), vec3(0.78, 0.73, 0.64), smoothstep(0.3, 2.4, fy)), g); diffuseColor.rgb = c; fGlass = g * 0.5; fLit = g * 1.4; dtCov = 0.6; }
+      c = mix(c, mix(vec3(0.50, 0.46, 0.40), vec3(0.78, 0.73, 0.64), smoothstep(0.3, 2.4, fy)), g); diffuseColor.rgb = c; fGlass = g * 0.5; fLit = g * (0.8 + 0.5 * smoothstep(0.4, 2.6, fy)); dtCov = 0.6; } // a_downtown2: vestibule lit from above (was a flat 1.4 glow)
   }
   if (fk > 16.5 && fk < 17.5 && fn.y < -0.5) { diffuseColor.rgb = vec3(0.95, 0.93, 0.86); fEm = 1.6; } // a_strip: lot-light lens
   { // footprint anti-aliasing: past ~0.5 m per pixel the window grid becomes its average coverage (aerials sparkled white/black)
