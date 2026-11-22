@@ -339,7 +339,7 @@ export function updateProps(P, cam, night, phase) {
 //   K = [intensity, range m, decay, ground-pool decal gain, wet-streak gain, ground-pool radius scale (build time)]; ?oldlamp → the old values (for comparison);
 //   ?lampk=I,R,D,pool,streak,poolscale overrides for tuning; globalThis.__LAMPK = [...] swaps them at runtime (test plans).
 // Map 索拉纳港 (A) keeps 60 / 30 / 1.6 untouched. No new lights, no new shader programs (distance / decay / colours are uniforms).
-const LAMP_OLD = [60, 30, 1.6, 1, 1, 1], LAMP_NEW = [24, 24, 2.0, 0.35, 0.6, 0.7];
+const LAMP_OLD = [60, 30, 1.6, 1, 1, 1], LAMP_NEW = [24, 24, 2.0, 0.45, 1.0, 0.7];
 const LAMP_Q = typeof location !== 'undefined' ? location.search : '';
 const LAMP_K = /[?&]oldlamp\b/.test(LAMP_Q) ? LAMP_OLD : (() => { const m = /[?&]lampk=([0-9.,]+)/.exec(LAMP_Q); if (!m) return LAMP_NEW; const v = m[1].split(',').map(Number); return LAMP_NEW.map((d, i) => (isFinite(v[i]) && v[i] >= 0 && i < v.length ? v[i] : d)); })();
 const POOL_C = [0.45, 0.78, 1.0];
