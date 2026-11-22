@@ -189,7 +189,13 @@ export function buildStreet(scene, city) {
     const fm = new THREE.Matrix4().multiplyMatrices(m, T(2.0, 1.3, 0, Math.PI / 2)); const e = new THREE.Vector3(); e.setFromMatrixPosition(fm);
     signFace(ad[0], ad[1], ad[2], ad[3], e.x, e.y, e.z, sh.ry + Math.PI / 2, 1.1, 1.6); void lm;
     postSign(sh.x + Math.cos(sh.ry) * 2.8, sh.z - Math.sin(sh.ry) * 2.8, sh.ry, 4, 2.4, 0.6);
-    city.col.add(sh.x - 2.2, sh.z - 2.2, sh.x + 2.2, sh.z + 2.2, 2.5, 'shelter');
+    const sb = city.col.add(sh.x - 2.2, sh.z - 2.2, sh.x + 2.2, sh.z + 2.2, 2.5, 'shelter');
+    if (!CYBER) { // a_lane8fix: detail.busShelter footprint (local x along the street, +z out of the open front) instead of the 4.4 m square that spanned
+      // the whole promenade sidewalk: back glazing + bench strip, side wing pane, map-case end post, front post, litter bin (applied by maps/gta/colfix.js)
+      const c = Math.cos(sh.ry), s2 = Math.sin(sh.ry); const L = (u0, u1, v0, v1, h) => { const xs = [], zs = [];
+        for (const u of [u0, u1]) for (const v of [v0, v1]) { xs.push(sh.x + c * u + s2 * v); zs.push(sh.z - s2 * u + c * v); }
+        return [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), h]; };
+      sb.fit = [L(-2.0, 2.0, -0.7, -0.12, 2.5), L(-2.0, -1.9, -0.12, 0.6, 2.5), L(1.9, 2.0, -0.12, 0.6, 2.5), L(2.15, 2.55, 0.0, 0.4, 0.75)]; }
   }
 
   // ---------------- corner clutter: newspaper boxes, utility cabinets, bins, bollards; parking meters on the beachfront drive
@@ -203,7 +209,8 @@ export function buildStreet(scene, city) {
       if (occupied(bx, bz, 1.2)) continue;
       const n = 1 + Math.floor(r() * 3);
       for (let k = 0; k < n; k++) { const c = boxCols[Math.floor(r() * boxCols.length)]; stamp(CYBER ? add : addP(PB.paint), newsBox(c), T(bx + k * 0.52 * sz, 0.15, bz, sz > 0 ? 0 : Math.PI)); }
-      city.col.add(bx - 0.3, bz - 0.3, bx + 1.6, bz + 0.3, 1.1, 'nbox');
+      const nb = city.col.add(bx - 0.3, bz - 0.3, bx + 1.6, bz + 0.3, 1.1, 'nbox');
+      if (!CYBER) { const xe = bx + (n - 1) * 0.52 * sz; nb.fit = [[Math.min(bx, xe) - 0.25, bz - 0.25, Math.max(bx, xe) + 0.25, bz + 0.25, 1.1]]; } // a_lane8fix: real run of n boxes (0.47 m, 0.52 m pitch toward sz), applied after every layer is placed (maps/gta/colfix.js)
     }
     if (r() < 0.7) { // utility cabinet
       const ux = it.x - (RH + 3.4), uz = it.z + (RH + 4.5);

@@ -242,7 +242,11 @@ export function buildPromenade(scene, city) {
               kinds.get('bike').items.push({ x: c + sd * 8.15, z: zz, m, c: shareCol }); stat.bikes++; } } }
       }
       // --- traffic-signal controller cabinet near the downstream corner (kerb zone), meter pedestal beside it
-      { const z = s.a1 - 4.6; const b = place(c, sd, z, 7.5, 8.75, 0.85, 1.75, 'sigcab'); if (b) { push('sigcab', c + sd * 8.12, 0.15, z, ryFace(sd) + Math.PI); stat.cab++; } }
+      { const z = s.a1 - 4.6; const b = place(c, sd, z, 7.5, 8.75, 0.85, 1.75, 'sigcab'); if (b) { push('sigcab', c + sd * 8.12, 0.15, z, ryFace(sd) + Math.PI); stat.cab++;
+        // a_lane8fix: fit to the visible cabinet (local x -0.55..0.55, depth +-0.36) + meter pedestal (local x 0.7..1.0); the 0.12 m pad is stepped over
+        const ry = ryFace(sd) + Math.PI, cx = c + sd * 8.12, co = Math.cos(ry), si = Math.sin(ry); const L = (u0, u1, v0, v1) => { const xs = [], zs = [];
+          for (const u of [u0, u1]) for (const v of [v0, v1]) { xs.push(cx + co * u + si * v); zs.push(z - si * u + co * v); } return [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), 1.75]; };
+        b.fit = [L(-0.55, 0.55, -0.36, 0.36), L(0.7, 1.0, -0.15, 0.25)]; } }
       // --- newsrack corral mid-block on the inner avenues' kerb zone (3-4 boxes on a shared base)
       if (c !== 290 && r() < 0.55) { const n = 3 + Math.floor(r() * 2); const z = s.a0 + 14 + r() * (L - 28); const b = place(c, sd, z, 7.95, 8.5, n * 0.26 + 0.05, 1.2, 'nbox2');
         if (b) { const cols = [[0.12, 0.32, 0.65], [0.75, 0.12, 0.12], [0.9, 0.75, 0.15], [0.95, 0.95, 0.93], [0.15, 0.45, 0.25], [0.3, 0.3, 0.32]]; for (let k = 0; k < n; k++) push('news', c + sd * 8.22, 0.15, z - (n - 1) * 0.26 + k * 0.52, ryFace(sd) + Math.PI, cols[Math.floor(r() * cols.length)]); stat.news += n; } }

@@ -6,6 +6,7 @@ import { U } from './env.js';
 import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
+import { serviceLanes } from './maps/gta/backlot.js';
 import { CYBER } from './mapsel.js';
 import { furnMat, PB, stampAO, signalMastA, signalMastFarA, pedPoleA, hydrantA, bikeRackA, recycleBinA } from './streetkit.js';
 
@@ -414,8 +415,10 @@ export function buildFurniture(scene, city, G = {}) {
       if (G.ph_cafe) { if (k % 2 === 0) PH.cafe.push(TR(x, y, z, r() * 0.3 - 0.15)); } else {
       const top = new THREE.CylinderGeometry(0.42, 0.42, 0.04, 14); add(top, T(x, y + 0.74, z), [0.92, 0.92, 0.9]);
       const leg = new THREE.CylinderGeometry(0.04, 0.05, 0.72, 6); add(leg, T(x, y + 0.36, z), [0.2, 0.2, 0.2]); }
+      const odd = k % 2 === 1;
       if (k++ % 2 === 0) { const um = new THREE.ConeGeometry(1.5, 0.5, 10, 1, true); add(um, T(x, y + 2.45, z), col); const p = new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6); add(p, T(x, y + 1.2, z), [0.85, 0.85, 0.85]); }
-      city.col.add(x - 0.5, z - 0.5, x + 0.5, z + 0.5, 1.0, 'cafe');
+      const cb = city.col.add(x - 0.5, z - 0.5, x + 0.5, z + 0.5, 1.0, 'cafe');
+      if (!CYBER && G.ph_cafe && odd) cb.fit = []; // a_lane8fix: with the café GLB only every other slot gets a set, so this slot is empty: orphan box, dropped by maps/gta/colfix.js
     }
     // parallel parking on the west curb lane of Tideline Drive
     for (let z = b.z0 + 10; z < b.z1 - 10; z += 6.8) parking.push({ x: 284.6, z, yaw: r() < 0.5 ? 0 : Math.PI, fill: r() < 0.65 });
@@ -451,6 +454,7 @@ export function buildFurniture(scene, city, G = {}) {
       if (city.groundH(x, z) < 0.1 || occ(x, z, 0.6 + hl)) continue;
       const ex = s.axis === 'z' ? 0.45 : hl, ez = s.axis === 'z' ? hl : 0.45;
       if (city.col.query(x, z, hl + 1, box).some((b) => b.maxX > x - ex && b.minX < x + ex && b.maxZ > z - ez && b.minZ < z + ez)) continue;
+      if (serviceLanes(city).some((L) => x + ex > L.x - L.hw - 0.6 && x - ex < L.x + L.hw + 0.6 && z + ez > L.z0 - 1 && z - ez < L.z1 + 1)) continue; // a_lane8fix: keep the service-lane aprons (a_backlot) clear: a rack across lane 8's mouth stopped walkers dead at the kerb
       stampLod(fA, bikeRackA(n), TR(x, 0.15, z, s.axis === 'z' ? 0 : Math.PI / 2), 0.15); city.col.add(x - ex + 0.3, z - ez + 0.3, x + ex - 0.3, z + ez - 0.3, 0.9, 'bike');
     }
     const fm = new THREE.Mesh(fA.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); flushFine(scene);

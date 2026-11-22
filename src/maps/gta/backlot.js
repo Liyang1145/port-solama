@@ -264,6 +264,20 @@ function graffitiPiece(r, big) {
 }
 
 // ------------------------------------------------------------------------------------------------------- build -----
+// a_lane8fix: the service-lane centre lines, the same rule buildBacklot uses below (yard midline between the two rows' back walls,
+// read from the 'bld' colliders, which exist once buildCity has run) so earlier layers (props.js bike racks) can keep the aprons clear.
+export function serviceLanes(city) {
+  if (city._svcLanes) return city._svcLanes; const out = [];
+  for (const b of city.blocks.filter((q) => q.area === 'island' && q.x0 > 0 && q.lotMat !== 'grass' && q.inner)) {
+    const [ix0, iz0, ix1, iz1] = b.inner; const cxm = (ix0 + ix1) / 2;
+    const bl = city.col.query(cxm, (iz0 + iz1) / 2, Math.max(ix1 - ix0, iz1 - iz0) / 2 + 2, []).filter((c) => c.tag === 'bld' && c.minX >= ix0 - 0.5 && c.maxX <= ix1 + 0.5 && c.minZ >= iz0 - 0.5 && c.maxZ <= iz1 + 0.5);
+    const Wr = bl.filter((c) => c.minX < cxm - 5), Er = bl.filter((c) => c.maxX > cxm + 5); if (Wr.length < 2 || Er.length < 2) continue;
+    const wMax = Math.max(...Wr.map((c) => c.maxX)), eMin = Math.min(...Er.map((c) => c.minX)); if (eMin - wMax < 24) continue;
+    out.push({ x: (wMax + eMin) / 2, hw: 3.0, z0: b.z0, z1: b.z1 });
+  }
+  return (city._svcLanes = out);
+}
+
 export function buildBacklot(scene, city) {
   const t0 = performance.now();
   const r = mulberry(7177); const col = city.col; const qb = [];

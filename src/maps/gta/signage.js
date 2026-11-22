@@ -216,7 +216,11 @@ export function buildSignage(scene, city) {
     const { x, z, zp, zn, xk } = done; const gh = city.groundH(x, z);
     const M = MX(x, gh, z, 0, ry);
     push('shelter', x, z, M); push('glass', x, z, M); push('lbox', x, z, M);
-    col.add(Math.min(c + sd * 7.66, c + sd * 9.36), z - 2.38, Math.max(c + sd * 7.66, c + sd * 9.36), z + 2.38, 2.6, 'busstop');
+    { const bb = col.add(Math.min(c + sd * 7.66, c + sd * 9.36), z - 2.38, Math.max(c + sd * 7.66, c + sd * 9.36), z + 2.38, 2.6, 'busstop');
+      // a_lane8fix: the open front under the cantilever roof stays walkable; collide with the rear posts + glazing + bench, the end panel
+      // (local x -1.95) and the route-map light box (local x 2.25). local (u along the street, v toward the kerb) -> world (x - sd v, z + sd u)
+      const L = (u0, u1, v0, v1) => { const xa = x - sd * v0, xb = x - sd * v1, za = z + sd * u0, zb = z + sd * u1; return [Math.min(xa, xb), Math.min(za, zb), Math.max(xa, xb), Math.max(za, zb), 2.6]; };
+      bb.fit = [L(-2.0, 2.0, -0.8, -0.2), L(-2.0, -1.9, -0.2, 0.18), L(2.13, 2.37, -0.2, 0.54)]; }
     const bi = blockIdx(z); const name = STOP_NAMES[c][bi] + '站'; const R = ROUTE[c];
     // fascia: station name, white on navy, both on the road face (+z local)
     const lxv = lx;
