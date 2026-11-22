@@ -29,11 +29,12 @@
 import * as THREE from 'three';
 import { box } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
+import { PL_OFF } from './portlight.js'; // b_portlight (fence density)
 
 export const PY_OFF = typeof location !== 'undefined' && /[?&]noportyard\b/.test(location.search);
 export const PY = { stats: null };
 export const CC = [[0.62, 0.16, 0.12], [0.12, 0.32, 0.55], [0.85, 0.55, 0.12], [0.2, 0.45, 0.3], [0.55, 0.55, 0.55], [0.75, 0.75, 0.72], [0.45, 0.2, 0.35]];
-const CW = 2.44, CH2 = 2.6, CL = 12.2;
+export const CW = 2.44, CH2 = 2.6, CL = 12.2;
 export function hsh(...a) { let h = 2166136261 >>> 0; for (const v of a) { h ^= Math.imul(v | 0, 0x9e3779b1) >>> 0; h = Math.imul(h, 16777619) >>> 0; h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995) >>> 0; h ^= h >>> 15; } return (h >>> 0) / 4294967296; }
 // same loops (and float steps) as stream.js port()
 export function yardGrid(p) { const hx = p.d / 2, hz = p.w / 2; const xs = [], zs = []; for (let x = -hx + 2; x < hx - 2.4; x += 3) xs.push(x); for (let z = -hz + 1; z < hz - 12; z += 13.2) zs.push(z); return { xs, zs }; }
@@ -83,6 +84,10 @@ function boxEnd(v, o, r, n, y0, c, kind, tl, h) {
 }
 
 // ---------------------------------------------------------------- stream.js port(): container rows ----
+// b_portlight: per-box colour (tint / fade by hash, 20 ft pair + its second colour) — C[i][j][k] = the stack's pick(CC) draws
+const tint = (c, s) => { const t = 0.84 + 0.26 * hsh(s, 1); return [c[0] * t * (0.95 + 0.1 * hsh(s, 2)), c[1] * t * (0.95 + 0.1 * hsh(s, 3)), c[2] * t * (0.95 + 0.1 * hsh(s, 4))]; };
+export function yardBoxCol(p, C, i, j, k) { const c = tint(C[i][j][k], p.seed ^ (i * 977 + j * 131 + k * 17)); const pair = hsh(p.seed, i, j, k, 7) < 0.2;
+  return { c, pair, c2: pair ? tint(CC[Math.floor(hsh(p.seed, i, j, k, 8) * CC.length)], p.seed ^ (i * 991 + j * 137 + k * 19 + 5)) : null }; }
 // v: the lot's 'vcol' bucket. Draws exactly what the old loop drew from the rng (same calls, same order), then lays the boxes.
 export function yardContainers(v, p) {
   const hx = p.d / 2, hz = p.w / 2; const { xs, zs } = yardGrid(p); const nc = xs.length, nr = zs.length;
@@ -96,14 +101,13 @@ export function yardContainers(v, p) {
   for (let i = 0; i < nc; i++) for (let j = 0; j < nr; j++) { const x = xs[i], z = zs[j]; const n = N[i][j];
     for (let k = 0; k < n; k++) { S.boxes++; const y0 = 0.05 + k * CH2; const h = hsh(p.seed, i, j, k);
       const L = i === 0 || N[i - 1][j] <= k, R = i === nc - 1 || N[i + 1][j] <= k;
-      const tint = (c, s) => { const t = 0.84 + 0.26 * hsh(s, 1); return [c[0] * t * (0.95 + 0.1 * hsh(s, 2)), c[1] * t * (0.95 + 0.1 * hsh(s, 3)), c[2] * t * (0.95 + 0.1 * hsh(s, 4))]; };
-      const c = tint(C[i][j][k], p.seed ^ (i * 977 + j * 131 + k * 17)); const pair = hsh(p.seed, i, j, k, 7) < 0.2; const tl = k > 0;
+      const { c, pair, c2 } = yardBoxCol(p, C, i, j, k); const tl = k > 0; // b_portlight: colour helper shared with portlight.js (same math)
       const zN = [z, 0, -1], zP = [z + CL, 0, 1]; // end faces: (z, normal)
       const end = (zf, s, kind, cc) => boxEnd(v, s < 0 ? [x + CW, 0, zf] : [x, 0, zf], s < 0 ? [-1, 0, 0] : [1, 0, 0], [0, 0, s], y0, cc, kind, tl, hsh(p.seed, i, j, k, s + 9));
       const dk = k === 0 ? 'door' : k === 1 ? 'door1' : 'door2', bk = k <= 1 ? 'blank' : 'blank2';
       if (!pair) { box(v, x, y0, z, x + CW, y0 + CH2, z + CL, {}, c, false); ribs(x, y0, z, z + CL, mul(c, 0.72), L, R, () => false);
         const dz = h < 0.5 ? -1 : 1; end(dz < 0 ? zN[0] : zP[0], -1 === dz ? -1 : 1, dk, c); end(dz < 0 ? zP[0] : zN[0], dz < 0 ? 1 : -1, bk, c); }
-      else { S.pairs++; const c2 = tint(CC[Math.floor(hsh(p.seed, i, j, k, 8) * CC.length)], p.seed ^ (i * 991 + j * 137 + k * 19 + 5)); const zm = z + 6.05, zm2 = z + 6.15;
+      else { S.pairs++; const zm = z + 6.05, zm2 = z + 6.15;
         box(v, x, y0, z, x + CW, y0 + CH2, zm, {}, c, false); box(v, x, y0, zm2, x + CW, y0 + CH2, z + CL, {}, c2, false);
         ribs(x, y0, z, zm, mul(c, 0.72), L, R, () => false); ribs(x, y0, zm2 - 1.0 + 0.0, z + CL, mul(c2, 0.72), L, R, (zr) => zr < zm2 + 0.4);
         end(z, -1, dk, c); end(zm, 1, 'blank2', c); end(zm2, -1, 'blank2', c2); end(z + CL, 1, dk, c2); } } }
@@ -145,13 +149,13 @@ export function planYards(parcels, G) {
   const st = PY.stats || (PY.stats = {}); st.plan = { yards: 0, fenceRuns: 0, fenceLen: 0, fenceCut: 0, gates: 0, booths: 0, sc: 0, tt: 0, rs: 0, masts: 0, off: PY_OFF };
   if (PY_OFF || !G || !G.index) return st.plan;
   for (const p of parcels) { if (p.far || p.style !== 'port') continue;
-    const N = withSeed(p.seed, () => { if (rng() < 0.45) return null; const { xs, zs } = yardGrid(p); const o = []; for (let i = 0; i < xs.length; i++) { o.push([]); for (let j = 0; j < zs.length; j++) { const n = randi(1, 4); for (let k = 0; k < n; k++) pick(CC); o[i].push(n); } } return o; });
+    const Cc = []; const N = withSeed(p.seed, () => { if (rng() < 0.45) return null; const { xs, zs } = yardGrid(p); const o = []; for (let i = 0; i < xs.length; i++) { o.push([]); Cc.push([]); for (let j = 0; j < zs.length; j++) { const n = randi(1, 4); const cs = []; for (let k = 0; k < n; k++) cs.push(pick(CC)); o[i].push(n); Cc[i].push(cs); } } return o; }); // b_portlight: keep the colours (same draws)
     if (!N) continue; st.plan.yards++;
     const hx = p.d / 2, hz = p.w / 2; const { xs, zs } = yardGrid(p); const nc = xs.length, nr = zs.length; const zEnd = zs[nr - 1] + CL, m = hz - zEnd; const xEnd = xs[nc - 1] + CW + 0.05;
     const gy = p.gf && p.gf.yard; const xL = -hx - 1.4, xR = hx + 1.4;
     const cr = withSeed((p.seed ^ 0x9e37) >>> 0, () => { pick([0, 1, 2]); const zc = rand(-hz + 9, hz - 9); const tx = rand(xL + 4, xR - 4); return { zc, tx }; }); if (gy && gy.zc !== null) cr.zc = gy.zc;
     const masts0 = gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]];
-    const y = { N, xs, zs, zEnd, m, xEnd, runs: [], gate: null, booth: null, boom: null, sc: [], tt: null, rs: null, masts: [], lash: [] };
+    const y = { N, C: Cc, xs, zs, zEnd, m, xEnd, runs: [], gate: null, booth: null, boom: null, sc: [], tt: null, rs: null, masts: [], lash: [] };
     const X0 = -hx - 0.5, X1 = hx + 0.3, Z0 = -hz + 0.1, Z1 = hz - 0.1;
     if (m >= 5.5) { const g1 = m >= 6.5 ? hz - 2.55 : hz - 0.6; y.gate = { z0: zEnd + 0.6, z1: g1 }; st.plan.gates++;
       if (m >= 6.5) { y.booth = { x0: hx - 2.0, z0: hz - 2.3, x1: hx - 0.35, z1: hz - 0.55 }; y.boom = { x: hx - 0.05, z: g1 + 0.22 }; st.plan.booths++; } }
@@ -209,9 +213,14 @@ export function yardFurniture(v, nb, cb, p, K, cone) {
     for (const yy of [0.36, 1.25, 2.22]) tube(v, P(r.a0, yy), P(r.a1, yy), yy > 2 ? 0.028 : 0.012, POST, t4);
     for (const [yy, o] of [[2.4, 0.16], [2.52, 0.27], [2.64, 0.38]]) tube(v, P(r.a0, yy, o), P(r.a1, yy, o), 0.008, DK, t4); // barbed strands
     const np = Math.max(1, Math.round(L / 3.5)); for (let i = 0; i <= np; i++) { const a = r.a0 + L * i / np; tube(v, P(a, 0.3), P(a, 2.3), 0.04, POST, t4); if (i % 2 === 0 || i === np) tube(v, P(a, 2.25), P(a, 2.7, 0.42), 0.025, POST, t4); }
-    const nm = Math.max(1, Math.round(L / 1.0)); for (let i = 1; i < nm; i++) { const a = r.a0 + L * i / nm; // welded mesh verticals (street face)
-      const o = r.ax === 'z' ? [r.c, 0, a] : [a, 0, r.c]; const ra = r.ax === 'z' ? [0, 0, 1] : [1, 0, 0]; const n1 = r.ax === 'z' ? [r.out, 0, 0] : [0, 0, r.out];
-      fq(v, o, ra, n1, -0.014, 0.3, 0.014, 2.22, 0.03, MESH); } }
+    const o0 = r.ax === 'z' ? [r.c, 0, 0] : [0, 0, r.c]; const ra = r.ax === 'z' ? [0, 0, 1] : [1, 0, 0]; const n1 = r.ax === 'z' ? [r.out, 0, 0] : [0, 0, r.out]; const n2 = [-n1[0], 0, -n1[2]];
+    if (PL_OFF) { const nm = Math.max(1, Math.round(L / 1.0)); for (let i = 1; i < nm; i++) { const a = r.a0 + L * i / nm; // welded mesh verticals (street face)
+      const o = r.ax === 'z' ? [r.c, 0, a] : [a, 0, r.c]; fq(v, o, ra, n1, -0.014, 0.3, 0.014, 2.22, 0.03, MESH); } }
+    else { // b_portlight: denser mesh read from afar — verticals every 0.6 m, a touch wider, on both faces (the yard side was invisible:
+      // back-face culled), plus two thin mid wires; the run reads as a fence line at 100–300 m instead of dotted posts
+      const nm = Math.max(2, Math.round(L / 0.6)); for (let i = 1; i < nm; i++) { const a = r.a0 + L * i / nm; const w = i % 2 ? 0.017 : 0.021;
+        fq(v, o0, ra, n1, a - w, 0.3, a + w, 2.22, 0.03, MESH); fq(v, o0, ra, n2, a - w, 0.3, a + w, 2.22, 0.03, MESH); }
+      for (const yy of [0.82, 1.72]) for (const nn of [n1, n2]) fq(v, o0, ra, nn, r.a0, yy - 0.012, r.a1, yy + 0.012, 0.034, MESH); } }
   // gate: portal with a lit header panel + beacons, raised boom barrier, guard booth with a lit window band, stop line
   if (y.gate) { const g = y.gate; const xf = hx + 0.3;
     if (g.portal) { for (const z of [g.z0 - 0.15, g.z1 + 0.15]) { put(v, G.box, xf, 2.8, z, 0.3, 5.6, 0.3, [0.85, 0.62, 0.1]); put(nb, G.ball, xf, 5.75, z, 0.16, 0.16, 0.16, [1, 0.55, 0.05]); }

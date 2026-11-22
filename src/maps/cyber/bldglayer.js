@@ -22,6 +22,7 @@ import { ParcelFit } from './parcelfit.js'; // r6.4 b_parcelfit
 import { ClutterCols } from './clutter.js'; // r6.4 b_clutter
 import { CLUT_CTX } from './clutcap.js';
 import { yardFurniture } from './portyard.js'; // r6.4 b_portyard
+import { yardLights, warehouseLight } from './portlight.js'; // r6.4 b_portlight
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -29,8 +30,10 @@ let CONE_MAT = null, CONE_G = null;
 function coneMat() {
   if (CONE_MAT) return CONE_MAT;
   CONE_MAT = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ vC = color; vT = uv.y; vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
-    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
+    // b_portlight: same program, second mode — uv.x >= 2 marks a "wash" vertex (ground light pool / light on a box face, portlight.js):
+    // its vertex colour is the added night radiance, view-independent. Cone vertices (uv.x in [0, 1]) take the old path unchanged.
+    vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ vC = color; vT = uv.y; vM = step(1.5, uv.x); vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
+    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ if (vM > 0.5) { gl_FragColor = vec4(vC * uNight, 1.0); return; } float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
   return CONE_MAT;
 }
 // cone from the lamp at (x, y, z) down to the ground, radius r at the bottom (unit geometry: apex at y=0 top, base at y=-1)
@@ -172,6 +175,7 @@ function portExtras(W, p, warehouse) {
     for (let i = 0; i < 3; i++) tube(v, [-hx + 2, h + 2.5, rz - 1 + i], [hx - 1, h + 2.5, rz - 1 + i], rand(0.15, 0.3), pick([pc, [0.7, 0.7, 0.68], [0.25, 0.4, 0.3]]), G.tube6);
     if (hz > 12) { const tz = -hz + 5; _ry(v, G.cyl12, 0, h + 2.4, tz, 1.5, 7, 1.5, [0.85, 0.85, 0.82]); for (const x of [-2.4, 2.4]) box(v, x - 0.3, h, tz - 1.4, x + 0.3, h + 1.6, tz + 1.4, {}, DARK); }
     for (let i = 0; i < 3; i++) { const x = rand(-hx + 2, hx - 2), z = rand(-hz + 2, hz - 2); box(v, x - 0.7, h, z - 0.7, x + 0.7, h + 0.9, z + 0.7, {}, [0.55, 0.56, 0.57]); }
+    warehouseLight(W.b('cone', 0, 0), p); // r6.4 b_portlight: apron pool under the work light (no rng; after the last draw)
     return;
   }
   // container yard: rail-mounted gantry crane over the stacks + flood-light masts
@@ -211,6 +215,7 @@ function portExtras(W, p, warehouse) {
   cone(cb, tx, Hc - 2.9, zc + 4.2, Hc - 3, 3, wh);
   for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) cone(cb, x, 21.8, z, 21.7, 7, [0.6, 0.58, 0.5]);
   yardFurniture(v, nb, cb, p, { kg, beam, tube, put }, cone); // r6.4 b_portyard: fence, gate, vehicles, inner masts (no rng; p.py)
+  yardLights(cb, p, { xL, xR, zc, Hc, tx }, gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]); // r6.4 b_portlight: ground pools + box wash in 'cone' (no rng)
 }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 function _ry(b, g, x, y, z, sx, sy, sz, col) { _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2); _s.set(sx, sy, sz); _p.set(x, y, z); _m.compose(_p, _q, _s); b.geom(g, _m, {}, col); }
