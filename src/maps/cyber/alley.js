@@ -103,7 +103,7 @@ function geos() {
 // 'lamp' = the instanced street-light program (props.js); same feature set (no map, no vertex colours) -> shared program
 const MDEF = {
   acBody: [0xb9bab4, 0.6, 0.15], acDark: [0x1d1f22, 0.6, 0.5], stain: [0x121416, 0.3, 0.0], pipeGrey: [0x5d6268, 0.45, 0.6], pipeRust: [0x5a3626, 0.8, 0.35],
-  pipeBlack: [0x141517, 0.5, 0.2], cable: [0x111214, 0.55, 0.1], fe: [0x1f2226, 0.7, 0.55], door: [0x4a5560, 0.55, 0.45] /* b_alleyface2: same steel as the painted service doors (mats.js style 6) */, bulb: [0x332a1c, 0.5, 0.0, 0xffc27a, 2.2],
+  pipeBlack: [0x141517, 0.5, 0.2], cable: [0x111214, 0.55, 0.1], fe: [0x1f2226, 0.7, 0.55], door: [0x5a636e, 0.55, 0.45] /* b_alleyface2: same steel as the painted service doors (mats.js style 6) */, bulb: [0x332a1c, 0.5, 0.0, 0xffc27a, 2.2],
   jbox: [0x7f8580, 0.55, 0.4], boxA: [0xa47c4c, 0.92, 0.0], boxB: [0x7a5a37, 0.95, 0.0], bagK: [0x0f1012, 0.28, 0.0], bagB: [0x1a2d55, 0.32, 0.0],
   crateR: [0xb51e22, 0.5, 0.0], crateB: [0x1f58a8, 0.5, 0.0], crateY: [0xd9a514, 0.5, 0.0], vent: [0x8a9095, 0.45, 0.6],
 };
