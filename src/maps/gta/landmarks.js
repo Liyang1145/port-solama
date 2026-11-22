@@ -116,7 +116,7 @@ export function landmarksBase(ctx, pick, ds) {
     col.add(x - 2.15, z + 3.65, x + 2.15, z + 6.35, 2.2, 'kiosk');
     if (ds) ds.add(x, z, R + 8, job('wheel', (Wd) => wheelDetail(Wd)));
     rig = { x, z, H, R, rv, rb, gv, gr, ang, cols, ds, fv, fg, far: null, fs: 0, base: null, det: null, th: 0, f: 0 };
-    rig.cc = cabinColliders(col); cabinCol(0);
+    rig.cc = cabinColliders(col); rig.ct = null; syncCab();
   }
   return { attach: wheelAttach, update: wheelUpdate };
 }
@@ -156,7 +156,7 @@ function wheelUpdate(cam) {
   if (!rig.det && d < DLOAD) { rig.det = wheelSpinDetail(); if (rig.ds) rig.ds.mark(rig.det); }
   else if (rig.det && d > DFREE) { for (const ms of rig.det) { SC.remove(ms); ms.geometry.dispose(); } rig.det = null; }
   BM.emissiveIntensity = 0.02 + U.uNight.value * 4.5;
-  cabinCol(th); // a_wheelcab: the low cabins are solid (follow the turn every frame, near or far: 3 boxes, no draw calls)
+  syncCab(); // a_wheelcab: the low cabins are solid (follow the turn every frame, near or far: 3 boxes, no draw calls)
   if (rig.far) { const dd = Math.hypot(cam.x - rig.x, cam.z - rig.z); const on = U.uNight.value > 0.05 && dd > 60; rig.far.visible = on;
     if (on) { const sc = Math.min(3.0, Math.max(0.16, dd * 0.0034)); if (Math.abs(sc - rig.fs) > rig.fs * 0.04) { rig.fs = sc; farScale(rig.far.geometry, sc); } } }
   // far away the motion is sub-pixel: re-pose the cabins only every 8th frame there
@@ -173,6 +173,7 @@ function farScale(geo, sc) { const p = geo.attributes.position.array, loc = geo.
 // access bridge (top BR.y) are walkable surfaces now: the city's groundH asks landmarkDeckH first.
 const WD = { x0: WH.x - 6, x1: WH.x + 6, z0: WH.z - 3.2, z1: WH.z + 3.2, y: 0.75 };
 export function landmarkDeckH(x, z) {
+  syncCab(); // a_wheelcab: cabin colliders follow the simulation clock even on frames that don't render (groundH runs before the player's resolve)
   { const dx = x - LH.x, dz = z - LH.z; if (dx * dx + dz * dz <= PL.r * PL.r) return PL.y; } // a_wheelcab: lighthouse plinth drum top
   if (z >= WD.z0 && z <= WD.z1) { if (x >= WD.x0 && x <= WD.x1) return WD.y;
     if (x >= WD.x0 - 1.06 && x < WD.x0 && Math.abs(z - WH.z) <= 1.4) { const k = Math.min(2, Math.floor((WD.x0 - x) / 0.35)); return WD.y - (k + 1) * 0.25; } } // the three steps
@@ -199,19 +200,22 @@ function wheelColliders(col) {
 }
 // a_wheelcab: cabins at the bottom of the turn sweep the boarding lane. A pool of 3 boxes (at most 3 of the 16 cabins are ever
 // within 2.5 m of the deck: 0.39 rad apart, |angle from bottom| < 0.56 rad) follows the lowest cabins every frame. A box is solid
-// only while its cabin's floor is below head height over the deck (1.9 m); higher cabins stay tracked but parked, so you can walk
-// under them. Boxes are registered over the whole low sweep once and only their extents change (no grid churn, no draw calls).
+// only while its cabin's floor is below head height (1.9 m) over the deck (or over the sand beside it: a cabin that clears a head
+// on the lower sand is clipped to the deck span); higher cabins stay tracked but parked, so you can walk under them. Boxes are registered over the whole low sweep once and only their extents change (no grid churn, no draw calls).
 // Test hook: set .off on any box's .pool to park them all (control runs).
 const CAB = { hx: 0.92, hz: 1.02, y0: -2.28, y1: -0.24, low: 2.5, head: 1.9, n: 3 };
 function cabinColliders(col) { const pool = []; const { x, z, R } = WH; const sx = R * Math.sin(0.6) + CAB.hx;
   for (let i = 0; i < CAB.n; i++) { const b = col.add(x - sx, z - CAB.hz, x + sx, z + CAB.hz, -50, 'cabin'); b.pool = pool; pool.push(b); }
   pool.off = false; return pool; }
 function parkCab(b) { b.minX = b.maxX = WH.x; b.minZ = b.maxZ = WH.z; b.h = -50; b.k = -1; }
+function syncCab() { if (rig && rig.cc && rig.ct !== U.uTime.value) { rig.ct = U.uTime.value; cabinCol(-U.uTime.value * SPIN); } }
 function cabinCol(th) { const C = rig && rig.cc; if (!C) return; let n = 0;
   if (!C.off) for (let k = 0; k < 16 && n < C.length; k++) { const a = rig.ang[k] + th, s = Math.sin(a); const yb = rig.H + s * rig.R + CAB.y0;
     if (yb - WD.y >= CAB.low) continue; const b = C[n++];
     if (yb - WD.y >= CAB.head) { parkCab(b); b.k = k; continue; }
-    const px = rig.x + Math.cos(a) * rig.R; b.minX = px - CAB.hx; b.maxX = px + CAB.hx; b.minZ = rig.z - CAB.hz; b.maxZ = rig.z + CAB.hz;
+    const px = rig.x + Math.cos(a) * rig.R; let x0 = px - CAB.hx, x1 = px + CAB.hx;
+    if (yb - sandY(px) >= CAB.head) { x0 = Math.max(x0, WD.x0); x1 = Math.min(x1, WD.x1); if (x1 <= x0) { parkCab(b); b.k = k; continue; } } // clears a head on the sand: solid only over the deck
+    b.minX = x0; b.maxX = x1; b.minZ = rig.z - CAB.hz; b.maxZ = rig.z + CAB.hz;
     b.h = rig.H + s * rig.R + CAB.y1; b.k = k; }
   for (; n < C.length; n++) parkCab(C[n]); }
 // a_wheelcab: the lighthouse used to be one 7.8 m square box (it covered the north half of the jetty's round head and left a ~1 m
