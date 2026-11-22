@@ -269,6 +269,7 @@ export function cnSignboard(W, F, a0, a1, y, h = 0.8) {
   const k = randi(0, 17); const fw = Math.min(w - 0.12, (h - 0.1) * 2.2 * (w > 4 ? 1.15 : 1)); // keep the 2:1 cell aspect roughly; centre it
   const f = V3(F, (a0 + a1) / 2, 0.515, y + h / 2); cnFace(W, k, f[0], f[1], f[2], ry, fw, h - 0.1, 1);
   if (fw < w - 0.5) for (const s of [-1, 1]) { const e = V3(F, (a0 + a1) / 2 + s * (fw / 2 + (w - fw) / 4), 0.515, y + h / 2); put(W.b('neon', e[0], e[2]), kg().box, e[0], e[1], e[2], (w - fw) / 2 - 0.12, h - 0.16, 0.01, pick(NEONC).map((q) => q * 0.12), ry); }
+  return k; // b_signsync: the shop name cell, so storefront.js can light the same name over the door
 }
 // stickers / paper ads: n small sheets on the wall around a0..a1 (d just proud of the facade), heights 0.7-2.2
 export function stickers(W, F, a0, a1, y0, n, d = 0.03) {

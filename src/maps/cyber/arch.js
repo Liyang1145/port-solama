@@ -20,25 +20,26 @@ export const SHOP_LOG = []; // r6.4 b_storefront: bays of streamed parcels (parc
 export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
   const W = ctx.W; const F = edge([fx, z1], [fx, z0]); // runs from z1 to z0 -> outward +x
   const n = Math.max(1, Math.round(F.len / sw)); const cw = F.len / n; let vend = 0;
+  const swl = ctx.col && !ctx.col.query ? [] : null; // b_signsync: sidewalk / vending footprints of this frontage (shared by its SHOP_LOG records)
   for (let i = 0; i < n; i++) {
     const a0 = i * cw + 0.2, a1 = (i + 1) * cw - 0.2; const r = rng();
     const yt = y0 + ground * 0.78;
-    let kind = 'plain', open = 1, cl = null, sg = 0;
+    let kind = 'plain', open = 1, cl = null, sg = 0, sk = -1;
     if (r < 0.32) { const o = pick([0, 0, 0.35, 0.6]); if (o > 0) cl = storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, o); kind = 'shut'; open = o; }
     else if (r < 0.62) { cl = storefront(W, F, a0, a1, y0, yt); awning(W, F, a0, a1, yt + 0.05, rand(1.3, 2.0)); kind = 'awn'; }
     else if (r < 0.75) { cl = storefront(W, F, a0, a1, y0, yt); rollShutter(W, F, a0, a1, y0, yt, 0.92); kind = 'up'; open = 0.92; } // open shop: shutter rolled up into the housing
     else cl = storefront(W, F, a0, a1, y0, yt);
     // r6.4 b_street2: about half the shop boards are Chinese light boxes (invented names); stickers / condensers / wiring per bay
-    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) { cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); sg = 1; } else { signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); sg = 2; } }
+    if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) { sk = cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); sg = 1; } else { signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); sg = 2; } }
     // r6.4 b_storefront: streamed parcels (stub collider, no query) log each bay for storefront.js — no rng use, geometry unchanged
-    if (ctx.col && !ctx.col.query) SHOP_LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, i, n });
+    if (ctx.col && !ctx.col.query) SHOP_LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, sw: swl, i, n });
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
-    if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) vending(W, F, a0 + 0.6 + j * 1.0, y0); }
+    if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } }
   }
   // r6.3: hanging light-box signs on wall arms over the pavement (every couple of bays) + sidewalk dressing (bins, trash, crates,
   // food stalls, umbrella tables, puddles, ground pipes) weighted by how gritty the street is
   for (let i = 0; i < n; i++) if (rng() < (opts.hang ?? 0.45)) hangingSign(W, F, i * cw + rand(0.4, 0.9), y0 + ground + rand(0.2, 1.4));
-  if (opts.dress !== false) sidewalk(W, F, y0, opts.grit ?? 0.5);
+  if (opts.dress !== false) sidewalk(W, F, y0, opts.grit ?? 0.5, swl ? { log: swl } : {});
   // blade sign at one end of the frontage
   if (opts.blade !== false && rng() < 0.85) {
     const a = rng() < 0.5 ? 0.6 : F.len - 0.6; const h = rand(2.4, 4.2), w = rand(0.8, 1.2); const yc = y0 + ground + 0.6 + h / 2;

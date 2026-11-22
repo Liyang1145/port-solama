@@ -200,16 +200,17 @@ export function laundryLine(W, A, B, sag = 0.3) {
 // One bay-run of sidewalk dressing in front of a shop frontage F (a ∈ [0, F.len], outward d): picks a mix weighted by `grit`
 // (0 clean commercial .. 1 tenement back street). Puddles everywhere (wet city), food stalls / umbrella tables on wider runs.
 export function sidewalk(W, F, y0, grit = 0.5, opts = {}) {
-  const L = F.len; if (L < 5) return; const yP = y0 + 0.012;
+  const L = F.len; if (L < 5) return; const yP = y0 + 0.012; const lg = opts.log; // b_signsync: footprints (a span, d span) for storefront.js
   let a = rand(0.8, 2.5);
   while (a < L - 1.2) {
     const r = rng();
-    if (r < 0.16 * grit + 0.04) { trashPile(W, F, a, rand(0.5, 0.9), y0); a += rand(2.5, 5); }
-    else if (r < 0.26 * grit + 0.07) { wheelieBin(W, F, a, rand(0.55, 0.8), y0); if (rng() < 0.6) wheelieBin(W, F, a + 0.75, rand(0.55, 0.8), y0); a += rand(3, 6); }
-    else if (r < 0.36 * grit + 0.1) { crates(W, F, a, rand(0.6, 1.0), y0); a += rand(3, 6); }
-    else if (r < 0.4 * grit + 0.12) { gasBottles(W, F, a, 0.45, y0); a += rand(2, 4); }
-    else if (r < 0.52 && opts.stalls !== false && L > 10) { const f = rng() < 0.3 ? foodStall : pick(STALLS); f(W, F, Math.min(L - 1.6, a + 1.2), rand(2.0, 2.6), y0); a += rand(6, 10); } // r6.4: + 面摊 / 烧烤 / 维修摊 (street2.js)
-    else if (r < 0.62 && opts.tables !== false) { umbrellaTable(W, F, a + 0.8, rand(1.8, 2.6), y0); a += rand(4, 7); }
+    if (r < 0.16 * grit + 0.04) { const d = rand(0.5, 0.9); trashPile(W, F, a, d, y0); lg && lg.push({ k: 'trash', a0: a - 1.0, a1: a + 1.0, d0: d - 0.45, d1: d + 0.5 }); a += rand(2.5, 5); }
+    else if (r < 0.26 * grit + 0.07) { const d = rand(0.55, 0.8); wheelieBin(W, F, a, d, y0); lg && lg.push({ k: 'bin', a0: a - 0.42, a1: a + 0.42, d0: d - 0.45, d1: d + 0.45 });
+      if (rng() < 0.6) { const d2 = rand(0.55, 0.8); wheelieBin(W, F, a + 0.75, d2, y0); lg && lg.push({ k: 'bin', a0: a + 0.33, a1: a + 1.17, d0: d2 - 0.45, d1: d2 + 0.45 }); } a += rand(3, 6); }
+    else if (r < 0.36 * grit + 0.1) { const d = rand(0.6, 1.0); crates(W, F, a, d, y0); lg && lg.push({ k: 'crates', a0: a - 0.65, a1: a + 0.65, d0: d - 0.5, d1: d + 0.5 }); a += rand(3, 6); }
+    else if (r < 0.4 * grit + 0.12) { gasBottles(W, F, a, 0.45, y0); lg && lg.push({ k: 'gas', a0: a - 0.1, a1: a + 1.3, d0: 0.25, d1: 0.65 }); a += rand(2, 4); }
+    else if (r < 0.52 && opts.stalls !== false && L > 10) { const f = rng() < 0.3 ? foodStall : pick(STALLS); const as = Math.min(L - 1.6, a + 1.2), d = rand(2.0, 2.6); f(W, F, as, d, y0); lg && lg.push({ k: 'stall', a0: as - 1.75, a1: as + 1.75, d0: d - 0.7, d1: d + 1.3 }); a += rand(6, 10); } // r6.4: + 面摊 / 烧烤 / 维修摊 (street2.js)
+    else if (r < 0.62 && opts.tables !== false) { const d = rand(1.8, 2.6); umbrellaTable(W, F, a + 0.8, d, y0); lg && lg.push({ k: 'table', a0: a - 0.1, a1: a + 1.7, d0: d - 0.9, d1: d + 0.9 }); a += rand(4, 7); }
     else a += rand(2, 5);
   }
   const np = Math.round(L / rand(6, 12)); for (let i = 0; i < np; i++) puddle(W, F, rand(1, L - 1), rand(1.0, 3.4), yP + i * 0.0005, rand(0.4, 1.3));
