@@ -33,7 +33,7 @@ export function envFamily(key, patched) { return patched ? (FAM[key] || key) : '
 // called by prep(): normalised lazily right before the next render, when the material is fully set up
 export function envReg(mat, key, patched) {
   if (OLDENV || !mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || key === 'npc' || key === 'ch') return;
-  mat.userData.envFam = envFamily(key, patched); PENDING.add(mat); hook();
+  mat.userData.envFam = envFamily(key, patched); PENDING.add(mat);
   // Material.clone() drops onBeforeCompile / customProgramCacheKey: clones keep the hooks and are normalised too
   if (!mat.__envClone && !DBG.includes('noclone')) { mat.__envClone = 1; const c0 = mat.clone; mat.clone = function () { const c = c0.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = this.customProgramCacheKey; c.clone = this.clone; c.__envClone = 1; if (!c.userData.envOn) PENDING.add(c); return c; }; }
 }
@@ -95,8 +95,7 @@ export function envPatch(s, m, U) {
 }
 
 // culling restore. renderBufferDirect remembers the drawn object so the shared shadow depth material can find its source material
-let CUR = null, CURG = null, HOOKED = false;
-function hook() { HOOKED = true; } // kept for clarity: the renderer is wrapped once by envInstall (main.js)
+let CUR = null, CURG = null;
 // main.js calls this right after creating the renderer: every render / compile first normalises pending materials
 export function envInstall(r) {
   if (OLDENV || r.__envInst) return; r.__envInst = true;
