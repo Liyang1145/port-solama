@@ -25,6 +25,13 @@ import { U } from '../../env.js';
 import { ROOF_LOG, PARCEL_COLS } from './city.js';
 import { predict } from './parcelfit.js'; // b_overlayfit: the drawn footprint of a lot (pure replay of the generator's draws)
 import { PY_OFF, isYard } from './portyard.js'; // r6.4 b_portyard
+import { AF_OFF } from './svcface.js'; // b_alleyface2
+// b_alleyface2: the slot walls of the streamed lots now carry service-face openings (city.js svcEdgesLot; stream.js logs them on
+// p.svcF in world space). Wall fixtures planned here keep off them with the same draws in the same order: downpipes, conduit drops +
+// junction box and the wall lamp slide along the wall to the nearest clear depth (or are left off), swung-open gate leaves over a
+// door / shutter are left off, the wall clutter heap and the two baffles slide (their colliders are moved once, at the first plan).
+// ?nosvcgap (or ?noalleyface): as before this lane.
+const SG_OFF = () => AF_OFF || !!globalThis.__NOSVCGAP || (typeof location !== 'undefined' && /[?&]nosvcgap\b/.test(location.search));
 
 // b_overlayfit test switch: ?nooverlayfit plans the slots exactly as before this lane
 const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
@@ -149,7 +156,7 @@ export class ParcelGapLayer {
     this.kinds = new Map(); this.hmin = new Map(); this.last = null; this.frame = 0; this.dirty = false;
     const G = geos(); this.triOf = {}; for (const k in KINDS) this.triOf[k] = G[KINDS[k][0]].attributes.position.count / 3;
     this.gaps = findGaps(city.parcels || []);
-    this.stats = { gaps: this.gaps.length, narrow: 0, wide: 0, baffled: 0, colliders: 0, planned: 0, packed: 0, tris: 0, inst: 0, of: { off: OF_OFF, wallCols: 0, wallGaps: 0, clamped: 0, clampSum: 0, bagsGrounded: 0, based: 0 } };
+    this.stats = { gaps: this.gaps.length, narrow: 0, wide: 0, baffled: 0, colliders: 0, planned: 0, packed: 0, tris: 0, inst: 0, of: { off: OF_OFF, wallCols: 0, wallGaps: 0, clamped: 0, clampSum: 0, bagsGrounded: 0, based: 0 }, sv: { walls: 0, open: 0, pipeMoved: 0, pipeDrop: 0, condMoved: 0, condDrop: 0, lampMoved: 0, lampDrop: 0, leafDrop: 0, bafMoved: 0, bafStuck: 0, backMoved: 0, backStuck: 0, upDrop: 0, clMoved: 0, clDrop: 0 } };
     this.byChunk = new Map(); for (const g of this.gaps) { let l = this.byChunk.get(g.key); if (!l) this.byChunk.set(g.key, l = []); l.push(g); }
     this.exactFootprints();
     for (const g of this.gaps) withSeed(g.seed, () => this.layout(g));
@@ -200,6 +207,46 @@ export class ParcelGapLayer {
   toW(g, x, z) { _p.set(x, 0, z).applyMatrix4(g.GM); return [_p.x, _p.z]; }
   // thin collider across the slot (gap frame: centre x, depth t, half length hl along x, half thickness hw along z)
   obb(g, x, t, hl, hw, h) { const [cx, cz] = this.toW(g, x, -t); const e = g.GM.elements; const ux = e[0], uz = e[2]; const b = this.city.col.addOBB(cx, cz, ux, uz, hl, hw, h, 'gap'); this.stats.colliders++; return b; }
+  // b_alleyface2: openings of the side's building on this slot wall, gap-frame depth [t0, t1] (+0.15 m margin) and height [lo, hi]
+  // (floor openings from 0). From p.svcF, logged when the lot's near detail was built (both lots are built before a slot is planned).
+  svcOpen(g, side) {
+    const k = side > 0 ? 'svP' : 'svQ'; if (g[k] !== undefined) return g[k]; const P = side > 0 ? g.p : g.q; if (SG_OFF() || !P.svcF) return null;
+    const out = []; for (const o of P.svcF) { const A = this.depthOf(g, o.a[0], o.a[1]), B = this.depthOf(g, o.b[0], o.b[1]);
+      if (Math.max(A.t, B.t) < -0.5 || Math.min(A.t, B.t) > g.D + 0.5) continue;
+      if (Math.abs(A.x - this.wall(g, A.t, side)) > 0.5 || Math.abs(B.x - this.wall(g, B.t, side)) > 0.5) continue; // another face of that lot
+      out.push({ t0: Math.min(A.t, B.t) - 0.15, t1: Math.max(A.t, B.t) + 0.15, lo: o.floor ? -1 : o.lo - 0.1, hi: o.hi + 0.05, floor: o.floor, t: o.t }); }
+    if (out.length) { this.stats.sv.walls++; this.stats.sv.open += out.length; } return (g[k] = out);
+  }
+  svcHit(g, side, a, b, ya, yb, floorOnly = false) { const O = this.svcOpen(g, side); if (!O) return false; return O.some((o) => (!floorOnly || o.floor) && a < o.t1 && b > o.t0 && ya < o.hi && yb > o.lo); }
+  // nearest depth t' in [tMin, tMax] whose span [t' + h0, t' + h1] x [ya, yb] is clear of the openings (t itself when clear; null: none)
+  svcClear(g, side, t, h0, h1, ya, yb, tMin, tMax, floorOnly = false) {
+    const sp = typeof h0 === 'function' ? h0 : (u) => [u + h0, u + h1]; const ok = (u) => { const [a, b] = sp(u); return !this.svcHit(g, side, a, b, ya, yb, floorOnly); };
+    if (ok(t)) return t;
+    for (let d = 0.05; d < 8; d += 0.05) for (const s of [1, -1]) { const u = t + s * d; if (u < tMin || u > tMax) continue; if (ok(u)) return u; }
+    return null;
+  }
+  // b_alleyface2: first plan of a wide slot: the baffles (each butts into one wall over its full height) and the wall clutter heap
+  // (floor openings only) slide clear of the openings; their colliders move with them, once.
+  svcRefit(g) {
+    if (g.svFit || SG_OFF()) return; g.svFit = true; const L = g.L; const C = this.city.col; const S = this.stats.sv;
+    if (g.narrow) { // back panel (no collider): to a depth where neither wall has an opening
+      const hit = (t) => this.svcHit(g, 1, t - 0.12, t + 0.12, 0, 99) || this.svcHit(g, -1, t - 0.12, t + 0.12, 0, 99);
+      if (L.t1 && hit(L.t1)) { let nt = null; for (let d = 0.05; d < 9 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = L.t1 + s * d; if (u < 2.2 || u > g.D - 0.6) continue; if (!hit(u)) { nt = u; break; } }
+        if (nt === null) S.backStuck++; else { L.t1 = nt; S.backMoved++; } }
+      return; }
+    if (L.t1 && L.bBox && L.bBox[L.t1] && L.bBox[L.t2]) { const hit = (t1) => this.svcHit(g, L.sA, t1 - 0.12, t1 + 0.12, 0, 99) || this.svcHit(g, -L.sA, t1 + 1.3 - 0.12, t1 + 1.3 + 0.12, 0, 99);
+      if (hit(L.t1)) { let nt = null; for (let d = 0.05; d < 9 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = L.t1 + s * d; if (u < 2.6 || u + 1.3 > g.D - 0.7) continue; if (!hit(u)) { nt = u; break; } }
+        if (nt === null) S.bafStuck++; else { S.bafMoved++; const old = [L.t1, L.t2]; for (const t of old) { C.remove(L.bBox[t]); delete L['b' + t]; } L.t1 = nt; L.t2 = nt + 1.3; const nb = {};
+          for (const [t, side] of [[L.t1, L.sA], [L.t2, -L.sA]]) { const w0 = this.wall(g, t, side), w1 = this.wall(g, t, -side); const dir = Math.sign(w1 - w0); const a = w0 - dir * 0.3, b = w1 - dir * L.ow;
+            L['b' + t] = [a, b]; nb[t] = this.obb(g, (a + b) / 2, t, Math.abs(b - a) / 2, 0.08, 4); this.stats.colliders--; } L.bBox = nb; } } }
+    if (L.cl && !L.clMute && L.clBox) { const c = L.cl; const span = c.t1 - c.t0; const lim = L.t1 ? L.t1 - 1.2 : g.D - 1; const fw = this.fsS(g, c.side); const tMin = fw ? fw + 0.1 : 0.9;
+      const bad = (t0) => this.svcHit(g, c.side, t0 - 0.45, t0 + span + 0.65, 0, 1.2, true) || t0 + span > lim + 1e-6; // heap pieces reach ~0.45 m before t0 / 0.65 m past t1
+      if (bad(c.t0)) { let nt = null; for (let d = 0.05; d < 8 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = c.t0 + s * d; if (u < tMin || u + span > lim) continue; if (!bad(u)) { nt = u; break; } }
+        C.remove(L.clBox); L.clBox = null;
+        if (nt === null) { L.clMute = true; S.clDrop++; }
+        else { S.clMoved++; const tm = nt + span / 2; const w = this.wall(g, tm, c.side); const dir = Math.sign(this.wall(g, tm, -c.side) - w); L.cl = { side: c.side, t0: nt, t1: nt + span, w, dir, dep: c.dep };
+          L.clBox = this.obb(g, w + dir * 0.25, tm, 0.25 + 0.05, span / 2, 1.3); this.stats.colliders--; } } }
+  }
   // ---- startup: layout decisions + colliders (deterministic per slot)
   layout(g) {
     const L = g.L = {};
@@ -212,13 +259,13 @@ export class ParcelGapLayer {
       L.type = pick(['open', 'open', 'up', 'up', 'none']);
       if (g.D >= 7.5) { this.stats.baffled++; L.t1 = Math.min(Math.max(g.D * 0.4, 3.5), 7); L.t2 = L.t1 + 1.3; L.sA = rng() < 0.5 ? 1 : -1; L.ow = this.gw(g, L.t1) < 1.75 ? 0.85 : 0.9;
         for (const [t, side] of [[L.t1, L.sA], [L.t2, -L.sA]]) { const w0 = this.wall(g, t, side), w1 = this.wall(g, t, -side); const dir = Math.sign(w1 - w0); const a = w0 - dir * 0.3, b = w1 - dir * L.ow;
-          if (this.yAny(g)) continue; /* b_portyard */ L['b' + t] = [a, b]; this.obb(g, (a + b) / 2, t, Math.abs(b - a) / 2, 0.08, 4); } }
+          if (this.yAny(g)) continue; /* b_portyard */ L['b' + t] = [a, b]; (L.bBox || (L.bBox = {}))[t] = this.obb(g, (a + b) / 2, t, Math.abs(b - a) / 2, 0.08, 4); } }
       const lim = L.t1 ? L.t1 - 1.2 : g.D - 1; const gm = Math.min(this.gw(g, 1), this.gw(g, lim));
       if (gm >= 2.0 && lim > 2.2) { const side = L.sA || (rng() < 0.5 ? 1 : -1); /* on the baffle-1 wall: the opening (and the way through) is on the other side */ const t0 = rand(0.9, Math.max(1.0, lim - 1.4)), t1 = Math.min(lim, t0 + rand(0.9, 1.6)); const tm = (t0 + t1) / 2;
         const fw = this.fsS(g, side); const so = fw ? Math.max(0, fw + 0.1 - t0) : 0; // b_overlayfit: start where that wall runs straight (podium front / end of the curve)
         const w = this.wall(g, tm + so, side); const dir = Math.sign(this.wall(g, tm + so, -side) - w); L.cl = { side, t0: t0 + so, t1: t1 + so, w, dir, dep: 0.5 };
         if (this.ys(g, side)) { L.clMute = true; this.stats.py = (this.stats.py || 0) + 1; } else /* b_portyard */
-        this.obb(g, w + dir * 0.25, tm + so, 0.25 + 0.05, (t1 - t0) / 2, 1.3); } // collider is rotated: across = 0.3 half, along depth = half span
+        L.clBox = this.obb(g, w + dir * 0.25, tm + so, 0.25 + 0.05, (t1 - t0) / 2, 1.3); } // collider is rotated: across = 0.3 half, along depth = half span
     }
     // mouth heap in front of the closure (on the setback strip), small collider
     if (rng() < 0.55) { const gw = g.g0; const side = rng() < 0.5 ? 1 : -1; const x = g.narrow ? this.xc(g, 0) + rand(-0.2, 0.2) * gw : this.wall0(g, 0, side) + side * g.sd * rand(0.35, 0.9);
@@ -227,6 +274,7 @@ export class ParcelGapLayer {
   // ---- visual plan (lazy: once both neighbours have reported their roof height)
   plan(g) {
     const hp = this.hmin.get(g.p.seed), hq = this.hmin.get(g.q.seed); if (hp === undefined || hq === undefined) return null;
+    this.svcRefit(g); const SV = this.stats.sv; const svFirst = !g.svPlanned; g.svPlanned = true; const svc = (k) => { if (svFirst) SV[k]++; }; // b_alleyface2
     const H = Math.max(3.4, Math.min(hp, hq, 40, g.p.style === 'condo' || g.q.style === 'condo' ? 5.0 : 99)); /* condo slabs sit back 2.5 m above a 5 m podium */ const L = g.L; const D = g.D; const inst = {}; let tris = 0; this.stats.planned++;
     let mute = false; const push = (k, mat) => { if (mute) return; _w.multiplyMatrices(g.GM, mat); (inst[k] || (inst[k] = [])).push(..._w.elements); tris += this.triOf[k]; };
     // b_overlayfit: walking-height wall fixtures of a walkable slot (gap frame: across x from the wall face w toward dir, depth t,
@@ -247,8 +295,9 @@ export class ParcelGapLayer {
     else if (L.type === 'gate') { P('gate', x0, 0, zf + -0.06, gM, hc, 1); P('steel', x0, hc + 0.05, zf + -0.06, gM + 0.1, 0.08, 0.1); P('jbox', x0 + gM * 0.3, 1.05, zf + -0.02, 0.18, 0.18, 0.4); } // + padlock
     else if (L.type === 'fence') { P('fence', x0, 0, zf + -0.05, gM, hc, 1); for (const s of [1, -1]) seg('post', [x0 + s * (gM / 2 - 0.03), 0, zf - 0.05], [x0 + s * (gM / 2 - 0.03), hc + 0.3, zf - 0.05], 0.03);
       seg('post', [x0 - gM / 2, hc, zf - 0.05], [x0 + gM / 2, hc, zf - 0.05], 0.022); P('razor', x0, hc + 0.18, zf + -0.05, gM, 1, 1); }
-    else if (L.type === 'open') { for (const side of [1, -1]) { const w = this.wall(g, 0.6 + fs, side); const dir = Math.sign(this.wall(g, 0.6 + fs, -side) - w); const so = this.fsS(g, side); M0(YS(side), () => { P('gate', w + dir * 0.06, 0, -g0 / 4 - 0.15 - so, g0 / 2, 2.4, 1, Math.PI / 2); fix(w, dir, 0.11, g0 / 4 + 0.15 + so, g0 / 4, 2.4); }); } }
-    else if (L.type === 'up') { P('steel', x0, 3.2, zf + -0.16, gM + 0.12, 0.5, 0.45); for (const s of [1, -1]) P('steel', x0 + s * (gM / 2 - 0.02), 1.5, zf + -0.1, 0.05, 3.0, 0.08); }
+    else if (L.type === 'open') { for (const side of [1, -1]) { const w = this.wall(g, 0.6 + fs, side); const dir = Math.sign(this.wall(g, 0.6 + fs, -side) - w); const so = this.fsS(g, side); const lf = this.svcHit(g, side, so + 0.15, so + 0.15 + g0 / 2, 0, 2.4); if (lf) svc('leafDrop'); /* b_alleyface2: not over a door / shutter */ M0(YS(side) || lf, () => { P('gate', w + dir * 0.06, 0, -g0 / 4 - 0.15 - so, g0 / 2, 2.4, 1, Math.PI / 2); fix(w, dir, 0.11, g0 / 4 + 0.15 + so, g0 / 4, 2.4); }); } }
+    else if (L.type === 'up') { const ud = this.svcHit(g, 1, fs - 0.05, fs + 0.4, 0, 3.5) || this.svcHit(g, -1, fs - 0.05, fs + 0.4, 0, 3.5); if (ud) { svc('upDrop'); mute = true; } // b_alleyface2: housing + rails at the mouth would cut into a neighbour's opening
+      P('steel', x0, 3.2, zf + -0.16, gM + 0.12, 0.5, 0.45); for (const s of [1, -1]) P('steel', x0 + s * (gM / 2 - 0.02), 1.5, zf + -0.1, 0.05, 3.0, 0.08); if (ud) mute = false; }
     });
     if (L.type !== 'plate' && L.type !== 'none' && rng() < 0.75) M0(YA, () => P('bulb', x0 + rand(-0.2, 0.2) * gM, Math.min(H - 0.3, hc + 0.7), zf + -0.25)); // lamp under the lintel, facing out
     // ---- back panel (narrow) / staggered baffles (wide)
@@ -257,11 +306,15 @@ export class ParcelGapLayer {
       P('steel', b, H / 2, -t, 0.08, H, 0.2); } // steel edge on the opening
     // ---- pipes / conduits / cable drops up the walls
     const hp2 = Math.min(H - 0.2, 16); const tP = Math.max(0.6, tEnd - 0.3);
-    for (let i = 0, n = randi(1, g0 < 0.5 ? 2 : 3); i < n; i++) { const side = rng() < 0.5 ? 1 : -1; const t = ((q, o) => (o ? Math.max(q, o + 0.15) : q))(rand(0.35, tP), this.fsS(g, side)); const r = g0 < 0.5 ? rand(0.035, 0.06) : rand(0.05, 0.11); const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
-      const x = w + dir * (r + 0.02); const top = rand(Math.min(5, hp2), hp2); const k = pick(['pipeGrey', 'pipeRust', 'pipeBlack']); const m1 = mute; if (YS(side)) mute = true; // b_portyard
+    for (let i = 0, n = randi(1, g0 < 0.5 ? 2 : 3); i < n; i++) { const side = rng() < 0.5 ? 1 : -1; let t = ((q, o) => (o ? Math.max(q, o + 0.15) : q))(rand(0.35, tP), this.fsS(g, side)); const r = g0 < 0.5 ? rand(0.035, 0.06) : rand(0.05, 0.11); let w = this.wall(g, t, side); let dir = Math.sign(this.wall(g, t, -side) - w);
+      let x = w + dir * (r + 0.02); const top = rand(Math.min(5, hp2), hp2); const k = pick(['pipeGrey', 'pipeRust', 'pipeBlack']); const m1 = mute; if (YS(side)) mute = true; // b_portyard
+      { const fo = this.fsS(g, side); const u = this.svcClear(g, side, t, -r - 0.05, r + 0.05, 0, top, Math.max(0.35, fo ? fo + 0.15 : 0), Math.max(tP, t)); // b_alleyface2
+        if (u === null) { mute = true; svc('pipeDrop'); } else if (u !== t) { t = u; w = this.wall(g, t, side); dir = Math.sign(this.wall(g, t, -side) - w); x = w + dir * (r + 0.02); svc('pipeMoved'); } }
       seg(k, [x, 0.05, -t], [x, top, -t], r); seg(k, [x, top, -t], [w, top + 0.25, -t], r); for (let y = 1.2; y < top; y += rand(1.8, 2.6)) P('steel', x, y, -t, r * 2 + 0.08, 0.05, 0.05); fix(w, dir, 2 * r + 0.06, t, Math.max(r, 0.03), top); mute = m1; }
-    for (let i = 0, n = randi(1, 2); i < n; i++) { const side = rng() < 0.5 ? 1 : -1; const t = ((q, o) => (o ? Math.max(q, o + 0.4) : q))(rand(0.3, Math.min(tP, 3)), this.fsS(g, side)); const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
+    for (let i = 0, n = randi(1, 2); i < n; i++) { const side = rng() < 0.5 ? 1 : -1; let t = ((q, o) => (o ? Math.max(q, o + 0.4) : q))(rand(0.3, Math.min(tP, 3)), this.fsS(g, side)); let w = this.wall(g, t, side); let dir = Math.sign(this.wall(g, t, -side) - w);
       const m2 = mute; if (YS(side)) mute = true; // b_portyard
+      { const fo = this.fsS(g, side); const fm = OF_OFF ? -9 : this.fsOf(g) + 0.3; const u = this.svcClear(g, side, t, (v) => { const tj = Math.max(v - 0.12, fm); return [Math.min(v, tj) - 0.3, Math.max(v + 0.1, tj + 0.3)]; }, null, 0, hp2, Math.max(0.3, fo ? fo + 0.4 : 0), Math.max(tP, t)); // b_alleyface2 (drops + junction box)
+        if (u === null) { mute = true; svc('condDrop'); } else if (u !== t) { t = u; w = this.wall(g, t, side); dir = Math.sign(this.wall(g, t, -side) - w); svc('condMoved'); } }
       let nj = 0; for (let j = 0; j < randi(1, 3); j++) { const x = w + dir * (0.03 + j * 0.035); seg('pipeBlack', [x, 0.6, -t - j * 0.03], [x, hp2, -t - j * 0.03], 0.016); nj = j + 1; }
       if (nj) fix(w, dir, 0.03 + (nj - 1) * 0.035 + 0.02, t + (nj - 1) * 0.015, 0.02 + (nj - 1) * 0.015, hp2);
       if (g0 > 0.5 || rng() < 0.5) { const yj = rand(1.2, 1.8); const tj = OF_OFF ? t - 0.12 : Math.max(t - 0.12, this.fsOf(g) + 0.3); if (FIT && tj !== t - 0.12) g.of |= 8; /* b_overlayfit: the box (±0.24 m) poked out past the mouth / through the closure */ P('jbox', w, yj, -tj, 1, 1, 1, dir * Math.PI / 2); fix(w, dir, 0.21, tj, 0.24, yj + 0.34); } mute = m2; }
@@ -298,8 +351,10 @@ export class ParcelGapLayer {
       mute = !!L.heapOff; if (mute) g.of |= 16; heap(hp.x, hp.z, hp.r, false, [hp.x - hp.r, hp.x + hp.r, hp.z - 0.32, hp.z + 0.32], 0.0); mute = false; }
     if (L.cl) M0(L.clMute, () => { const c = L.cl; const cxw = c.w + c.dir * 0.25; const rc = [cxw - 0.3, cxw + 0.3, -c.t1, -c.t0]; for (let t = c.t0; t < c.t1 - 0.3; t += 0.6) heap(c.w + c.dir * 0.27, -t - 0.25, 0.22, true, rc, 0.055); });
     // ---- wall lamp inside wide slots
-    if (!g.narrow && rng() < 0.7) { const tq = rand(1.0, Math.max(1.1, (L.t1 || D) - 0.6)); const side = rng() < 0.5 ? 1 : -1; const t = this.fsS(g, side) ? Math.max(tq, this.fsS(g, side) + 0.3) : tq; const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
-      M0(YS(side), () => P('bulb', w, 2.7, -t, 1, 1, 1, dir * Math.PI / 2)); }
+    if (!g.narrow && rng() < 0.7) { const tq = rand(1.0, Math.max(1.1, (L.t1 || D) - 0.6)); const side = rng() < 0.5 ? 1 : -1; let t = this.fsS(g, side) ? Math.max(tq, this.fsS(g, side) + 0.3) : tq;
+      const u = this.svcClear(g, side, t, -0.15, 0.15, 2.5, 2.95, this.fsS(g, side) ? this.fsS(g, side) + 0.3 : 1.0, Math.max(t, (L.t1 || D) - 0.6)); if (u === null) svc('lampDrop'); else if (u !== t) { t = u; svc('lampMoved'); } // b_alleyface2
+      const w = this.wall(g, t, side); const dir = Math.sign(this.wall(g, t, -side) - w);
+      M0(YS(side) || u === null, () => P('bulb', w, 2.7, -t, 1, 1, 1, dir * Math.PI / 2)); }
     // b_overlayfit: the fixtures' colliders, once per slot (a re-plan after the chunk reloads draws the same fixtures)
     if (FX.length && !g.wcol && this.city.col && this.city.col.addOBB) { g.wcol = true; this.stats.of.wallGaps++;
       for (const [w, dir, reach, t, hl, top] of FX) { this.obb(g, w + dir * reach / 2, t, reach / 2, hl, top); this.stats.colliders--; this.stats.of.wallCols++; } }
