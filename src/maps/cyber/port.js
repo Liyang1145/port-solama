@@ -689,11 +689,23 @@ function washV(b, u, y, v, ru, ry, col, n = 1) { const a = new THREE.Vector3(u -
 // wash quad facing +u / -u at plane u
 function washU(b, u, y, v, rv, ry, col, n = 1) { const a = new THREE.Vector3(u, y - ry, v + rv * n), c = new THREE.Vector3(u, y - ry, v - rv * n), e = new THREE.Vector3(u, y + ry, v - rv * n), f = new THREE.Vector3(u, y + ry, v + rv * n);
   b.quad(a, c, e, f, [0, 0, 1, 0, 1, 1, 0, 1], {}, col); }
+// b_portnight: port night tuning against the street lamps after b_lampfix (霓港 lamp pools 0.45 gain, 11.2 m) and the b_portlight
+// yard pools behind the back fence. Measured (22:00, same cameras, nopost): the port was not over-lit — its ground stays darker than
+// the lamp-lit streets — but (a) the back-row mast pools (centre v = 71, 24 m) spilled ~9 m over the yard fence (v ≈ 86) on top of
+// the b_portlight cool pools, and (b) under each working crane four 12 m flood pools + the 16 m work-lane pool stacked into one hot
+// patch (+135 / 255 over the bare ground). New: back-row mast pool radius 24 → 16 m (stops at the fence; truck lane keeps its own
+// 13 m pool), mast inner hot spot 0.5 → 0.35, crane flood pools ×0.7 (a softer patch, still the brightest ground on the quay).
+// Same geometry counts (radius / vertex colour only): no new lights, programs or draw calls. Glows, cones, LEDs unchanged.
+//   PK = [back-row mast pool radius m, front-row mast pool radius m, mast inner gain, crane flood pool gain, work-lane gain];
+//   ?oldport → b_port2 values; ?portk=a,b,c,d,e overrides (build time).
+const PK_OLD = [24, 24, 0.5, 1.0, 0.35], PK_NEW = [16, 24, 0.35, 0.7, 0.35];
+const PK_Q = typeof location !== 'undefined' ? location.search : '';
+export const PK = /[?&]oldport\b/.test(PK_Q) ? PK_OLD : (() => { const m = /[?&]portk=([0-9.,]+)/.exec(PK_Q); if (!m) return PK_NEW; const v = m[1].split(',').map(Number); return PK_NEW.map((d, i) => (isFinite(v[i]) && i < v.length ? v[i] : d)); })();
 function nightLights(W, GL) {
   const S = SHIP;
   // --- yard high masts: four lamp heads each, a long amber cone and a 24 m sodium pool; red top light
   for (let u = -240; u <= 240; u += 80) for (const vv of [41, 79]) { const cb = W.b('cone', u, vv), pl = W.b('pool', u, vv); const H = 34;
-    cone(cb, u, H, vv - 2, H - 0.1, 12, sc([0.9, 0.78, 0.55], 0.6)); pool(pl, u, 0.05, vv - 8, 24, [1.0, 0.78, 0.5]); pool(pl, u, 0.07, vv - 8, 9, sc(WARM, 0.5));
+    cone(cb, u, H, vv - 2, H - 0.1, 12, sc([0.9, 0.78, 0.55], 0.6)); pool(pl, u, 0.05, vv - 8, vv > 60 ? PK[0] : PK[1], [1.0, 0.78, 0.5]); pool(pl, u, 0.07, vv - 8, 9, sc(WARM, PK[2]));
     for (const o of [-2.4, -0.8, 0.8, 2.4]) GL.add(u + o, H + 0.6, vv - 0.45, 0.9, sc(WARM, 1.1));
     GL.add(u, H + 1.8, vv, 0.5, RED, 1); }
   // --- container lanes: cross-aisle pools between yard blocks (cyan spill from the block ID pylons + sodium), the lane between the
@@ -712,8 +724,8 @@ function nightLights(W, GL) {
     for (const rv of RAIL_V) for (const du of [-5, 5]) GL.add(U0 + du, 2.6, rv + (rv < 10 ? -1.0 : 1.0), 0.35, AMBER, 2);
     const lampZ = c.up ? [6, 20, 30] : [-48, -36, -24, -12, 6, 20, 30];
     for (const s of [-4, 4]) for (const z of lampZ) { GL.add(U0 + s, Hb - 2.1, z, 0.55, sc(WARM, 1.2));
-      if (z > -6 && z < 25) { cone(cb, U0 + s, Hb - 2.05, z, Hb - 2.15, 5, [0.95, 0.75, 0.45]); pool(pl, U0 + s, 0.06, z, 12, [1.0, 0.76, 0.46]); } }
-    if (!c.up) { pool(pl, U0, 0.08, 16, 16, sc(WARM, 0.35)); // work lane under the backreach (trucks)
+      if (z > -6 && z < 25) { cone(cb, U0 + s, Hb - 2.05, z, Hb - 2.15, 5, [0.95, 0.75, 0.45]); pool(pl, U0 + s, 0.06, z, 12, sc([1.0, 0.76, 0.46], PK[3])); } }
+    if (!c.up) { pool(pl, U0, 0.08, 16, 16, sc(WARM, PK[4])); // work lane under the backreach (trucks)
       washV(pl, U0, S.deck * 0.5, S.vC + S.B / 2 + 0.06, 13, S.deck * 0.5, sc(WARM, 0.55)); } // flood spill on the hull side below the crane
     // cyan LED strip on the leg faces (reads as a cyber crane from afar)
     for (const du of [-9, 9]) for (const rv of RAIL_V) put(nb, kg().box, U0 + du, 28, rv + (rv < 10 ? -1.04 : 1.04), 0.14, 32, 0.04, sc(CRANE_COL[c.s].led, 0.5)); }
