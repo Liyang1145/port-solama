@@ -23,6 +23,50 @@ function quadUp(bk, P4, uv4, rd4, col) {
   bk.quad(v[o[0]], v[o[1]], v[o[2]], v[o[3]], o.flatMap((i) => uv4[i]), {}, col || null);
   if (rd4) { const k = bk.custom.aRd; k.length -= 16; for (const i of o) k.push(...rd4[i]); }
 }
+// a_stripfix: the mainland ground caps were a few kilometre-long slivers (the coast fanned to the far corners). At eye height
+// the triangle under the camera reaches kilometres sideways; once the near plane cuts it, its screen-space depth plane is
+// built from vertices ~1e6 px off screen and SwiftShader's interpolated depth there was off by more than the 6.6 cm between the
+// ground (y -0.06) and the lots / aprons / drives (y +0.006, polygon offset -1/-4): the grass won and covered the parking lots.
+// The caps are now cut on a lattice (133 m cells over the modelled city, 400 m cells elsewhere, coarse cells that border fine ones
+// carry the fine lattice points on that side so there are no T-junctions) and emitted as plain indexed triangles (polyCap wrote
+// each triangle as a degenerate quad): same buckets / draw calls / material, a little more than double the triangles.
+const GQ = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
+const GC = 400, GSUB = +(GQ.get('gsub') || 3), GF = GC / GSUB, GBOX = [-3600, -3200, -800, 3200]; // fine box (x0, z0, x1, z1), multiples of GC
+export function gridCap(bk, poly, y) {
+  if (GQ.has('nogrid')) { polyCap(bk, poly, y); return; }
+  const n = poly.length; let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const p of poly) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
+  const fineC = (i, j) => i * GC >= GBOX[0] && (i + 1) * GC <= GBOX[2] && j * GC >= GBOX[1] && (j + 1) * GC <= GBOX[3];
+  const eg = new Map(); // poly edges bucketed by coarse cell
+  for (let k = 0; k < n; k++) { const a = poly[k], b = poly[(k + 1) % n]; for (let i = Math.floor(Math.min(a[0], b[0]) / GC); i <= Math.floor(Math.max(a[0], b[0]) / GC); i++) for (let j = Math.floor(Math.min(a[1], b[1]) / GC); j <= Math.floor(Math.max(a[1], b[1]) / GC); j++) { const key = i * 65536 + j; let l = eg.get(key); if (!l) eg.set(key, l = []); l.push(k); } }
+  const touches = (L, cx0, cz0, cx1, cz1) => { if (L) for (const k of L) { const a = poly[k], b = poly[(k + 1) % n]; if (Math.max(a[0], b[0]) >= cx0 - 1e-6 && Math.min(a[0], b[0]) <= cx1 + 1e-6 && Math.max(a[1], b[1]) >= cz0 - 1e-6 && Math.min(a[1], b[1]) <= cz1 + 1e-6) return true; } return false; };
+  const clip = (P, ax, v, keepLess) => { const out = []; for (let k = 0; k < P.length; k++) { const a = P[k], b = P[(k + 1) % P.length]; const ia = keepLess ? a[ax] <= v : a[ax] >= v, ib = keepLess ? b[ax] <= v : b[ax] >= v;
+      if (ia) out.push(a); if (ia !== ib) { const t = (v - a[ax]) / (b[ax] - a[ax]); const q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; q[ax] = v; out.push(q); } } return out; };
+  const emit = (P) => { // polygon (xz) -> indexed triangles, normal up
+    const m = []; for (const p of P) { const l = m[m.length - 1]; if (!l || Math.abs(l[0] - p[0]) > 1e-4 || Math.abs(l[1] - p[1]) > 1e-4) m.push(p); }
+    while (m.length > 1 && Math.abs(m[0][0] - m[m.length - 1][0]) < 1e-4 && Math.abs(m[0][1] - m[m.length - 1][1]) < 1e-4) m.pop(); if (m.length < 3) return;
+    const tris = m.length === 4 ? [[0, 1, 2], [0, 2, 3]] : THREE.ShapeUtils.triangulateShape(m.map((p) => new THREE.Vector2(p[0], p[1])), []); const base = bk.vc;
+    for (const p of m) { bk.p.push(p[0], y, p[1]); bk.n.push(0, 1, 0); bk.uv.push(p[0], p[1]); for (const k in bk.custom) for (let j = 0; j < bk.attrSizes[k]; j++) bk.custom[k].push(0); } bk.vc += m.length;
+    for (const t of tris) { const a = m[t[0]], b = m[t[1]], c = m[t[2]]; const cr = (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]); if (Math.abs(cr) < 1e-6) continue; // y-up normal: (b-a) x (c-a) .y > 0
+      if (cr > 0) bk.idx.push(base + t[0], base + t[1], base + t[2]); else bk.idx.push(base + t[0], base + t[2], base + t[1]); } };
+  // a cell [cx0,cx1]x[cz0,cz1]; sides: extra lattice spacing per side (0 = none) [z=cz0, x=cx1, z=cz1, x=cx0]
+  const cell = (cx0, cz0, cx1, cz1, L, side) => {
+    let P;
+    if (!touches(L, cx0, cz0, cx1, cz1)) { if (!pointInPoly((cx0 + cx1) / 2, (cz0 + cz1) / 2, poly)) return; P = [[cx0, cz0], [cx1, cz0], [cx1, cz1], [cx0, cz1]]; }
+    else { P = clip(clip(clip(clip(poly, 0, cx0, false), 0, cx1, true), 1, cz0, false), 1, cz1, true); if (P.length < 3) return; }
+    if (!side) { emit(P); return; }
+    const on = (p, k) => k === 0 ? Math.abs(p[1] - cz0) < 1e-4 : k === 1 ? Math.abs(p[0] - cx1) < 1e-4 : k === 2 ? Math.abs(p[1] - cz1) < 1e-4 : Math.abs(p[0] - cx0) < 1e-4;
+    const Q = []; for (let k = 0; k < P.length; k++) { const a = P[k], b = P[(k + 1) % P.length]; Q.push(a);
+      for (let sd = 0; sd < 4; sd++) { const s = side[sd]; if (!s || !on(a, sd) || !on(b, sd)) continue; const ax = sd & 1 ? 1 : 0; const lo = Math.min(a[ax], b[ax]), hi = Math.max(a[ax], b[ax]); const pts = [];
+        const o0 = ax ? cz0 : cx0; for (let q = Math.ceil((lo - o0 + 1e-4) / s); o0 + q * s < hi - 1e-4; q++) pts.push(o0 + q * s); if (a[ax] > b[ax]) pts.reverse(); for (const v of pts) { const q = [a[0], a[1]]; q[ax] = v; Q.push(q); } } }
+    emit(Q); };
+  for (let i = Math.floor(x0 / GC); i <= Math.floor(x1 / GC); i++) for (let j = Math.floor(z0 / GC); j <= Math.floor(z1 / GC); j++) {
+    const X0 = i * GC, Z0 = j * GC, X1 = X0 + GC, Z1 = Z0 + GC; const L = eg.get(i * 65536 + j);
+    if (fineC(i, j)) { const sub = !touches(L, X0, Z0, X1, Z1); if (sub && !pointInPoly(X0 + GC / 2, Z0 + GC / 2, poly)) continue;
+      for (let qa = 0; qa < GSUB; qa++) for (let qb = 0; qb < GSUB; qb++) { const a = X0 + qa * GF, b = Z0 + qb * GF, a1 = X0 + (qa + 1) * GF, b1 = Z0 + (qb + 1) * GF;
+        if (sub) emit([[a, b], [a1, b], [a1, b1], [a, b1]]); else cell(a, b, a1, b1, L, null); } continue; }
+    const side = [fineC(i, j - 1) ? GF : 0, fineC(i + 1, j) ? GF : 0, fineC(i, j + 1) ? GF : 0, fineC(i - 1, j) ? GF : 0];
+    cell(X0, Z0, X1, Z1, L, side.some((v) => v) ? side : null); }
+}
 // vertical/sloped quad facing (ox, oz)
 function wallQ(bk, a, b, ya0, ya1, yb0, yb1, ox, oz, col, u0 = 0) {
   const A = V3(a[0], ya0, a[1]), B = V3(b[0], yb0, b[1]), C = V3(b[0], yb1, b[1]), D = V3(a[0], ya1, a[1]);
@@ -108,14 +152,14 @@ export function buildRegion(ctx, H) {
   const inMouth = (za, zb) => ccut.some((q) => zb > q.lo.s[1] - 1 && za < q.hi.s[1] + 1);
   {
     const district = [[-1380, -480], [-1380, 480]]; for (let z = 480; z >= -480; z -= 10) district.push([shoreX(z), z]);
-    polyCap(W.b('mgroundC', -1100, 0), wind(district), -0.06);
+    gridCap(W.b('mgroundC', -1100, 0), wind(district), -0.06);
     // vis-sweep: the ground slab used to stop at x=-2700 / z=±1500 -> a hard rectangular map edge in every aerial. It now runs
     // out to the far fade (env.js / water.js fade everything into the horizon haze at 2.3–4 km), the coast following shoreX.
     const XG = -4600, ZG = 4600;
     const north = [[XG, 480], [XG, ZG], ...shoreRun(ZG, 480)];
     const south = [[XG, -ZG], [XG, -480], ...shoreRun(-480, -ZG)];
-    polyCap(W.b('mgroundG', -1500, 900), wind(north), -0.06); polyCap(W.b('mgroundG', -1500, -900), wind(south), -0.06);
-    polyCap(W.b('mgroundG', -2000, 0), wind([[XG, -480], [XG, 480], [-1380, 480], [-1380, -480]]), -0.06);
+    gridCap(W.b('mgroundG', -1500, 900), wind(north), -0.06); gridCap(W.b('mgroundG', -1500, -900), wind(south), -0.06);
+    gridCap(W.b('mgroundG', -2000, 0), wind([[XG, -480], [XG, 480], [-1380, 480], [-1380, -480]]), -0.06);
     // bay park strip: from the outer sidewalk edge of 湾岸大道 to the seawall, raised 0.15, grass + palms
     const sh = D.byId.shore; const park = [];
     for (let s = 0; s <= sh.path.len; s += 6) { const q = sh.path.at(s); const sideBay = Math.sign(-q.tz) || 1; park.push([q.x - q.tz * sideBay * (sh.hw + SW + 0.01), q.z + q.tx * sideBay * (sh.hw + SW + 0.01)]); }
