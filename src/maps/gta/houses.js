@@ -16,6 +16,10 @@
 //  - colliders (mailbox, AC, bins, fence + gate, porch columns, screen walls) in an own 8 m grid appended to col.query, built per
 //    house on first query near it; every item is checked: inside its lot, off every sidewalk / driveway / apron, clear of every
 //    building / wall / hedge / trunk / pool deck. &nohouses switches the whole layer off, &houseaudit runs the census eagerly.
+// a_housepolish: kit dissolves (ordered dither) over the last 12 m before RAD and the last 7 m before NEAR instead of popping;
+//    牧场平房 split into three sub-styles + per-look wall palettes, picked per house to not repeat the neighbours (mixStreet);
+//    door centred on a painted window cell (frame + sidelights cover it), number plaque above the door / on the canopy beam and
+//    reading left-to-right, lantern on the wall gap, canopy cap and pool-cage top kept under the fascia, mailbox at the walk.
 import * as THREE from 'three';
 import { fabKit } from './fabric.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
@@ -64,11 +68,41 @@ export function prepHouses(fab, lots) {
   for (const LT of lots) { const Hr = LT.house; if (!Hr || Hr.gone) continue;
     const roof = LT.roof && !LT.roof.gone ? LT.roof : null; let look;
     if (!roof) look = 3; else { const c = roof; look = c[7] - c[9] > 0.25 ? 0 : c[7] > 0.78 ? 2 : 1; }
-    Hr.hs = (look + 1) * 0.1; S.looks[look]++;
+    Hr.hs = (look + 1) * 0.1; S.looks[look]++; // sub-style added in mixStreet
     const L = { house: Hr, roof, yard: LT.yard, verge: LT.verge, dock: LT.dock, quad: LT.quad, ftree: LT.ftree, btree: LT.btree, deck: LT.deck && !LT.deck.gone ? LT.deck : null, canal: LT.canal, front: LT.front };
     const sc = srcAt(Hr[0], Hr[2]); if (sc) sc.lots.push(L);
-    const i = K.H.length; K.H.push({ LT: L, look }); K.hg.add(i, Hr[0], Hr[2], Hr[0], Hr[2]); S.houses++; }
-  S.ms = Math.round(performance.now() - T0); return K; }
+    const i = K.H.length; K.H.push({ LT: L, look, sub: 0 }); K.hg.add(i, Hr[0], Hr[2], Hr[0], Hr[2]); S.houses++; }
+  { const t = performance.now(); mixStreet(K); S.mixMs = +(performance.now() - t).toFixed(1); } S.ms = Math.round(performance.now() - T0); return K; }
+// a_housepolish: street mix. The look stays tied to the roof (far roof colours unchanged); 牧场平房 (46 %) splits into three
+// sub-styles (0 storm-shutter ranch, 1 louvered-shutter ranch, 2 stone-wainscot ranch with dark frames) and every house gets a wall
+// colour from its look's palette. Each house picks the (sub, colour) that least repeats its already-placed neighbours (< 26 m),
+// scanning the candidates from a seed-hashed start: deterministic, no random draws, no record any bake hashes is read after this.
+const PAL = [
+  [[0.96, 0.90, 0.78], [0.98, 0.86, 0.72], [0.94, 0.84, 0.66], [0.97, 0.93, 0.84], [0.93, 0.81, 0.69], [0.95, 0.88, 0.80]], // 地中海
+  [[0.90, 0.88, 0.82], [0.86, 0.88, 0.84], [0.94, 0.92, 0.86], [0.84, 0.81, 0.73], [0.80, 0.84, 0.88], [0.90, 0.86, 0.74], [0.82, 0.86, 0.78]], // 牧场
+  [[0.95, 0.95, 0.93], [0.80, 0.88, 0.92], [0.82, 0.90, 0.84], [0.97, 0.92, 0.76], [0.94, 0.85, 0.80]], // 海岸
+  [[0.95, 0.95, 0.94], [0.84, 0.84, 0.83], [0.92, 0.90, 0.86], [0.76, 0.77, 0.78]]]; // 现代
+const NSUB = [1, 3, 1, 1];
+const keyOf = (D) => D.look * 100 + D.sub * 10 + D.col;
+const ND = new Float64Array(64), NJ = new Int32Array(64);
+// neighbours of house i within R m, nearest first, into ND / NJ (shared buffers, no allocation); returns the count
+function nbrs(K, i, R = 26) { const H = K.H[i].LT.house, x = H[0], z = H[2], C = K.hg.C, m = K.hg.m; let n = 0; // points sit in one cell each: no dedupe needed
+  for (let a = Math.floor((x - R) / C); a <= Math.floor((x + R) / C); a++) for (let b = Math.floor((z - R) / C); b <= Math.floor((z + R) / C); b++) { const l = m.get(a * 65536 + b); if (!l) continue;
+    for (let k = 0; k < l.length && n < 64; k++) { const j = l[k]; if (j === i) continue; const G = K.H[j].LT.house; const dx = G[0] - x, dz = G[2] - z, d2 = dx * dx + dz * dz; if (d2 >= R * R) continue;
+      const d = Math.sqrt(d2); let p = n++; while (p > 0 && ND[p - 1] > d) { ND[p] = ND[p - 1]; NJ[p] = NJ[p - 1]; p--; } ND[p] = d; NJ[p] = j; } }
+  return n; }
+// houses whose two nearest neighbours (< 26 m) share their look + sub-style + wall colour (key: function of a house -> key)
+function triples(K, key) { let n = 0; for (let i = 0; i < K.H.length; i++) { if (nbrs(K, i) < 2) continue; const k = key(i); if (key(NJ[0]) === k && key(NJ[1]) === k) n++; } return n; }
+function mixStreet(K) { const S = K.stats; const cq = (c) => Math.round(c[0] * 20) * 441 + Math.round(c[1] * 20) * 21 + Math.round(c[2] * 20);
+  if (AUDIT) S.triplesBefore = { look: triples(K, (i) => K.H[i].look), lookColour: triples(K, (i) => K.H[i].look * 1e6 + cq(K.H[i].LT.house.slice(7, 10))) };
+  const done = new Uint8Array(K.H.length); S.subs = [0, 0, 0];
+  for (let i = 0; i < K.H.length; i++) { const D = K.H[i], H = D.LT.house, P = PAL[D.look], ns = NSUB[D.look]; let nn = 0; const cnt = nbrs(K, i); for (let k = 0; k < cnt; k++) if (done[NJ[k]]) { ND[nn] = ND[k]; NJ[nn] = NJ[k]; nn++; }
+    const nc = ns * P.length, h0 = Math.floor(hh(H[11], 41) * nc); let best = 1e9, bs = 0, bc = 0;
+    for (let k = 0; k < nc; k++) { const c = (h0 + k) % nc, sub = c % ns, col = Math.floor(c / ns) % P.length; let cost = 0;
+      for (let q = 0; q < nn; q++) { const d = ND[q], E = K.H[NJ[q]]; const w = d < 18 ? 1 : 0.5; const same = E.look === D.look && E.sub === sub; if (same) cost += w; if (E.look === D.look && E.col === col) cost += 0.6 * w; if (same && E.col === col) cost += 4 * w; }
+      if (cost < best - 1e-6) { best = cost; bs = sub; bc = col; } }
+    D.sub = bs; D.col = bc; done[i] = 1; const c = P[bc]; H[7] = c[0]; H[8] = c[1]; H[9] = c[2]; H.hs = (D.look + 1) * 0.1 + bs * 0.02; if (D.look === 1) S.subs[bs]++; }
+  if (AUDIT) S.triplesAfter = { lookSub: triples(K, (i) => K.H[i].look * 10 + K.H[i].sub), lookSubColour: triples(K, (i) => keyOf(K.H[i])) }; }
 function indexChunk(K, c) { c.done = true;
   for (const b of c.body) { if (b.gone) continue; const R = recRect(b); R.rec = b; const e = ext(R); K.bodies.add(R, ...e); }
   for (const t of c.tree) { if (t.gone) continue; const r = 0.24 * (0.75 + t[2] * 0.12) + 0.05; const o = { x: t[0], z: t[1], r, canopy: t[2], top: t[3] }; K.trunks.add(o, t[0] - r, t[1] - r, t[0] + r, t[1] + r); }
@@ -112,7 +146,8 @@ const mul = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 const pack = (S, S1, F, F1, FS, cols, why) => ({ S: new Float32Array(S), S1: new Float32Array(S1), F: new Float32Array(F), F1: new Float32Array(F1), FS: new Float32Array(FS), cols, why });
 function buildHouse(K, i) {
   const D = K.H[i]; const LT = D.LT; ensureIdx(K, LT.house[0], LT.house[2]); const H = LT.house, look = D.look; const S = [], F = [], S1 = [], F1 = [], FS = [], cols = [], why = {}; let tS = S, tF = F; const near = (on) => { tS = on ? S1 : S; tF = on ? F1 : F; }; const seed = H[11]; const r = (k) => hh(seed, k); // lod 1 (near(true)): only within NEAR m
-  const C = [H[0], H[2]], w = H[3], h = H[4], d = H[5], ang = H[6]; const [U, V] = axes(ang); const wall = [H[7], H[8], H[9]]; const trim = TRIM[look];
+  const C = [H[0], H[2]], w = H[3], h = H[4], d = H[5], ang = H[6]; const [U, V] = axes(ang); const wall = [H[7], H[8], H[9]]; const sub = D.sub || 0;
+  const trim = look === 1 && sub === 1 ? TRIM[2] : look === 1 && sub === 2 ? [0.20, 0.17, 0.15] : TRIM[look]; // a_housepolish: 牧场 sub 1 white trim, sub 2 dark bronze
   const own = H; const quad = LT.quad; const mine = [];
   const refuse = (k) => { why[k] = (why[k] || 0) + 1; return null; };
   const tryPlace = (R, opt = {}, tag = '') => { const b = blocked(K, R, { own, quad, mine, ...opt }); if (b) return refuse(tag + ':' + b); mine.push(R); return R; };
@@ -131,7 +166,7 @@ function buildHouse(K, i) {
 
   // ---- roof edge: fascia + gutters + downspouts (hip) / parapet + coping + scupper (flat)
   const R0 = LT.roof;
-  if (R0) { const rw = R0[3], rd = R0[5], ra = R0[6], y = R0[1]; const [ru, rv] = axes(ra); const gc = look === 1 ? [0.36, 0.30, 0.24] : [0.95, 0.95, 0.93];
+  if (R0) { const rw = R0[3], rd = R0[5], ra = R0[6], y = R0[1]; const [ru, rv] = axes(ra); const gc = look === 1 && sub !== 1 ? (sub === 2 ? [0.20, 0.17, 0.15] : [0.36, 0.30, 0.24]) : [0.95, 0.95, 0.93];
     for (const sg of [-1, 1]) { box(tF, R0[0] + rv[0] * sg * (rd / 2 - 0.02), y - 0.2, R0[2] + rv[1] * sg * (rd / 2 - 0.02), rw, 0.22, 0.05, ra, trim, 7, seed);
       box(tF, R0[0] + ru[0] * sg * (rw / 2 - 0.02), y - 0.2, R0[2] + ru[1] * sg * (rw / 2 - 0.02), 0.05, 0.22, rd - 0.02, ra, trim, 7, seed);
       box(tF, R0[0] + rv[0] * sg * (rd / 2 + 0.07), y - 0.2, R0[2] + rv[1] * sg * (rd / 2 + 0.07), rw + 0.1, 0.13, 0.13, ra, gc, 7, seed); }
@@ -152,27 +187,38 @@ function buildHouse(K, i) {
   let tg = null, gw = 0;
   if (E) { const et = (E[0] - C[0]) * T[0] + (E[1] - C[1]) * T[1], eo = (E[0] - C[0]) * N[0] + (E[1] - C[1]) * N[1] - Df;
     gw = r(5) < 0.3 ? 2.9 : 2.6; if (Math.abs(eo) < 1.2 && Math.abs(et) <= Lf - 0.4) { tg = Math.max(-Lf + gw / 2 + 0.25, Math.min(Lf - gw / 2 - 0.25, et)); } else refuse('garage'); }
-  if (tg !== null) { const gh = h > 5 ? 2.3 : 2.15; const gc = GDOOR[look === 0 ? (r(6) < 0.5 ? 0 : 2) : look === 3 ? 3 : r(6) < 0.7 ? 0 : 1];
+  if (tg !== null) { const gh = h > 5 ? 2.3 : 2.15; const gc = GDOOR[look === 0 ? (r(6) < 0.5 ? 0 : 2) : look === 3 ? 3 : look === 1 && sub === 2 ? (r(6) < 0.5 ? 2 : 3) : r(6) < 0.7 ? 0 : 1];
     bx(tF, tg, 0.025, 0.02, gw + 0.26, gh + 0.14, 0.05, trim, 7); bx(tF, tg, 0.06, 0.03, gw, gh, 0.06, gc, 9); near(true); bx(tF, tg, 0.1, 0.42, 0.32, 0.05, 0.05, [0.3, 0.3, 0.31], 7); near(false);
     bx(tF, tg, 0.03, gh + 0.32, gw + 0.6, 0.18, 0.08, trim, 7); } // header band
   // ---- front door, frame, plaque, lantern; porch slab + step; columns + canopy (地中海 / 海岸 / some 牧场)
   const sgd = tg === null ? (r(7) < 0.5 ? -1 : 1) : -Math.sign(tg || 1); const dw = look === 0 && r(8) < 0.45 ? 1.65 : 0.95; const pw = dw + 1.5;
   let td = tg === null ? sgd * Math.min(Lf * 0.3, Math.max(0, Lf - pw / 2 - 0.3)) : tg + sgd * (gw / 2 + 0.9 + pw / 2);
   if (Math.abs(td) > Lf - pw / 2 - 0.15) td = sgd * (Lf - pw / 2 - 0.15); if (tg !== null && Math.abs(td - tg) < gw / 2 + pw / 2 + 0.3) td = null;
+  // a_housepolish: slide the door onto the centre of a painted window cell (fabBody: cells 3.4 m along fu = xz . (-n.z, n.x) + seed * 37,
+  // glass 0.952..2.448 m of the cell, frame to ~0.83 m either side of the centre): the 1.86-1.97 m door assembly covers that window
+  // (shutters, if any, then flank the door) instead of the frame / lantern cutting half a window; keep the old spot if it does not fit
+  if (td !== null) { const ft = [-N[1], N[0]], tf = T[0] * ft[0] + T[1] * ft[1]; const fu = (t) => (C[0] + T[0] * t + N[0] * Df) * ft[0] + (C[1] + T[1] * t + N[1] * Df) * ft[1] + Math.fround(seed) * 37;
+    const f0 = fu(td), base = td + (3.4 * Math.round((f0 - 1.7) / 3.4) + 1.7 - f0) / tf; let best = null;
+    for (const k of [0, 1, -1]) { const t2 = base + k * 3.4 / tf; if (Math.abs(t2) > Lf - pw / 2 - 0.15) continue; if (tg !== null && (Math.abs(t2 - tg) < gw / 2 + pw / 2 + 0.3 || Math.sign(t2 - tg) !== sgd)) continue; if (blocked(K, rect(t2, 0.75, pw, 1.5), { own, quad, mine, pave: false })) continue; if (best === null || Math.abs(t2 - td) < Math.abs(best - td)) best = t2; }
+    if (best !== null) td = best; else refuse('doorsnap'); }
   if (td === null) refuse('door');
   if (td !== null) { const dc = DOORS[Math.floor(r(9) * DOORS.length)];
-    bx(tF, td, 0.03, 0.18, dw + 0.32, 2.38, 0.06, trim, 7); bx(tF, td, 0.06, 0.2, dw, 2.15, 0.08, dc, 13);
-    near(true); bx(tF, td + sgd * -1 * (dw / 2 + 0.42), 0.05, 1.62, 0.44, 0.16, 0.04, look === 3 ? [0.9, 0.9, 0.88] : [0.08, 0.08, 0.09], 11);
-    bx(tF, td + sgd * (dw / 2 + 0.36), 0.12, 1.78, 0.18, 0.34, 0.16, [0.12, 0.11, 0.10], 7); near(false);
+    const fw = dw < 1.2 ? 1.86 : dw + 0.32; bx(tF, td, 0.03, 0.18, fw, 2.38, 0.06, trim, 7); bx(tF, td, 0.06, 0.2, dw, 2.15, 0.08, dc, 13);
+    if (dw < 1.2) { near(true); for (const sg of [-1, 1]) bx(tF, td + sg * (dw / 2 + 0.235), 0.05, 0.3, 0.37, 1.95, 0.07, [0.10, 0.12, 0.14], 7); near(false); } // sidelights
+    const plC = look === 3 ? [0.9, 0.9, 0.88] : [0.08, 0.08, 0.09]; let plaque = false; // placed above the door unless a canopy takes it
+    { const tl = Math.abs(td + sgd * 1.62) < Lf - 0.15 ? td + sgd * 1.62 : Math.abs(td - sgd * 1.62) < Lf - 0.15 && (tg === null || Math.abs(td - sgd * 1.62 - tg) > gw / 2 + 0.3) ? td - sgd * 1.62 : null; // lantern on the wall gap past the cell
+      if (tl !== null) { near(true); bx(tF, tl, 0.12, 1.78, 0.18, 0.34, 0.16, [0.12, 0.11, 0.10], 7); near(false); } }
     let pd = look === 2 ? 2.0 : look === 0 ? 1.7 : 1.4; let Rp = null;
     for (const dd of [pd, 1.1]) { const R = rect(td, dd / 2 + 0.2, pw, dd + 0.4); if (!blocked(K, R, { own, quad, mine, pave: false })) { Rp = R; pd = dd; break; } }
-    if (!Rp) refuse('porch'); else { mine.push(Rp);
+    if (!Rp) { refuse('porch'); near(true); bx(tF, td, 0.05, 2.62, 0.44, 0.16, 0.04, plC, 11); near(false); } else { mine.push(Rp);
       bx(tF, td, pd / 2, 0, pw, 0.17, pd, [0.80, 0.78, 0.74], 7); bx(tF, td, pd + 0.18, 0, pw - 0.3, 0.09, 0.38, [0.78, 0.76, 0.72], 7);
-      const cols3 = look === 0 || look === 2 || (look === 1 && r(10) < 0.4);
-      if (cols3 && pd > 1.3) { const cy = Math.min(2.75, h - (R0 ? 0.5 : 0.35)); const cc = look === 2 ? [0.96, 0.96, 0.94] : look === 0 ? mul(wall, 1.02) : trim; const cw = look === 0 ? 0.32 : 0.2;
+      const cols3 = look === 0 || look === 2 || (look === 1 && (sub === 1 ? r(10) < 0.85 : sub === 0 ? r(10) < 0.3 : false));
+      if (cols3 && pd > 1.3) { plaque = true; const cy = Math.min(2.75, R0 ? R0[1] - 0.66 : h - 0.35); /* a_housepolish: cap top <= fascia bottom - 0.02 (was h - 0.5: the cap ran through fascia + gutter) */ const cc = look === 2 ? [0.96, 0.96, 0.94] : look === 0 ? mul(wall, 1.02) : trim; const cw = look === 0 ? 0.32 : 0.2;
         for (const sg of [-1, 1]) { const t = td + sg * (pw / 2 - 0.2); bx(tS, t, pd - 0.2, 0.17, cw, cy - 0.17, cw, cc, 7); col(rect(t, pd - 0.2, cw, cw), cy, 'column'); }
         bx(tS, td, (pd + 0.15) / 2, cy, pw + 0.3, 0.2, pd + 0.15, look === 0 ? mul(wall, 0.97) : trim, 7);
-        if (R0 && look !== 3) bx(tS, td, (pd + 0.15) / 2, cy + 0.2, pw + 0.4, 0.22, pd + 0.3, [R0[7] * 0.95, R0[8] * 0.95, R0[9] * 0.95], 7); }
+        if (R0 && look !== 3) bx(tS, td, (pd + 0.15) / 2, cy + 0.2, pw + 0.4, 0.22, pd + 0.3, [R0[7] * 0.95, R0[8] * 0.95, R0[9] * 0.95], 7);
+        near(true); bx(tF, td, pd + 0.17, cy + 0.02, 0.44, 0.16, 0.04, plC, 11); near(false); }
+      if (!plaque) { near(true); bx(tF, td, 0.05, 2.62, 0.44, 0.16, 0.04, plC, 11); near(false); plaque = true; }
       // front walk: from the step to the driveway edge (L-free: straight along the face)
       if (tg !== null && Y) { const tEdge = tg + sgd * (Y[2] / 2 - 0.05); const tFrom = td - sgd * 0.0; const L = Math.abs(tFrom - tEdge); const o = pd + 0.37 + 0.55;
         if (L > 0.6) { const Rw = rect((tFrom + tEdge) / 2, o, L, 0.9); if (!blocked(K, Rw, { own, quad, mine: [], pave: true, deck: false })) { near(true); bx(tF, (tFrom + tEdge) / 2, o, 0, L, 0.035, 0.9, [0.82, 0.80, 0.76], 7); near(false); } else refuse('walkpath'); } } } }
@@ -198,11 +244,16 @@ function buildHouse(K, i) {
     if (!placed && R0) { // back wall
       const t = (r(12) - 0.5) * Lf; const R = rect(t, -2 * Df - 0.6, 1.0, 1.0); if (tryPlace(R, {}, 'ac')) { near(true); bx(tF, t, -2 * Df - 0.6, 0, 1.1, 0.08, 1.1, [0.72, 0.71, 0.68], 7); near(false); bx(tS, t, -2 * Df - 0.6, 0.08, 0.86, 0.78, 0.86, [0.80, 0.80, 0.78], 10); col(R, 0.86, 'ac'); placed = true; } }
     if (!placed && R0) refuse('ac'); }
-  // ---- mailbox at the street end of the driveway, on the lawn (0.55 m inside the sidewalk's inner edge)
+  // ---- mailbox beside the street end of the driveway, on the lawn 0.45 m behind the sidewalk's inner edge (a_housepolish)
   if (Y) { const [yu] = axes(Y[4]); const Ns = [Y[0] - nIn[0] * Y[3] / 2, Y[1] - nIn[1] * Y[3] / 2]; let done = false;
     const along = (yu[0] * T[0] + yu[1] * T[1]) >= 0 ? 1 : -1;
-    for (const sg of [sideG, -sideG]) { const s = sg * along; const x = Ns[0] + nIn[0] * 0.6 + yu[0] * s * (Y[2] / 2 + 0.55), z = Ns[1] + nIn[1] * 0.6 + yu[1] * s * (Y[2] / 2 + 0.55);
-      const pil = look === 0 && r(13) < 0.6; const R = { x, z, a: fa, hl: pil ? 0.25 : 0.16, hw: pil ? 0.25 : 0.28 }; if (!inPoly(quad, x - nIn[0] * 0.6, z - nIn[1] * 0.6) && !inPoly(quad, x, z)) { refuse('mail:lot'); continue; } if (!tryPlace(R, { quad: null }, 'mail')) continue; // the frame-built lot outline can sit up to ~1 m behind the re-laid sidewalk: the strip in between is this lot's lawn
+    for (const sg of [sideG, -sideG]) { const s = sg * along; const bx0 = Ns[0] + yu[0] * s * (Y[2] / 2 + 0.55), bz0 = Ns[1] + yu[1] * s * (Y[2] / 2 + 0.55);
+      // a_housepolish: stand it 0.45 m behind the re-laid sidewalk's actual inner edge (probe from 1.5 m inside the yard end out to
+      // 2.5 m beyond it), so it sits at the walk on the lawn strip instead of up to ~1.6 m back; no walk found -> the old 0.6 m spot
+      let eo = null; for (let o = 1.5; o >= -2.5; o -= 0.1) if (walkHit(K, bx0 + nIn[0] * o, bz0 + nIn[1] * o)) { eo = o + 0.05; break; }
+      const mo = eo === null ? 0.6 : eo + 0.45; K.stats.mailEdge = K.stats.mailEdge || [0, 0]; K.stats.mailEdge[eo === null ? 1 : 0]++;
+      const x = bx0 + nIn[0] * mo, z = bz0 + nIn[1] * mo;
+      const pil = look === 0 && r(13) < 0.6; const R = { x, z, a: fa, hl: pil ? 0.25 : 0.16, hw: pil ? 0.25 : 0.28 }; if (!inPoly(quad, x, z) && !inPoly(quad, x + nIn[0] * 1.6, z + nIn[1] * 1.6)) { refuse('mail:lot'); continue; } if (!tryPlace(R, { quad: null }, 'mail')) continue; // the frame-built lot outline can sit up to ~1 m behind the re-laid sidewalk: the strip in between is this lot's lawn
       if (pil) { box(tS, x, 0, z, 0.46, 1.25, 0.46, fa, mul(wall, 0.98), 7, seed); box(tS, x, 1.25, z, 0.54, 0.08, 0.54, fa, trim, 7, seed); box(tS, x - nIn[0] * 0.2, 0.85, z - nIn[1] * 0.2, 0.3, 0.06, 0.08, fa, [0.12, 0.12, 0.12], 7, seed); }
       else { const mc = MAILC[Math.floor(r(14) * 3)]; box(tS, x, 0, z, 0.09, 1.02, 0.09, fa, look === 2 ? [0.95, 0.95, 0.93] : [0.14, 0.14, 0.15], 7, seed); box(tS, x, 1.0, z, 0.24, 0.26, 0.52, fa, mc, 7, seed); near(true); box(tS, x + T[0] * 0.13, 1.12, z + T[1] * 0.13, 0.02, 0.16, 0.05, fa, [0.75, 0.12, 0.1], 7, seed); near(false); }
       col(R, 1.25, 'mailbox'); done = true; break; }
@@ -210,7 +261,7 @@ function buildHouse(K, i) {
   // ---- pool screen enclosure (some pools): flat-top aluminium frame, dithered screens (no shadow)
   if (LT.deck && r(15) < (LT.canal ? 0.55 : 0.42)) { const Dk = LT.deck; const da = Dk[4]; const [du, dv] = axes(da); const hl = Dk[2] / 2 - 0.05, hw = Dk[3] / 2 - 0.05; const Rc = { x: Dk[0], z: Dk[1], a: da, hl, hw };
     const houseGap = (() => { let g = 1e9; for (const [x, z] of corners(Rc)) { const rx = x - C[0], rz = z - C[1]; const la = Math.abs(rx * U[0] + rz * U[1]) - w / 2, lw = Math.abs(rx * V[0] + rz * V[1]) - d / 2; g = Math.min(g, Math.max(la, lw)); } return g; })();
-    let ht = 3.2; if (houseGap < 0.7 && R0) ht = Math.min(ht, h - 0.15); let ok = ht >= 2.6;
+    let ht = 3.2; if (houseGap < 0.7 && R0) ht = Math.min(ht, R0[1] - 0.25); else if (houseGap < 0.7) ht = Math.min(ht, h - 0.15); let ok = ht >= 2.6; // a_housepolish: top beam under the fascia
     if (ok) { const e = ext(Rc, 0.6); if (K.bodies.near(...e, (B) => B.rec !== own && obbOverlap(Rc, B, 0.05))) { ok = false; refuse('cage:body'); }
       else if (K.trunks.near(...ext(Rc, 6), (t) => circRect(t.x, t.z, t.palm ? t.r + 0.4 : (t.top - 0.27 * t.canopy < ht + 0.3 ? t.canopy + 0.3 : t.r + 0.3), Rc))) { ok = false; refuse('cage:tree'); }
       else if (rectOnWalk(K, Rc)) { ok = false; refuse('cage:walk'); } else for (const [x, z] of corners(Rc, 0.0)) if (!inPoly(quad, x, z)) { ok = false; refuse('cage:lot'); break; } }
@@ -268,19 +319,29 @@ export function attachHouses(K, scene) { if (!K) return null; const { box: G, bo
   m.onBeforeShadow = function () { keep = this.count; this.count = scene.overrideMaterial ? 0 : this.userData.n[0]; this.userData.warm |= 1; }; m.onAfterShadow = function () { this.count = keep; }; // the shadow maps redrawn inside GTAO's normal pass are thrown away: skip
   m.onBeforeRender = function (r, sc, cam, geo, mat) { keep = this.count; if (mat !== MAT) this.count = this.userData.n[0] + this.userData.n[1]; this.userData.warm |= mat === MAT ? 2 : 4; }; m.onAfterRender = function () { this.count = keep; };
   K.mesh = m; K.last = null; K.info = { houses: 0, boxes: 0, tris: 0 }; K.stats.attachMs = Math.round(performance.now() - T0); return K; }
-const CAP = 1000, NEAR = 42;
+const CAP = 1000, NEAR = 42, FADE = 12, FADE1 = 7; // a_housepolish: dissolve bands [RAD - FADE, RAD] and [NEAR - FADE1, NEAR] (house distance)
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// writes each kit box's dissolve into the fraction of aK.x (kind - 0.45 * fade; fabBody discards by an ordered dither); aK only
+function fadeHouses(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attributes.aK.array, sg = K.segs; let lo = 1e9, hi = -1; K.lastF = [p.x, p.z]; let nf = 0;
+  for (let k = 0; k < sg.length; k += 5) { const dd = Math.hypot(sg[k + 2] - p.x, sg[k + 3] - p.z); const f = Math.max(sstep(RAD - FADE, RAD, dd), sg[k + 4] ? sstep(NEAR - FADE1, NEAR, dd) : 0); if (f > 0) nf += sg[k + 1];
+    for (let j = sg[k], e = sg[k] + sg[k + 1]; j < e; j++) { const v = Math.round(A[j * 2]) - 0.45 * f; if (fresh || v !== A[j * 2]) { A[j * 2] = v; if (j < lo) lo = j; if (j > hi) hi = j; } } }
+  K.fading = nf; if (hi >= lo && !fresh) { const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(lo * 2, (hi - lo + 1) * 2); ga.needsUpdate = true; } }
 export function updateHouses(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh;
   if ((m.userData.warm & 3) !== 3) return; // until the warm-up instance has been drawn in the shadow and main passes
   if (p.y > 140) { if (m.visible) { m.visible = false; K.last = null; } return; }
-  if (K.last && Math.hypot(p.x - K.last[0], p.z - K.last[1]) < 2.5) return; K.last = [p.x, p.z]; const T0 = performance.now();
+  const mv = K.last ? Math.hypot(p.x - K.last[0], p.z - K.last[1]) : 1e9;
+  if (mv < 2.5) { if (K.segs && Math.hypot(p.x - K.lastF[0], p.z - K.lastF[1]) >= 0.3) fadeHouses(K, p); return; } K.last = [p.x, p.z]; const T0 = performance.now();
   const near = []; const R = RAD; K.hg.near(p.x - R, p.z - R, p.x + R, p.z + R, (i) => { const H = K.H[i].LT.house; const dd = Math.hypot(H[0] - p.x, H[2] - p.z); if (dd < R) near.push([dd, i]); return false; });
-  near.sort((a, b) => a[0] - b[0]); const list = near.map(([dd, i]) => { const b = getBuilt(K, i); if (!b._filed && K.col) { fileCols(K, b.cols); b._filed = true; } return [dd, b]; });
+  near.sort((a, b) => a[0] - b[0]); const list = near.map(([dd, i]) => { const b = getBuilt(K, i); if (!b._filed && K.col) { fileCols(K, b.cols); b._filed = true; } const H = K.H[i].LT.house; b.hx = H[0]; b.hz = H[2]; return [dd, b]; });
+  const segs = []; const seg = (n0, b, tier) => { if (n > n0) segs.push(n0, n - n0, b.hx, b.hz, tier); };
   const M = m.instanceMatrix.array, Cc = m.instanceColor.array, A = m.geometry.attributes.aK.array; let n = 0; const cnt = [0, 0, 0];
   const put = (a) => { const k = a.length / NF; if (n + k > CAP) return false; for (let j = 0; j < k; j++, n++) { const o = j * NF; M.set(a.subarray(o, o + 16), n * 16); Cc[n * 3] = a[o + 16]; Cc[n * 3 + 1] = a[o + 17]; Cc[n * 3 + 2] = a[o + 18]; A[n * 2] = a[o + 19]; A[n * 2 + 1] = a[o + 20]; } return true; };
   // budget split so the far houses keep their big pieces: casters first (nearest first), then fine pieces, then screens
-  const n0 = n; for (const [dd, b] of list) { if (!put(b.S)) break; if (dd < NEAR) put(b.S1); } cnt[0] = n - n0;
-  const n1 = n; for (const [dd, b] of list) { if (!put(b.F)) break; if (dd < NEAR) put(b.F1); } cnt[1] = n - n1;
-  const n2 = n; for (const [, b] of list) if (!put(b.FS)) break; cnt[2] = n - n2;
+  // segments [start, count, house x, house z, tier] -> fadeHouses dissolves each one by its house's distance (no hard pop at RAD / NEAR)
+  const n0 = n; for (const [dd, b] of list) { let q = n; if (!put(b.S)) break; seg(q, b, 0); if (dd < NEAR) { q = n; put(b.S1); seg(q, b, 1); } } cnt[0] = n - n0;
+  const n1 = n; for (const [dd, b] of list) { let q = n; if (!put(b.F)) break; seg(q, b, 0); if (dd < NEAR) { q = n; put(b.F1); seg(q, b, 1); } } cnt[1] = n - n1;
+  const n2 = n; for (const [, b] of list) { const q = n; if (!put(b.FS)) break; seg(q, b, 0); } cnt[2] = n - n2;
+  K.segs = segs; fadeHouses(K, p, true);
   m.count = n; m.userData.n = cnt; m.instanceMatrix.clearUpdateRanges(); m.instanceMatrix.addUpdateRange(0, n * 16); m.instanceMatrix.needsUpdate = true;
   m.instanceColor.clearUpdateRanges(); m.instanceColor.addUpdateRange(0, n * 3); m.instanceColor.needsUpdate = true; const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(0, n * 2); ga.needsUpdate = true; m.visible = n > 0;
   K.info = { houses: near.length, boxes: n, casters: cnt[0], fine: cnt[1], screens: cnt[2], tris: n * 12, built: K.built.size, ms: +(performance.now() - T0).toFixed(2) };
