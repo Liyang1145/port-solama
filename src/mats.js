@@ -527,7 +527,7 @@ float u = vRd.x, v = vRd.y, L = vRd.z, kind = floor(vRd.w + 0.5);
 float au = abs(u);
 vec3 paintW = vec3(0.86, 0.86, 0.82), paintY = vec3(0.86, 0.66, 0.16);
 float wpaint = 0.0, ypaint = 0.0, bikeM = 0.0, bikeG = 0.0;
-float wear = vnoise(vRW.xz * 0.35) * 0.6 + vnoise(vRW.xz * 2.3) * 0.4;
+${CYBER ? '' : 'float sgTrW = 0.0; // a_signage: transverse markings (zebra / stop line / arrows) take tyre wear\n'}float wear = vnoise(vRW.xz * 0.35) * 0.6 + vnoise(vRW.xz * 2.3) * 0.4;
 if (kind == 0.0 || kind == 3.0) {
   float hw = kind == 3.0 ? 10.5 : 7.0;
   ypaint = max(bandM(u, 0.18, 0.12), bandM(u, -0.18, 0.12));
@@ -539,14 +539,14 @@ if (kind == 0.0 || kind == 3.0) {
   float zebra = step(0.5, fract(u / 1.1)) * step(1.0, e) * step(e, 4.2) * step(au, hw - 0.5);
   float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
   wpaint = max(wpaint, max(zebra, stopl));
-  if (e < 5.4) ypaint *= step(5.4, e);
+${CYBER ? '' : '  sgTrW = max(zebra, stopl);\n'}  if (e < 5.4) ypaint *= step(5.4, e);
   // v3.4 lane arrows before the stop line (GTA6_REFERENCE §6 road markings)
   float laneC = au < 3.5 ? 1.75 : 5.25; float ue = abs(au - laneC);
   float inb = step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, 6.6);
   float shaft = step(ue, 0.11) * step(9.0, e) * step(e, 11.6);
   float head = step(11.6, e) * step(e, 13.0) * step(ue, 0.42 * (13.0 - e) / 1.4);
   wpaint = max(wpaint, (shaft + head) * inb * step(30.0, L));
-  // green bike lanes on island/bayfront streets (not the beachfront drive with its parking lane)
+${CYBER ? '' : '  sgTrW = max(sgTrW, (shaft + head) * inb * step(30.0, L));\n'}  // green bike lanes on island/bayfront streets (not the beachfront drive with its parking lane)
   bikeM = (kind == 0.0 && vRW.x > -620.0 && (vRW.x < 268.0 || vRW.x > 312.0)) ? 1.0 : 0.0;
   float bikeBand = bandM(au, 6.15, 0.95) * bikeM * step(5.4, e);
   float bikeDash = step(e, 22.0) * step(fract(v / 3.0), 0.5);
@@ -557,7 +557,12 @@ if (kind == 0.0 || kind == 3.0) {
   wpaint = bandM(au, 3.9, 0.14);
 }
 float paintMask = clamp(wpaint + ypaint, 0.0, 1.0) * (0.55 + 0.45 * smoothstep(0.25, 0.75, wear));
-vec3 asph = texelColor.rgb * diffuse;
+${CYBER ? '' : `// a_signage (map A): wheel paths 0.85 m either side of each lane centre polish the zebra bars / stop line / arrows down to
+// the asphalt in patches; fine chipping everywhere else on them
+float sgWheel = smoothstep(0.5, 0.12, abs(abs(fract(au / 3.5) * 3.5 - 1.75) - 0.85));
+float sgChip = smoothstep(0.3, 0.8, vnoise(vRW.xz * 6.5)) * 0.7 + smoothstep(0.55, 0.9, vnoise(vRW.xz * 21.0)) * 0.3;
+paintMask *= 1.0 - sgTrW * clamp(sgWheel * (0.3 + 0.55 * sgChip) + (1.0 - sgWheel) * 0.28 * sgChip, 0.0, 0.85);
+`}vec3 asph = texelColor.rgb * diffuse;
 // tyre tracks: darker, smoother bands in each lane centre
 float lanePos = abs(fract((au) / 3.5) - 0.5);
 float tracks = (kind == 1.0) ? 0.0 : smoothstep(0.32, 0.18, abs(lanePos - 0.25)) * 0.2;
