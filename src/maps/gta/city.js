@@ -8,6 +8,7 @@ import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
 import { planFabric, attachFabric, updateFabric, inCanal, inCanalWater } from './fabric.js';
 import { fixFabricProps } from './propfix.js';
+import { fixFabricCars } from './parkfix.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -170,7 +171,7 @@ export function buildCity(scene, mats, T) {
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); region.propFix = fixFabricProps(fab, groundH); region.fabStats = attachFabric(fab, scene, M); }; // a_canaledge: fabric props off the water before their instances are made
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.fabStats = attachFabric(fab, scene, M); }; // a_canaledge: fabric props off the water before their instances are made
     region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
