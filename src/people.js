@@ -37,7 +37,33 @@ import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
 const PROTOS = {};
 
+// b_corenpc: one shader program for every character material (shared people.js, both maps). The cast GLBs mix materials with /
+// without base colour, normal and metal-rough maps, opaque / alpha-blend / alpha-mask, single / double sided, plus the per-character
+// tint patch (key 'tint') vs plain ('ch'): each combination was its own program (~25 extra programs around a crowd, each a full
+// lit + skinned shader to compile). Now every character material is normalised to the same program parameters with identical pixels:
+// - missing maps -> shared 1x1 placeholders (white base colour / white metal-rough: x1; flat normal map with normalScale 0: the
+//   geometry normal exactly);
+// - opaque materials keep blending off (NoBlending: same GL state as opaque) and force alpha = 1 by uniform (OPAQUE define);
+// - every material has alphaTest > 0 (opaque / blend 0.001, a dead threshold in the main pass; masks keep 0.5);
+// - every material is DoubleSide in the program; originally single-sided ones keep back-face culling through a WebGLState
+//   setMaterial wrap (userData.npcCull), and blended ones render in one pass (forceSinglePass);
+// - the clothing / hair / skin-tone tint is always in the shader, off by uniform (uTint 0) on untinted materials.
+// What still splits: face meshes with morph targets vs without (LOD1/2 + clothes), and shadow depth (back / double side).
+// ?oldnpcmat restores the old per-combination materials.
+export const OLDNPC = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldnpcmat');
+const TINT_GLSL = `
+uniform float uHue, uVal, uSat, uSkin, uTint, uOpq;
+vec3 rgb2hsv(vec3 c){ vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g)); vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10; return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x); }
+vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www); return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y); }`;
+const TINT_APPLY = `{ vec3 hsv = rgb2hsv(diffuseColor.rgb);
+  float skin = uSkin * smoothstep(0.13, 0.08, hsv.x) * smoothstep(0.12, 0.25, hsv.y) * smoothstep(0.7, 0.5, hsv.y) * smoothstep(0.15, 0.3, hsv.z);
+  vec3 t = hsv2rgb(vec3(fract(hsv.x + uHue), clamp(hsv.y * uSat, 0.0, 1.0), clamp(hsv.z * uVal, 0.0, 1.0)));
+  diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`;
+
 function hueMat(src, key) {
+  if (!OLDNPC && src.userData.nu) { // b_corenpc: same program, tint switched on by uniform
+    const m = src.clone(); const u = m.userData.nu; u.uTint.value = 1; u.uSkin.value = /Outfit/.test(src.name) ? 0 : 1; m.userData.tint = u; return m; // clone() keeps the shared hooks (npcClone)
+  }
   // clothing / hair / skin-tone tint: rotates hue / scales saturation + value (per-character uniforms)
   const m = src.clone();
   m.userData.tint = { uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: /Outfit/.test(src.name) ? 0 : 1 } };
@@ -54,6 +80,41 @@ vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fr
   diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`);
   });
 }
+
+let PH = null; // shared 1x1 placeholders
+const px1 = (r, g, b, srgb) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true; return t; };
+function npcCullWrap(renderer) { // originally single-sided character materials: back-face culling restored after three's setMaterial
+  const st = renderer.state; if (st.__npcCull) return; st.__npcCull = true; const gl = renderer.getContext(); const orig = st.setMaterial;
+  st.setMaterial = function (material, frontFaceCW, ...rest) { orig.call(this, material, frontFaceCW, ...rest); if (material.userData.npcCull === 1) { st.enable(gl.CULL_FACE); st.setFlipSided(!!frontFaceCW); } };
+}
+export const npcMatStats = { mats: 0, ph: 0, cull: 0, blend: 0 };
+function npcMat(m) {
+  if (!m.isMeshStandardMaterial) { prep(m, 'ch'); return; }
+  if (m.userData.nu) return; // shared by several sub-meshes: already normalised
+  if (!PH) PH = { white: px1(255, 255, 255, true), lin: px1(255, 255, 255, false), flat: px1(128, 128, 255, false) };
+  npcMatStats.mats++;
+  if (!m.map) { m.map = PH.white; npcMatStats.ph++; }
+  if (!m.normalMap) { m.normalMap = PH.flat; m.normalScale.set(0, 0); npcMatStats.ph++; }
+  if (!m.roughnessMap) { m.roughnessMap = PH.lin; npcMatStats.ph++; }
+  if (!m.metalnessMap) { m.metalnessMap = PH.lin; npcMatStats.ph++; }
+  const opq = !m.transparent; if (opq) m.blending = THREE.NoBlending; else { m.forceSinglePass = true; npcMatStats.blend++; }
+  if (!(m.alphaTest > 0)) m.alphaTest = 0.001;
+  if (m.side !== THREE.DoubleSide) { m.shadowSide = m.side === THREE.BackSide ? THREE.FrontSide : THREE.BackSide; m.side = THREE.DoubleSide; m.userData.npcCull = 1; npcMatStats.cull++; }
+  m.userData.nu = { uTint: { value: 0 }, uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: 0 }, uOpq: { value: opq ? 1 : 0 } };
+  prep(m, 'npc'); const base = m.onBeforeCompile;
+  m.onBeforeCompile = function (s, r) {
+    base.call(this, s, r); npcCullWrap(r); Object.assign(s.uniforms, this.userData.nu);
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>' + TINT_GLSL)
+      .replace('#include <map_fragment>', '#include <map_fragment>\nif (uTint > 0.5) ' + TINT_APPLY)
+      .replace('#include <alphatest_fragment>', '#ifdef USE_ALPHATEST\nif ( alphaTest > 0.0015 && diffuseColor.a < alphaTest ) discard;\n#endif')
+      .replace('#include <opaque_fragment>', 'if (uOpq > 0.5) diffuseColor.a = 1.0;\n#include <opaque_fragment>');
+  };
+  m.customProgramCacheKey = NPC_KEY; m.clone = npcClone;
+}
+// Material.clone() does not carry onBeforeCompile / customProgramCacheKey: a plain clone (the tint, world.js tintPlayer) would fall
+// back to a stock program. The hook reads its uniforms from this.userData.nu (deep-copied by clone), so sharing the function is safe.
+const NPC_KEY = () => 'npc';
+function npcClone() { const c = THREE.MeshStandardMaterial.prototype.clone.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = NPC_KEY; c.clone = npcClone; return c; }
 
 // Cast: MakeHuman-based realistic people (CC0 bodies, CMU mocap clips) exported with ara3d at medium detail; each GLB carries
 // its own retargeted clip set (r6.2: 20 clips — locomotion in 4 directions, idle variations, swim, jump, hit, two deaths, aim).
@@ -117,7 +178,7 @@ export function prepareCharacters(G) {
     g.scene.traverse((o) => {
       if (!o.isMesh) return; o.castShadow = !/Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name); o.receiveShadow = true; o.frustumCulled = false;
       const mm = Array.isArray(o.material) ? o.material : [o.material];
-      mm.forEach((m) => { if (m.transparent && m.map === null) m.depthWrite = false; prep(m, 'ch'); });
+      mm.forEach((m) => { if (m.transparent && m.map === null) m.depthWrite = false; if (OLDNPC) prep(m, 'ch'); else npcMat(m); });
       if (o.isSkinnedMesh) dropDeadMorphs(o.geometry);
       if (o.isSkinnedMesh && key !== 'hero') makeLods(o.geometry);
     });
