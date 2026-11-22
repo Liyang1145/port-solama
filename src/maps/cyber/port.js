@@ -690,15 +690,17 @@ function washV(b, u, y, v, ru, ry, col, n = 1) { const a = new THREE.Vector3(u -
 function washU(b, u, y, v, rv, ry, col, n = 1) { const a = new THREE.Vector3(u, y - ry, v + rv * n), c = new THREE.Vector3(u, y - ry, v - rv * n), e = new THREE.Vector3(u, y + ry, v - rv * n), f = new THREE.Vector3(u, y + ry, v + rv * n);
   b.quad(a, c, e, f, [0, 0, 1, 0, 1, 1, 0, 1], {}, col); }
 // b_portnight: port night tuning against the street lamps after b_lampfix (霓港 lamp pools 0.45 gain, 11.2 m) and the b_portlight
-// yard pools behind the back fence. Measured (22:00, same cameras, nopost): the port was not over-lit — its ground stays darker than
-// the lamp-lit streets — but (a) the back-row mast pools (centre v = 71, 24 m) spilled ~9 m over the yard fence (v ≈ 86) on top of
-// the b_portlight cool pools, and (b) under each working crane four 12 m flood pools + the 16 m work-lane pool stacked into one hot
-// patch (+135 / 255 over the bare ground). New: back-row mast pool radius 24 → 16 m (stops at the fence; truck lane keeps its own
-// 13 m pool), mast inner hot spot 0.5 → 0.35, crane flood pools ×0.7 (a softer patch, still the brightest ground on the quay).
-// Same geometry counts (radius / vertex colour only): no new lights, programs or draw calls. Glows, cones, LEDs unchanged.
-//   PK = [back-row mast pool radius m, front-row mast pool radius m, mast inner gain, crane flood pool gain, work-lane gain];
-//   ?oldport → b_port2 values; ?portk=a,b,c,d,e overrides (build time).
-const PK_OLD = [24, 24, 0.5, 1.0, 0.35], PK_NEW = [16, 24, 0.35, 0.7, 0.35];
+// yard pools behind the back fence. Measured (22:00, same cameras, nopost): the port is NOT over-lit — its ground stays darker than
+// the lamp-lit streets (truck lane ~16 / 255 vs ~23 at the yard gate street, quay ~9) — but (a) the back-row mast pools (centre
+// v = 71, 24 m) spilled ~9 m over the yard fence (v ≈ 86) onto the b_portlight cool pools, and (b) under each working crane four 12 m
+// flood pools + the 16 m work-lane pool stacked into one hot patch (+135 / 255 over bare ground). New: back-row mast pool radius
+// 24 → 20 m (the tail at the fence drops ~60 %; 16 m was tried and darkened the truck lane 15.6 → 12.2, so not used), truck-lane pool
+// 0.5 → 0.85 (keeps that lane lit next to the fence), crane flood pools ×0.75 (softer hot patch, still the brightest quay ground).
+// Front-row masts, inner hot spots, glows (aviation / warning lights), cones and LED strips unchanged.
+// Same geometry counts (radius / vertex colour only): no new lights, programs or draw calls.
+//   PK = [back-row mast pool radius m, front-row mast pool radius m, mast inner gain, crane flood pool gain, crane work-lane gain,
+//         truck-lane (behind line B) pool gain]; ?oldport → b_port2 values; ?portk=a,b,c,d,e,f overrides (build time).
+const PK_OLD = [24, 24, 0.5, 1.0, 0.35, 0.5], PK_NEW = [20, 24, 0.5, 0.75, 0.35, 0.85];
 const PK_Q = typeof location !== 'undefined' ? location.search : '';
 export const PK = /[?&]oldport\b/.test(PK_Q) ? PK_OLD : (() => { const m = /[?&]portk=([0-9.,]+)/.exec(PK_Q); if (!m) return PK_NEW; const v = m[1].split(',').map(Number); return PK_NEW.map((d, i) => (isFinite(v[i]) && i < v.length ? v[i] : d)); })();
 function nightLights(W, GL) {
@@ -714,7 +716,7 @@ function nightLights(W, GL) {
     for (const ln of [LINE_A, LINE_B]) { pool(pl, bu - 2.2, 0.06, ln.v0 + 1.2, 6, sc(CYAN, 0.55)); GL.add(bu - 2.2 + 0.3, 6.4, ln.v0 + 1.2, 0.7, sc(CYAN, 0.6)); }
     if (gu < QUAY.u1 - 4) { pool(pl, gu, 0.06, 53, 8, sc(WARM, 0.55)); pool(pl, gu, 0.06, 70, 7, sc(bi % 2 ? MAG : CYAN, 0.35)); }
     for (let k = 0; k < 2; k++) pool(pl, bu + 16 + k * 32, 0.06, 63.1, 6.5, sc(WARM, 0.45));
-    pool(pl, bu + 32, 0.06, 84, 13, sc(WARM, 0.5)); });
+    pool(pl, bu + 32, 0.06, 84, 13, sc(WARM, PK[5])); });
   // --- STS cranes: aviation lights (leg tops, A-frame apex, boom tip / raised boom tip), quay floods (cone + pool), lens glows,
   //     amber strobes on the sill beams, a lit spreader zone under the working ones
   for (const c of CRANES) { const U0 = c.u, H = 46, Hb = 49; const cb = W.b('cone', U0, 18), pl = W.b('pool', U0, 18), nb = W.b('neon', U0, 18);
