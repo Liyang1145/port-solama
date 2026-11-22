@@ -10,6 +10,8 @@ import { planFabric, attachFabric, updateFabric, inCanal, inCanalWater } from '.
 import { fixFabricProps } from './propfix.js';
 import { fixFabricCars } from './parkfix.js';
 import { curbPass } from './curbfix.js'; // a_curbalign
+import { prepHouses, attachHouses, updateHouses, auditHouses } from './houses.js'; // a_houses
+const HOUSE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('houseaudit');
 import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } from './edgewalls.js'; // a_edgewalls (after curbfix / propfix / parkfix: their bake inputs are unchanged)
 const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
@@ -174,8 +176,8 @@ export function buildCity(scene, mats, T) {
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.fabStats = attachFabric(fab, scene, M); }; // a_canaledge: fabric props off the water before their instances are made
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } fab.houseKit = prepHouses(fab, lots); region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;

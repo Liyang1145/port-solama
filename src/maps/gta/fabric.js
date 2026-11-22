@@ -552,6 +552,20 @@ const HASH = `
 float fh12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float fnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(fh12(i),fh12(i+vec2(1,0)),f.x), mix(fh12(i+vec2(0,1)),fh12(i+vec2(1,1)),f.x), f.y); }
 `;
+// a_houses: seven-segment digit (house numbers) and a 4x4 ordered dither (pool screens), body program only
+const HKFN = `
+float hkSeg(vec2 p, int d){ int m = d==0?63: d==1?6: d==2?91: d==3?79: d==4?102: d==5?109: d==6?125: d==7?7: d==8?127:111; float t = 0.16; float s = 0.0;
+  if (p.x < 0.0 || p.x > 1.0) return 0.0;
+  if ((m & 1) != 0) s += step(1.0 - t, p.y) * step(t, p.x) * step(p.x, 1.0 - t);
+  if ((m & 2) != 0) s += step(1.0 - t, p.x) * step(0.5, p.y);
+  if ((m & 4) != 0) s += step(1.0 - t, p.x) * step(p.y, 0.5);
+  if ((m & 8) != 0) s += step(p.y, t) * step(t, p.x) * step(p.x, 1.0 - t);
+  if ((m & 16) != 0) s += step(p.x, t) * step(p.y, 0.5);
+  if ((m & 32) != 0) s += step(p.x, t) * step(0.5, p.y);
+  if ((m & 64) != 0) s += step(abs(p.y - 0.5), t * 0.5) * step(t, p.x) * step(p.x, 1.0 - t);
+  return min(s, 1.0); }
+float hkBayer(vec2 f){ ivec2 q = ivec2(mod(f, 4.0)); int i = q.x + q.y * 4; int b[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5); return (float(b[i]) + 0.5) / 16.0; }
+`;
 const IVERT = `
   { vec4 wq = vec4(transformed, 1.0);
   #ifdef USE_INSTANCING
@@ -567,7 +581,7 @@ function mats(M) {
     s.uniforms.tPl = { value: tPl }; s.uniforms.uNight = U.uNight;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aK; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvK = aK; vFN = normalize((modelMatrix * vec4(normalize(mat3(instanceMatrix) * normal), 0.0)).xyz);' + IVERT);
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH)
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH + HKFN)
       .replace('#include <color_fragment>', `#include <color_fragment>
   float fk = floor(vK.x + 0.5), fsd = vK.y; vec3 fn = normalize(vFN); float fy = vFW.y - vIB.y; float fGlass = 0.0, fLit = 0.0;
   vec2 ft = vec2(-fn.z, fn.x); float fu = dot(vFW.xz, ft) + fsd * 37.0;
@@ -577,12 +591,56 @@ function mats(M) {
     if (fk > 0.5 && fk < 5.5) { float m = fnoise(vFW.xz * 0.21 + fsd * 5.0); diffuseColor.rgb = mix(vec3(0.74, 0.73, 0.70), vec3(0.88, 0.87, 0.84), fsd) * (0.82 + 0.25 * m);
       vec2 g = fract(vFW.xz / 9.0 + fsd * 3.0); float unitM = step(0.78, fh12(floor(vFW.xz / 9.0) + fsd)) * step(abs(g.x - 0.5), 0.17) * step(abs(g.y - 0.5), 0.17); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.43, 0.44), unitM); }
     if (fk > 5.5 && fk < 6.5) diffuseColor.rgb *= 0.8 + 0.4 * fnoise(vFW.xz * 1.7);
+    if (fk > 9.5 && fk < 10.5) { float r = length(vFW.xz - vIB.xz); float fan = step(r, 0.33) * (0.35 + 0.25 * step(0.5, fract(r / 0.045))); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09) + fan * 0.1, step(r, 0.33)); } // a_houses: AC fan grille
+    if (fk > 11.5 && fk < 12.5) { if (hkBayer(gl_FragCoord.xy) < 0.62) discard; } // a_houses: screen roof
   } else if (fn.y > -0.5) {
     if (fk < 0.5) { // house: punched windows (1 or 2 floors), a darker plinth
       float fl = floor(fy / 3.0); float wy = fy - fl * 3.0; vec2 c = vec2(floor(fu / 3.4), fl); float wx = fract(fu / 3.4);
       float win = step(0.28, wx) * step(wx, 0.72) * step(0.95, wy) * step(wy, 2.25) * step(fy, vIH - 0.4) * step(0.25, fh12(c + fsd * 11.0));
       fGlass = win; fLit = win * step(0.55, fh12(c * 1.7 + fsd));
       diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 0.45, fy)) * 0.25;
+      { // a_houses: close-range wall detail by look (1 地中海 2 牧场 3 海岸 4 现代), faded out with the pixel footprint (far view unchanged)
+        float hst = floor((vK.x - fk) * 10.0 + 0.5); float fNr = (1.0 - smoothstep(0.05, 0.16, length(fwidth(vFW)))) * step(0.5, hst);
+        if (fNr > 0.0) { vec3 base = diffuseColor.rgb; vec3 dc = base; float g = fGlass;
+          float wOn = step(fy, vIH - 0.4) * step(0.25, fh12(c + fsd * 11.0)); float wm = wx * 3.4; float inX = step(0.952, wm) * step(wm, 2.448), inY = step(0.95, wy) * step(wy, 2.25);
+          float fwid = hst > 3.5 ? 0.06 : hst < 1.5 ? 0.13 : 0.08; vec3 trimC = hst < 1.5 ? vec3(0.95, 0.92, 0.84) : hst > 3.5 ? vec3(0.10, 0.10, 0.11) : vec3(0.96, 0.96, 0.94);
+          dc *= 0.965 + 0.07 * fnoise(vec2(fu, fy) * 5.0); // stucco trowel
+          if (hst > 2.5 && hst < 3.5) dc *= 0.9 + 0.1 * smoothstep(0.0, 0.22, fract(fy / 0.19)); // lap siding
+          else { float vj = step(abs(fract(fu / 6.8 + 0.5) - 0.5) * 6.8, 0.012); dc *= 1.0 - 0.22 * vj; dc *= 1.0 - 0.25 * step(abs(fy - 3.0), 0.02) * step(4.5, vIH); } // control joints, floor reveal
+          dc *= 1.0 - 0.3 * step(abs(fy - 0.42), 0.015); // water-table reveal
+          float fr = step(0.952 - fwid, wm) * step(wm, 2.448 + fwid) * step(0.95 - fwid, wy) * step(wy, 2.25 + fwid) * (1.0 - inX * inY) * wOn;
+          float sill = step(0.952 - fwid - 0.07, wm) * step(wm, 2.448 + fwid + 0.07) * step(0.95 - fwid - 0.07, wy) * step(wy, 0.95 - fwid) * wOn;
+          dc = mix(dc, trimC, max(fr, sill)); dc *= 1.0 - 0.35 * sill * step(wy, 0.95 - fwid - 0.045);
+          if ((hst < 1.5 || (hst > 2.5 && hst < 3.5)) ) { float mun = (step(abs(wm - 1.7), 0.022) + step(abs(wy - 1.6), 0.022)) * inX * inY * wOn; g *= 1.0 - mun; dc = mix(dc, trimC, mun); }
+          float sh = fh12(vec2(fsd * 17.0, 3.0)); vec3 shC = sh < 0.25 ? vec3(0.14, 0.36, 0.38) : sh < 0.5 ? vec3(0.13, 0.19, 0.30) : sh < 0.75 ? vec3(0.42, 0.50, 0.40) : vec3(0.94, 0.94, 0.92);
+          if (hst > 2.5 && hst < 3.5) { // louvered shutters each side
+            float sx = step(0.952 - fwid - 0.62, wm) * step(wm, 0.952 - fwid - 0.04) + step(2.448 + fwid + 0.04, wm) * step(wm, 2.448 + fwid + 0.62); sx *= step(0.95 - fwid, wy) * step(wy, 2.25 + fwid) * wOn;
+            float lv = 0.78 + 0.22 * smoothstep(0.0, 0.5, fract(wy / 0.055)); dc = mix(dc, shC * lv, sx); }
+          else if (hst > 1.5 && hst < 2.5) { // accordion storm shutters stacked open
+            float sx = step(0.952 - fwid - 0.2, wm) * step(wm, 0.952 - fwid - 0.01) + step(2.448 + fwid + 0.01, wm) * step(wm, 2.448 + fwid + 0.2); sx *= step(0.88, wy) * step(wy, 2.33) * wOn;
+            dc = mix(dc, vec3(0.78, 0.77, 0.72) * (0.75 + 0.25 * abs(sin(wm * 70.0))), sx); }
+          else if (hst < 1.5 && sh < 0.45) { // Bahama shutter propped over the upper window
+            float sx = step(0.952 - fwid, wm) * step(wm, 2.448 + fwid) * step(1.45, wy) * step(wy, 2.25 + fwid) * wOn; float lv = 0.8 + 0.2 * smoothstep(0.0, 0.5, fract(wy / 0.06));
+            dc = mix(dc, mix(shC, vec3(0.30, 0.42, 0.30), 0.5) * lv, sx); g *= 1.0 - sx; dc *= 1.0 - 0.3 * step(1.3, wy) * step(wy, 1.45) * inX * wOn; }
+          diffuseColor.rgb = mix(base, dc, fNr); fGlass = mix(fGlass, g, fNr); fLit *= mix(1.0, step(0.5, g), fNr); }
+      }
+    } else if (fk > 8.5) { // a_houses kit (vertical faces): 9 sectional garage door, 10 AC condenser, 11 house-number plaque, 12 screen, 13 entry door, 14 fence / gate boards
+      float lu = dot(vFW.xz - vIB.xz, ft); float fNr = 1.0 - smoothstep(0.04, 0.14, length(fwidth(vFW)));
+      if (fk < 9.5) { float shH = vIH / 4.0; float sec = fract(fy / shH); float px = fract(lu / 0.66 + 0.5); float ed = min(min(px, 1.0 - px) * 0.66, min(sec, 1.0 - sec) * shH);
+        float k = 0.86 + 0.14 * smoothstep(0.03, 0.08, ed); k *= 1.0 - 0.35 * (1.0 - step(0.012, min(sec, 1.0 - sec) * shH));
+        float top = step(3.0 * shH + 0.1, fy) * step(fy, vIH - 0.1) * step(0.06, ed) * step(0.6, fh12(vec2(fsd * 7.0, 1.0)));
+        diffuseColor.rgb *= mix(1.0, k, fNr); fGlass = top * fNr; }
+      else if (fk < 10.5) { float gr = step(0.08, fy) * step(fy, vIH - 0.08) * step(0.5, fract(lu / 0.035)); diffuseColor.rgb *= 1.0 - 0.45 * gr * fNr; }
+      else if (fk < 11.5) { vec2 dp = vec2(lu + 0.15, fy - 0.025) / vec2(0.1, 0.11); float n = floor(fsd * 900.0) + 100.0;
+        float dg = dp.x < 1.0 ? floor(n / 100.0) : dp.x < 2.0 ? mod(floor(n / 10.0), 10.0) : mod(n, 10.0); vec2 cp = vec2(fract(dp.x) * 1.25, dp.y);
+        float on = step(0.0, dp.x) * step(dp.x, 3.0) * step(0.0, dp.y) * step(dp.y, 1.0) * hkSeg(cp, int(dg)) * step(abs(fn.y), 0.5);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0) - diffuseColor.rgb * 0.85, on * fNr); }
+      else if (fk < 12.5) { if (hkBayer(gl_FragCoord.xy) < 0.62) discard; }
+      else if (fk < 13.5) { float lp = mod(lu + 40.0, 0.825) - 0.4125; float pa = step(0.07, abs(lp)) * step(abs(lp), 0.33); float py = step(0.25, fy) * step(fy, 0.95) + step(1.15, fy) * step(fy, 1.95);
+        float ed = pa * py; float rim = ed * (1.0 - step(0.1, abs(lp)) * 0.0); float bd = (1.0 - step(0.03, abs(abs(lp) - 0.07))) * py + (1.0 - step(0.03, abs(abs(lp) - 0.33))) * py;
+        diffuseColor.rgb *= mix(1.0, (0.92 + 0.08 * rim) * (1.0 - 0.3 * bd), fNr); float lite = step(1.95, fy) * step(fy, 2.08) * step(abs(lp), 0.33) * step(0.5, fh12(vec2(fsd * 5.0, 2.0))); fGlass = lite * fNr;
+        float knob = step(abs(abs(lp) - 0.36), 0.03) * step(abs(fy - 1.0), 0.05); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75, 0.62, 0.36), knob * fNr); }
+      else { float bd = 1.0 - step(0.012, abs(fract(lu / 0.15 + 0.5) - 0.5) * 0.15); float rail = step(vIH - 0.12, fy) + step(abs(fy - 0.3), 0.05); diffuseColor.rgb *= mix(1.0, (1.0 - 0.3 * bd) * (1.0 - 0.12 * clamp(rail, 0.0, 1.0)), fNr); }
     } else if (fk < 1.5) { // retail: storefront glazing band with mullions, painted sign band, parapet line
       float mull = step(0.06, fract(fu / 3.0)); float gl = step(0.35, fy) * step(fy, 3.3) * mull; fGlass = gl; fLit = gl * 0.8;
       float sb = step(3.65, fy) * step(fy, 4.75) * step(0.35, fract(fu / 47.0 + fsd));
@@ -618,7 +676,15 @@ function mats(M) {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;' + HASH)
       .replace('#include <color_fragment>', `#include <color_fragment>
-  { float rows = fract((vFW.y - vIB.y) * 3.2); diffuseColor.rgb *= 0.86 + 0.14 * smoothstep(0.0, 0.25, rows); diffuseColor.rgb *= 0.88 + 0.2 * fnoise(vFW.xz * 0.9 + vIB.xz); }`);
+  { float rows = fract((vFW.y - vIB.y) * 3.2); vec3 rc = diffuseColor.rgb; float warm = step(0.25, rc.r - rc.b), light = step(0.78, rc.r) * (1.0 - warm);
+    diffuseColor.rgb *= mix(0.86 + 0.14 * smoothstep(0.0, 0.25, rows), 1.0, light * 0.7); diffuseColor.rgb *= 0.88 + 0.2 * fnoise(vFW.xz * 0.9 + vIB.xz);
+    // a_houses: close range tile by roof colour: barrel (terracotta), staggered flat tile (grey / brown), standing seam (light metal)
+    float rNr = 1.0 - smoothstep(0.03, 0.11, length(fwidth(vFW)));
+    if (rNr > 0.0) { vec3 rn = cross(dFdx(vFW), dFdy(vFW)); vec2 rt = normalize(vec2(-rn.z, rn.x) + vec2(1e-6, 0.0)); float ru = dot(vFW.xz, rt); float row = floor((vFW.y - vIB.y) * 3.2); float k = 1.0;
+      if (warm > 0.5) { float b = sin(ru * 24.166 + row * 3.1416); k = (0.9 + 0.2 * b * b) * (0.9 + 0.2 * fh12(vec2(floor(ru / 0.26 + 0.5 * row), row) + vIB.xz)); }
+      else if (light > 0.5) { float sm = fract(ru / 0.45); k = 1.0 - 0.18 * (1.0 - step(0.025, sm)) + 0.08 * step(0.025, sm) * step(sm, 0.06); }
+      else { float j = fract(ru / 0.33 + 0.5 * mod(row, 2.0)); k = (1.0 - 0.25 * (1.0 - step(0.03, j))) * (0.94 + 0.12 * fh12(vec2(floor(ru / 0.33 + 0.5 * mod(row, 2.0)), row) + vIB.xz)); }
+      diffuseColor.rgb *= mix(1.0, k, rNr); } }`);
   });
   const tree = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), 'fabTree', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
@@ -679,6 +745,8 @@ function inst(geo, mat, n, fill, extra) {
   if (extra) for (const k in extra) geo === null || m.geometry.setAttribute(k, extra[k]);
   m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; m.computeBoundingSphere(); m.frustumCulled = true; return m;
 }
+// a_houses: the house kit draws on the existing fabBody program (same box geometry, same material object -> no new program)
+export function fabKit() { return { box: geos().box, body: MATS && MATS.body }; }
 // attach: build every chunk's meshes once (resident; tiers toggle visibility), returns triangle counts
 export function attachFabric(fab, scene, M) {
   const G = geos(), MT = mats(M); let tris = 0, inst0 = 0;
@@ -690,7 +758,7 @@ export function attachFabric(fab, scene, M) {
     const pg = c.plaza.geometry(); if (pg) { add(new THREE.Mesh(pg, MT.walk), 'always'); tris += pg.index.count / 3; }
     const lg = c.lot.geometry('aP'); if (lg) { add(new THREE.Mesh(lg, MT.lot), 'always'); tris += lg.index.count / 3; }
     const I = c.I;
-    if (I.body.length) { const n = I.body.length; const ak = new Float32Array(n * 2); I.body.forEach((b, i) => { ak[i * 2] = b[10]; ak[i * 2 + 1] = b[11]; });
+    if (I.body.length) { const n = I.body.length; const ak = new Float32Array(n * 2); I.body.forEach((b, i) => { ak[i * 2] = b[10] + (b.hs || 0); ak[i * 2 + 1] = b[11]; }); // a_houses: house look in the fraction (0.1..0.4)
       const g = G.box.clone(); g.setAttribute('aK', new THREE.InstancedBufferAttribute(ak, 2));
       add(inst(g, MT.body, n, (i, m) => { const b = I.body[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), b[6]); m.compose(_v.set(b[0], b[1], b[2]), _q, _s.set(b[3], b[4], b[5])); return [b[7], b[8], b[9]]; }), 'bld', true); tris += n * 12; inst0 += n; }
     if (I.roof.length) { add(inst(G.roof, MT.roof, I.roof.length, (i, m) => { const b = I.roof[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), b[6]); m.compose(_v.set(b[0], b[1], b[2]), _q, _s.set(b[3], b[4], b[5])); return [b[7], b[8], b[9]]; }), 'bld', true); tris += I.roof.length * 6; }
