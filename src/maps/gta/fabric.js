@@ -374,15 +374,16 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
 // strip-mall band facing the arterial at b = bEdge (dir +1 into the cell from b=0, -1 from b=Lb)
 function stripBand(fab, F, bEdge, dir, La, col) {
   const R = fab.R, rr = fab.rr; const B = (x) => bEdge + dir * x;
+  const SB = { P: F.P, bEdge, dir, La, shops: [], pad: null }; (fab.strips = fab.strips || []).push(SB); // a_strip: metadata only (no random draw)
   lotQuad(fab, fq(F, 2, La - 2, Math.min(B(0.5), B(42)), Math.max(B(0.5), B(42))), [0, La - 4], dir > 0 ? [0, 41.5] : [41.5, 0], 0);
   for (let a = 4; a < La - 4; a += rr(16, 22)) { const p = F.P(a, B(1.2)); addPalm(fab, p[0], p[1], rr(8, 12)); }
   let a = rr(6, 14);
   while (a < La - 30) { const L = Math.min(La - 6 - a, rr(45, 130)); if (L < 25) break; const dd = rr(17, 25), h = rr(5, 7.5);
-    const p = F.P(a + L / 2, B(42 + dd / 2)); addBody(fab, p[0], p[1], 0, L, dd, h, fang(F, a + L / 2, B(42)), pickR(fab, WALLS), 1, col);
+    const p = F.P(a + L / 2, B(42 + dd / 2)); addBody(fab, p[0], p[1], 0, L, dd, h, fang(F, a + L / 2, B(42)), pickR(fab, WALLS), 1, col); SB.shops.push({ a, L, dd, h, rec: lastRec(fab, p, 'body') });
     lotQuad(fab, fq(F, a - 2, a + L + 2, Math.min(B(42 + dd), B(42 + dd + 7)), Math.max(B(42 + dd), B(42 + dd + 7))), [0, 1], [0, 1], 2);
     a += L + rr(10, 28); }
   // pad building (fast food / bank) out in the lot
-  if (R() < 0.5 && La > 160) { const ap = rr(30, La - 30); const p = F.P(ap, B(15)); addBody(fab, p[0], p[1], 0, rr(14, 20), rr(11, 15), rr(4.5, 5.5), fang(F, ap, B(15)), pickR(fab, WALLS), 1, col); }
+  if (R() < 0.5 && La > 160) { const ap = rr(30, La - 30); const p = F.P(ap, B(15)); addBody(fab, p[0], p[1], 0, rr(14, 20), rr(11, 15), rr(4.5, 5.5), fang(F, ap, B(15)), pickR(fab, WALLS), 1, col); SB.pad = { ap, rec: lastRec(fab, p, 'body') }; }
   parkCars(fab, F, 2, La - 2, bEdge, dir, 41.5, 0.42);
 }
 // cars in stall rows of a striped lot (modules of 18 m across: stalls 0.6–5.9 and 12.4–17.8, 2.7 m wide along a)
@@ -584,7 +585,7 @@ function mats(M) {
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH + HKFN)
       .replace('#include <color_fragment>', `#include <color_fragment>
   float fk = floor(vK.x + 0.5), fsd = vK.y; if (vK.x < fk - 0.004 && hkBayer(gl_FragCoord.xy + vec2(2.0, 1.0)) < (fk - vK.x) / 0.45) discard; // a_housepolish: kit fade (fraction 0..-0.45)
-  vec3 fn = normalize(vFN); float fy = vFW.y - vIB.y; float fGlass = 0.0, fLit = 0.0;
+  vec3 fn = normalize(vFN); float fy = vFW.y - vIB.y; float fGlass = 0.0, fLit = 0.0, fEm = 0.0, fStrip = -1.0; // a_strip: fEm = self-lit (light boxes / lenses), fStrip = shop face class
   vec2 ft = vec2(-fn.z, fn.x); float fu = dot(vFW.xz, ft) + fsd * 37.0;
   vec3 ftex = texture2D(tPl, (abs(fn.y) > 0.5 ? vFW.xz : vec2(fu, vFW.y)) * 0.25).rgb / 0.63;
   diffuseColor.rgb *= mix(vec3(1.0), clamp(ftex, 0.7, 1.2), 0.5) * (0.92 + 0.12 * fnoise(vFW.xz * 0.05 + fsd * 9.0));
@@ -646,7 +647,28 @@ function mats(M) {
         float ed = pa * py; float rim = ed * (1.0 - step(0.1, abs(lp)) * 0.0); float bd = (1.0 - step(0.03, abs(abs(lp) - 0.07))) * py + (1.0 - step(0.03, abs(abs(lp) - 0.33))) * py;
         diffuseColor.rgb *= mix(1.0, (0.92 + 0.08 * rim) * (1.0 - 0.3 * bd), fNr); float lite = step(1.95, fy) * step(fy, 2.08) * step(abs(lp), 0.33) * step(0.5, fh12(vec2(fsd * 5.0, 2.0))); fGlass = lite * fNr;
         float knob = step(abs(abs(lp) - 0.36), 0.03) * step(abs(fy - 1.0), 0.05); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75, 0.62, 0.36), knob * fNr); }
+      else if (fk > 14.5) { // a_strip kit: 15 shop entrance (3.0 m: double glass door + sidelites + transom, frame = instance colour), 16 light-box face, 17 lens (below)
+        if (fk < 15.5) { float ax = abs(lu); float inD = step(ax, 0.9); float leaf = abs(ax - 0.45);
+          float g1 = inD * step(leaf, 0.39) * step(0.24, fy) * step(fy, 2.2); float g2 = (1.0 - inD) * step(0.95, ax) * step(ax, 1.44) * step(0.47, fy) * step(fy, 2.2);
+          float g3 = step(2.3, fy) * step(fy, vIH - 0.06) * step(ax, 1.44) * step(0.04, abs(ax - 0.9)); float g = max(max(g1, g2), g3);
+          float bar = inD * step(abs(fy - 1.05), 0.025) * step(leaf, 0.3); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.81, 0.82), bar);
+          float hrs = inD * step(abs(ax - 0.62), 0.12) * step(abs(fy - 1.5), 0.1) * step(0.5, fract(fy * 22.0)); // vinyl opening-hours lines
+          fGlass = g * (1.0 - bar) * (1.0 - hrs); fLit = fGlass; diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92), hrs * g); }
+        else if (fk < 16.5) { float e = min(1.0, step(fy, 0.045) + step(vIH - 0.045, fy)); diffuseColor.rgb *= 1.0 - 0.5 * e; fEm = 1.0 - e; } }
       else { float bd = 1.0 - step(0.012, abs(fract(lu / 0.15 + 0.5) - 0.5) * 0.15); float rail = step(vIH - 0.12, fy) + step(abs(fy - 0.3), 0.05); diffuseColor.rgb *= mix(1.0, (1.0 - 0.3 * bd) * (1.0 - 0.12 * clamp(rail, 0.0, 1.0)), fNr); }
+    } else if (fk < 1.5 && vK.x - fk > 0.02) { // a_strip: strip-mall shop, the lot-side normal angle rides in the fraction (0.05..0.45)
+      float th = (vK.x - fk - 0.05) / 0.4 * 6.2831853; float fr = dot(fn.xz, vec2(cos(th), sin(th))); float lu = dot(vFW.xz - vIB.xz, ft);
+      float jt = step(abs(fract(lu / 6.0 + 0.5) - 0.5) * 6.0, 0.012); float cap = step(vIH - 0.18, fy), rev = step(abs(fy - (vIH - 0.62)), 0.03);
+      if (fr > 0.7) { fStrip = 1.0; // storefront: tile bulkhead, glass 0.45-3.0 m on a 1.5 m mullion grid (the kit's piers / doors sit on it), transom bar, stucco above the canopy
+        float m = fract(lu / 1.5); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tb = step(abs(fy - 2.36), 0.03);
+        float gl = step(0.45, fy) * step(fy, 3.0) * (1.0 - mul) * (1.0 - tb); fGlass = gl; fLit = gl * 0.85 * step(0.25, fh12(vec2(floor(lu / 4.5), fsd)));
+        float frm = step(0.42, fy) * step(fy, 3.04) * max(mul, tb); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.20, 0.20, 0.21), frm);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.32, 0.30) * (0.9 + 0.1 * step(0.5, fract(lu / 0.3))), step(fy, 0.42));
+        diffuseColor.rgb *= (1.0 - 0.25 * rev) * (1.0 + 0.06 * cap); }
+      else if (fr < -0.7) { fStrip = 2.0; // service wall: steel doors every 12 m, control joints, a darker splash band
+        float dz = step(abs(fract(lu / 12.0 + 0.31) - 0.5) * 12.0, 0.48) * step(fy, 2.12); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.52, 0.53, 0.52), dz);
+        diffuseColor.rgb *= (1.0 - 0.2 * jt) * (1.0 - 0.15 * (1.0 - smoothstep(0.0, 0.6, fy))) * (1.0 - 0.25 * rev); }
+      else { fStrip = 3.0; diffuseColor.rgb *= (1.0 - 0.2 * jt) * (1.0 - 0.25 * rev) * (1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.45, fy))); }
     } else if (fk < 1.5) { // retail: storefront glazing band with mullions, painted sign band, parapet line
       float mull = step(0.06, fract(fu / 3.0)); float gl = step(0.35, fy) * step(fy, 3.3) * mull; fGlass = gl; fLit = gl * 0.8;
       float sb = step(3.65, fy) * step(fy, 4.75) * step(0.35, fract(fu / 47.0 + fsd));
@@ -669,14 +691,15 @@ function mats(M) {
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.08, 0.085, 0.09), open);
     } else if (fk < 6.5) { diffuseColor.rgb *= 0.75 + 0.45 * fnoise(vec2(fu, fy) * 2.3); } // hedge
   }
+  if (fk > 16.5 && fk < 17.5 && fn.y < -0.5) { diffuseColor.rgb = vec3(0.95, 0.93, 0.86); fEm = 1.6; } // a_strip: lot-light lens
   { // footprint anti-aliasing: past ~0.5 m per pixel the window grid becomes its average coverage (aerials sparkled white/black)
     float fAA = smoothstep(0.3, 1.1, length(fwidth(vFW))) * step(fn.y, 0.5) * step(-0.5, fn.y);
-    float cov = fk < 0.5 ? 0.13 : fk < 1.5 ? step(0.35, fy) * step(fy, 3.3) * 0.92 : fk < 2.5 ? step(vIH - 2.1, fy) * step(fy, vIH - 1.3) * 0.5 : fk < 3.5 ? 0.3 * step(0.6, fy) : fk < 4.5 ? 0.58 : 0.0;
+    float cov = fk < 0.5 ? 0.13 : fStrip > 1.5 ? 0.0 : fStrip > 0.5 ? step(0.45, fy) * step(fy, 3.0) * 0.9 : fk < 1.5 ? step(0.35, fy) * step(fy, 3.3) * 0.92 : fk < 2.5 ? step(vIH - 2.1, fy) * step(fy, vIH - 1.3) * 0.5 : fk < 3.5 ? 0.3 * step(0.6, fy) : fk < 4.5 ? 0.58 : 0.0;
     fGlass = mix(fGlass, cov, fAA); fLit = mix(fLit, 0.12, fAA); }
   vec3 fglassC = mix(vec3(0.07, 0.10, 0.13), vec3(0.14, 0.18, 0.22), fh12(vec2(fsd, fk)));
   diffuseColor.rgb = mix(diffuseColor.rgb, fglassC, fGlass);`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.12, fGlass); if (fk > 5.5 && fk < 6.5) roughnessFactor = 1.0;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * vec3(1.0, 0.72, 0.42) * 1.6;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * vec3(1.0, 0.72, 0.42) * 1.6 + fEm * uNight * diffuseColor.rgb * 1.1;');
   });
   const roof = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), 'fabRoof', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
@@ -711,7 +734,8 @@ function mats(M) {
   const lot = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), 'fabLot', (s) => {
     s.uniforms.tAs = { value: asph };
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 aP; varying vec4 vP; varying vec2 vLU; varying vec3 vFW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvP = aP; vLU = uv; vFW = (modelMatrix * vec4(position, 1.0)).xyz;');
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tAs; varying vec4 vP; varying vec2 vLU; varying vec3 vFW;' + HASH)
+    s.uniforms.uLzA = { value: LOTZ.a }; s.uniforms.uLzB = { value: LOTZ.b };
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tAs; uniform vec4 uLzA[28]; uniform vec4 uLzB[28]; varying vec4 vP; varying vec2 vLU; varying vec3 vFW;' + HASH)
       .replace('#include <color_fragment>', `#include <color_fragment>
   { float mode = floor(vP.x + 0.5); vec3 as = texture2D(tAs, vFW.xz / 3.5).rgb; float n = fnoise(vFW.xz * 0.15) * 0.6 + fnoise(vFW.xz * 1.1) * 0.4;
     vec3 c = as * (0.82 + 0.3 * n);
@@ -728,6 +752,14 @@ function mats(M) {
       ln += step(abs(abs(q.y - 34.0) - 20.15), 0.09) * (step(q.x, 16.5) + step(88.5, q.x));
       c = mix(c, vec3(0.9), clamp(ln, 0.0, 1.0) * 0.9); }
     else { c = vec3(0.78, 0.76, 0.72) * (0.85 + 0.2 * n); }
+    for (int i = 0; i < 28; i++) { vec4 zA = uLzA[i], zB = uLzB[i]; if (zB.z < 0.5) break; vec2 d = vFW.xz - zA.xy; float la = d.x * zA.z - d.y * zA.w, lw = d.x * zA.w + d.y * zA.z; // a_strip zones (strip.js)
+      if (abs(la) < zB.x && abs(lw) < zB.y) {
+        if (zB.z < 1.5) { c = vec3(0.70, 0.69, 0.66) * (0.86 + 0.2 * n); vec2 g = abs(fract(vec2(la, lw) / 4.5) - 0.5); c *= 1.0 - 0.2 * step(0.485, max(g.x, g.y)); // filling-station apron: concrete slabs, oil stains, kerb band
+          c *= 1.0 - 0.22 * smoothstep(0.62, 0.85, fnoise(vFW.xz * 0.55)) * step(abs(lw), 6.0); c = mix(c, vec3(0.62, 0.61, 0.58), step(zB.x - 0.3, abs(la)) + step(zB.y - 0.3, abs(lw))); }
+        else { c = as * (0.80 + 0.28 * n); float e = step(zB.y - 0.15, abs(lw)) * step(0.5, fract(la / 3.0 + 0.25)) * zB.w + step(zB.y - 0.15, abs(lw)) * (1.0 - zB.w); // drive-through lane: no stalls, edge lines, arrows
+          float q = fract(la / 9.0) * 9.0 - 4.5; float ar = step(abs(lw), 0.11) * step(-1.8, q) * step(q, 0.2) + step(0.2, q) * step(q, 1.3) * step(abs(lw), (1.3 - q) * 0.62);
+          c = mix(c, vec3(0.90, 0.89, 0.84), clamp(e + ar, 0.0, 1.0) * 0.88); }
+        break; } }
     diffuseColor.rgb = c; }`);
   });
   const roadF = M.road.clone(); roadF.onBeforeCompile = M.road.onBeforeCompile; roadF.customProgramCacheKey = M.road.customProgramCacheKey; roadF.polygonOffset = true; roadF.polygonOffsetFactor = -1; roadF.polygonOffsetUnits = -4;
@@ -752,6 +784,8 @@ function inst(geo, mat, n, fill, extra) {
   m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; m.computeBoundingSphere(); m.frustumCulled = true; return m;
 }
 // a_houses: the house kit draws on the existing fabBody program (same box geometry, same material object -> no new program)
+// a_strip: up to 28 oriented zones painted by the lot shader (strip.js fills them before the lot material exists): A = cx, cz, cos, sin; B = hl, hw, kind (1 apron 2 lane, 0 = end), dashed
+export const LOTZ = { a: new Float32Array(28 * 4), b: new Float32Array(28 * 4) };
 export function fabKit() { return { box: geos().box, body: MATS && MATS.body }; }
 // attach: build every chunk's meshes once (resident; tiers toggle visibility), returns triangle counts
 export function attachFabric(fab, scene, M) {

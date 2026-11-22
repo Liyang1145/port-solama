@@ -26,7 +26,7 @@ const STOP_NAMES = {
   290: ['南滩', '冲浪俱乐部', '潮汐酒店', '日光海滩', '灯塔公园', '北滩'],
 };
 const ROUTE = { 50: { no: '7', col: '#1f8a4c', lin: [0.05, 0.27, 0.08] }, 170: { no: '23', col: '#e07a12', lin: [0.75, 0.2, 0.01] }, 290: { no: '12', col: '#1d5fb8', lin: [0.012, 0.11, 0.48] } };
-const FONT = '"WenQuanYi Zen Hei","Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif';
+import { raster, FONT } from './raster.js'; // a_strip: shared legend rasteriser
 const blockIdx = (z) => EW.filter((e) => e < z).length;
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -51,24 +51,7 @@ const tris = (g) => g.attributes.position.count / 3;
 // ------------------------------------------------------------------------------------------------ rasterised legends ----
 // draw(g, W, H) on a canvas pre-filled with pal[0]; every pixel snaps to the nearest palette colour; index 0 is "background"
 // (not emitted). opts.drop(x, y) -> true removes the pixel (paint wear). Returns { W, H, rects: [x, y, w, h, ci] }.
-let _cv = null, _cg = null; // one CPU-backed canvas reused for every legend (fast getImageData)
-function raster(W, H, pal, draw, opts = {}) {
-  if (!_cv) { _cv = document.createElement('canvas'); _cg = _cv.getContext('2d', { willReadFrequently: true }); }
-  const c = _cv; c.width = W; c.height = H; const g = _cg; g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
-  g.fillStyle = pal[0]; g.fillRect(0, 0, W, H); g.textAlign = 'center'; g.textBaseline = 'middle'; draw(g, W, H);
-  const d = g.getImageData(0, 0, W, H).data; const PC = pal.map((h) => { const cc = new THREE.Color(h); cc.convertLinearToSRGB(); return [cc.r * 255, cc.g * 255, cc.b * 255]; });
-  const idx = new Uint8Array(W * H);
-  for (let i = 0; i < W * H; i++) { let best = 0, bd = 1e9; for (let k = 0; k < PC.length; k++) { const dr = d[i * 4] - PC[k][0], dg = d[i * 4 + 1] - PC[k][1], db = d[i * 4 + 2] - PC[k][2]; const dd = dr * dr + dg * dg + db * db; if (dd < bd) { bd = dd; best = k; } } idx[i] = best; }
-  if (opts.drop) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (idx[y * W + x] && opts.drop(x, y)) idx[y * W + x] = 0;
-  const rects = []; let open = new Map();
-  for (let y = 0; y < H; y++) {
-    const next = new Map();
-    for (let x = 0; x < W;) { const ci = idx[y * W + x]; if (!ci) { x++; continue; } let x1 = x; while (x1 + 1 < W && idx[y * W + x1 + 1] === ci) x1++;
-      const key = x + ',' + x1 + ',' + ci; const r = open.get(key); if (r) { r[3]++; next.set(key, r); open.delete(key); } else { const nr = [x, y, x1 - x + 1, 1, ci]; rects.push(nr); next.set(key, nr); } x = x1 + 1; }
-    open = next;
-  }
-  return { W, H, rects, pal: pal.map((h) => { const cc = new THREE.Color(h); return [cc.r, cc.g, cc.b]; }) };
-}
+// a_strip: raster() moved to ./raster.js (shared with the strip-mall signs)
 const T = (g, t, x, y, size, col, weight = 'bold', font = FONT) => { g.fillStyle = col; g.font = `${weight} ${size}px ${font}`; g.fillText(t, x, y); };
 const fitT = (g, t, x, y, size, col, maxW, weight = 'bold') => { g.font = `${weight} ${size}px ${FONT}`; const w = g.measureText(t).width; T(g, t, x, y, w > maxW ? Math.floor(size * maxW / w) : size, col, weight); };
 function busGlyph(g, cx, cy, s, col) { // original front-view bus pictogram

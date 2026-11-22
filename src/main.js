@@ -12,7 +12,7 @@ import { buildSignage } from './maps/gta/signage.js';
 import { buildBacklot } from './maps/gta/backlot.js';
 import { applyColliderFits } from './maps/gta/colfix.js';
 import { applyCurbColliders } from './maps/gta/curbfix.js';
-import { attachStreetColliders } from './maps/gta/edgewalls.js'; import { attachHouseColliders, KIT_LAYER } from './maps/gta/houses.js'; // a_edgewalls
+import { attachStreetColliders } from './maps/gta/edgewalls.js'; import { attachHouseColliders, KIT_LAYER } from './maps/gta/houses.js'; import { attachStripColliders } from './maps/gta/strip.js'; // a_edgewalls / a_strip
 import { fixCityProps } from './maps/gta/propfix.js';
 import { fixStreetParking, attachParkedColliders } from './maps/gta/parkfix.js';
 import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
@@ -96,7 +96,7 @@ async function load() {
   if (!CYBER) city.curbCol = applyCurbColliders(city); // a_curbalign: boxes of the houses moved / yard walls cut off the streets (after every layer is placed)
   if (!CYBER) applyColliderFits(city); // a_lane8fix: swap oversized / misplaced / orphan colliders for their visible footprint (after every layer is placed)
   if (!CYBER) city.edgeCol = attachStreetColliders(city); // a_edgewalls: fabric street-light / street-tree trunks (own fine grid) + fitted boxes for the island kerb clutter that had none (after every layer)
-  if (!CYBER) { city.houseCol = attachHouseColliders(city); if (city.region.fabric && city.region.fabric.houseKit) { camera.layers.enable(KIT_LAYER); env.sunFar.shadow.camera.layers.enable(30); } } // a_houses: kit boxes (lazy per house cell) + the shadow kit is skipped by the far cascade
+  if (!CYBER) { city.houseCol = attachHouseColliders(city); city.stripCol = attachStripColliders(city); if (city.region.fabric && (city.region.fabric.houseKit || city.region.fabric.stripKit)) { camera.layers.enable(KIT_LAYER); env.sunFar.shadow.camera.layers.enable(30); } } // a_houses: kit boxes (lazy per house cell) + the shadow kit is skipped by the far cascade
   if (!CYBER) city.parkCol = attachParkedColliders(city); // a_parkcol: oriented boxes for the ~23k mainland parked cars (own fine grid, appended to col.query)
   if (CYBER) neon = buildNeon(scene, city);
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
