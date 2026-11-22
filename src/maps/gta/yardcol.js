@@ -3,10 +3,11 @@
 //  - runs at the same point as a_edgewalls' collectTrunks: after curbfix -> propfix -> parkfix -> edgewalls (the curbbake / parkbake
 //    input hashes are already taken), reads the final records only and draws no random numbers.
 //  - trunk: fabric.js draws a 5-sided cylinder (vertex radius 0.24 at the base, 0.16 at the top). Its footprint at the collision
-//    height (y 0.5, where col.resolve tests) is approximated by two mirrored oriented boxes, the best two-box fit of a regular
-//    pentagon (least missed + 2x excess area, mirror-symmetric about the vertex axis): excess outside the pentagon <= 0.09 R
-//    (the old square overhung by up to 0.58 R), pentagon tips left out <= 0.26 R. Trees are not rotated (vertex on +z); palms turn
-//    with their yaw and the boxes follow their lean (offset taken at y 0.8). Canopies / fronds get nothing.
+//    height (y 0.5, where col.resolve tests) gets ONE oriented box, the best single-box fit of a regular pentagon (least missed +
+//    2x excess area): shifted 0.079 R off the vertex, 1.39 R x 1.47 R, turned with the pentagon; excess outside it <= 0.13 R (the old
+//    square overhung by up to 0.58 R), pentagon tips left out <= 0.34 R. One convex box on purpose: a two-box union fits better
+//    (93 % vs 83 %) but its notch wedged car circles (col.resolve does two passes), so no concave trunk shapes. Trees are not
+//    rotated (vertex on +z); palms turn with their yaw and the box follows their lean (offset taken at y 0.8). Canopies get nothing.
 //  - hedge (kind 6 body: the lot back-line hedges, after a_edgewalls trimmed the ones inside the arterial walls): one oriented box,
 //    exactly the drawn slab (w x d, full height).
 //  - all of it goes into a_edgewalls' 8 m trunk grid (attachStreetColliders); a box is filed in every cell its AABB touches and a
@@ -14,13 +15,13 @@
 // &noyardcol: a_edgewalls' behaviour (square street trunk boxes, no yard trees, no hedges) in the same build.
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const YARD_OFF = Q.has('noyardcol');
-// two-box pentagon fit, vertex radius 1, vertex on +z: [cx, cz, ang, hl, hw] and its mirror (-cx, cz, -ang)
-const PF = [0.1276, -0.0158, 0.3207, 0.6812, 0.6634];
+// single-box pentagon fit, vertex radius 1, vertex on +z: [cx, cz, ang, hl (x), hw (z)]
+const PF = [0, -0.0789, 0, 0.6958, 0.7369];
 const YH = 0.5; // collision test height (col.resolve y for people / cars)
 export const YTAGS = ['ftree', 'fpalm', 'ytree', 'ypalm', 'hedge'];
 // out: flat array, stride 8 [cx, cz, ux, uz, hl, hw, h, tag]
 function pent(out, x, z, R, yaw, h, tag) { const cb = Math.cos(yaw), sb = Math.sin(yaw);
-  for (const m of [1, -1]) { const px = PF[0] * m * R, pz = PF[1] * R, a = PF[2] * m + yaw; out.push(x + px * cb + pz * sb, z - px * sb + pz * cb, Math.cos(a), -Math.sin(a), PF[3] * R, PF[4] * R, h, tag); } }
+  const px = PF[0] * R, pz = PF[1] * R, a = PF[2] + yaw; out.push(x + px * cb + pz * sb, z - px * sb + pz * cb, Math.cos(a), -Math.sin(a), PF[3] * R, PF[4] * R, h, tag); }
 // palm instance: Euler(p4, p3, p5) order XYZ applied to (0, y, 0)
 function lean(p, y) { const a = p[4], b = p[3], c = p[5]; const x1 = -y * Math.sin(c), y1 = y * Math.cos(c); const x2 = x1 * Math.cos(b), z2 = -x1 * Math.sin(b); const z3 = y1 * Math.sin(a) + z2 * Math.cos(a); return [x2, z3]; }
 export function collectYardCol(fab, yard) { if (YARD_OFF || !fab || !fab.chunks) return null; const T0 = performance.now(); const A = []; const S = { ftree: 0, fpalm: 0, ytree: 0, ypalm: 0, hedge: 0, boxes: 0, ms: 0 };
