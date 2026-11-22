@@ -339,6 +339,7 @@ function facadeAttrs(style, fh, ww, seed, wallC, glassC, up = [0, 0, 0]) {
 // one building volume (polygon footprint) with ground-floor storefront band + upper style
 export function volume(ctx, poly, y0, y1, opts) {
   const { W, col } = ctx; const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+  if (SVC_CTX.dry) { const D = SVC_CTX.dry; if (!(opts.store && y0 < 1)) { D.miss = true; throw D; } D.rec = { poly, y0, seed: rand(0, 100), sw: opts.storeW || 4.5 }; throw D; } // b_svccol: startup replay stops at the store volume (svccol.js)
   const b = W.b('building', cx, cz);
   const seed = rand(0, 100);
   if (y0 < 1.75 && streamed(ctx)) FOOT_LOG.push(poly); // b_parcelfit
@@ -434,6 +435,8 @@ function svcEdgesLot(poly, seed, sw, y0) {
 // steel door hoods, delivery-hatch sill + housing, meter cabinets. Bays from svcface.js (same rule as the shader).
 const SVC_STAT = { edges: 0, alley: 0, bays: 0, open: [0, 0, 0, 0, 0, 0] };
 export { SVC_STAT };
+export const SVC_CORE = []; // b_svccol: the hand-built core's service edges (world frame) -> svccol.js colliders
+export { svcEdgesLot, edgeFrame as svcEdgeFrame }; // b_svccol: startup prediction of a streamed lot's service openings
 function svcFront(b, E, y0, ground, s) {
   const galv = [0.40, 0.43, 0.45], dark = [0.17, 0.18, 0.19], steel = [0.33, 0.34, 0.35], cab = [0.36, 0.39, 0.37], plinth = [0.30, 0.30, 0.29];
   SVC_STAT.edges++; if (s.kind) SVC_STAT.alley++;
@@ -458,7 +461,7 @@ function shopfront(ctx, poly, y0, ground, sw, wall, svc = null) {
   const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 2.5) continue; const n = Math.max(1, Math.round(E.len / sw)); const cw = E.len / n;
-    if (svc && svc[i]) { svcFront(b, E, y0, ground, svc[i]); continue; } // b_alleyface: service frontage instead of shop piers / sign ledge
+    if (svc && svc[i]) { svcFront(b, E, y0, ground, svc[i]); if (!streamed(ctx)) SVC_CORE.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ww: svc[i].ww, ps: svc[i].ps, poly }); continue; } // b_alleyface: service frontage instead of shop piers / sign ledge (b_svccol: core edges logged for their colliders, no rng)
     for (let k = 0; k <= n; k++) { const a = k * cw; lbox(b, E, Math.max(0, a - 0.17), Math.min(E.len, a + 0.17), -0.02, 0.2, y0, y0 + ground - 0.05, pier); }
     const yt = 0.8 * ground; lbox(b, E, 0, E.len, -0.02, 0.3, yt, yt + 0.14, ledge, true);
     lbox(b, E, 0, E.len, -0.02, 0.07, y0, 0.06 * ground + 0.04, kick);

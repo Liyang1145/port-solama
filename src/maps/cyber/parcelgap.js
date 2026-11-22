@@ -25,7 +25,8 @@ import { U } from '../../env.js';
 import { ROOF_LOG, PARCEL_COLS } from './city.js';
 import { predict } from './parcelfit.js'; // b_overlayfit: the drawn footprint of a lot (pure replay of the generator's draws)
 import { PY_OFF, isYard } from './portyard.js'; // r6.4 b_portyard
-import { AF_OFF } from './svcface.js'; // b_alleyface2
+import { AF_OFF, SVC } from './svcface.js'; // b_alleyface2
+import { SC_OFF } from './svccol.js'; // b_svccol
 // b_alleyface2: the slot walls of the streamed lots now carry service-face openings (city.js svcEdgesLot; stream.js logs them on
 // p.svcF in world space). Wall fixtures planned here keep off them with the same draws in the same order: downpipes, conduit drops +
 // junction box and the wall lamp slide along the wall to the nearest clear depth (or are left off), swung-open gate leaves over a
@@ -217,6 +218,7 @@ export class ParcelGapLayer {
       out.push({ t0: Math.min(A.t, B.t) - 0.15, t1: Math.max(A.t, B.t) + 0.15, lo: o.floor ? -1 : o.lo - 0.1, hi: o.hi + 0.05, floor: o.floor, t: o.t }); }
     if (out.length) { this.stats.sv.walls++; this.stats.sv.open += out.length; } return (g[k] = out);
   }
+  svcProud(g, side, a, b) { const O = this.svcOpen(g, side); if (!O) return false; return O.some((o) => (o.t === SVC.HATCH || o.t === SVC.METER) && a < o.t1 && b > o.t0); } // b_svccol: a hatch sill / meter cabinet (with collider) on this wall within depth [a, b]
   svcHit(g, side, a, b, ya, yb, floorOnly = false) { const O = this.svcOpen(g, side); if (!O) return false; return O.some((o) => (!floorOnly || o.floor) && a < o.t1 && b > o.t0 && ya < o.hi && yb > o.lo); }
   // nearest depth t' in [tMin, tMax] whose span [t' + h0, t' + h1] x [ya, yb] is clear of the openings (t itself when clear; null: none)
   svcClear(g, side, t, h0, h1, ya, yb, tMin, tMax, floorOnly = false) {
@@ -234,7 +236,8 @@ export class ParcelGapLayer {
       if (L.t1 && hit(L.t1)) { let nt = null; for (let d = 0.05; d < 9 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = L.t1 + s * d; if (u < 2.2 || u > g.D - 0.6) continue; if (!hit(u)) { nt = u; break; } }
         if (nt === null) S.backStuck++; else { L.t1 = nt; S.backMoved++; } }
       return; }
-    if (L.t1 && L.bBox && L.bBox[L.t1] && L.bBox[L.t2]) { const hit = (t1) => this.svcHit(g, L.sA, t1 - 0.12, t1 + 0.12, 0, 99) || this.svcHit(g, -L.sA, t1 + 1.3 - 0.12, t1 + 1.3 + 0.12, 0, 99);
+    if (L.t1 && L.bBox && L.bBox[L.t1] && L.bBox[L.t2]) { const sc = !SC_OFF(); // b_svccol: the walk-through openings (baffle 1 by wall −sA, baffle 2 by wall sA) also keep clear of the hatch sills / meter cabinets, which have colliders now
+      const hit = (t1) => this.svcHit(g, L.sA, t1 - 0.12, t1 + 0.12, 0, 99) || this.svcHit(g, -L.sA, t1 + 1.3 - 0.12, t1 + 1.3 + 0.12, 0, 99) || (sc && (this.svcProud(g, -L.sA, t1 - 0.5, t1 + 0.5) || this.svcProud(g, L.sA, t1 + 1.3 - 0.5, t1 + 1.3 + 0.5)));
       if (hit(L.t1)) { let nt = null; for (let d = 0.05; d < 9 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = L.t1 + s * d; if (u < 2.6 || u + 1.3 > g.D - 0.7) continue; if (!hit(u)) { nt = u; break; } }
         if (nt === null) S.bafStuck++; else { S.bafMoved++; const old = [L.t1, L.t2]; for (const t of old) { C.remove(L.bBox[t]); delete L['b' + t]; } L.t1 = nt; L.t2 = nt + 1.3; const nb = {};
           for (const [t, side] of [[L.t1, L.sA], [L.t2, -L.sA]]) { const w0 = this.wall(g, t, side), w1 = this.wall(g, t, -side); const dir = Math.sign(w1 - w0); const a = w0 - dir * 0.3, b = w1 - dir * L.ow;

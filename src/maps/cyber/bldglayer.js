@@ -20,6 +20,7 @@ import { RoofLayer } from './roofs.js';
 import { ParcelGapLayer } from './parcelgap.js';
 import { StorefrontLayer } from './storefront.js';
 import { ParcelFit } from './parcelfit.js'; // r6.4 b_parcelfit
+import { SvcCol } from './svccol.js'; // b_svccol
 import { ClutterCols } from './clutter.js'; // r6.4 b_clutter
 import { CLUT_CTX } from './clutcap.js';
 import { yardFurniture } from './portyard.js'; // r6.4 b_portyard
@@ -122,6 +123,7 @@ export class BldgLayer {
         tu.add(i); tu.add(j); add(keyOf(p.x, p.z), { kind: 'bridge', p, q, y, seed: (p.seed * 31 + q.seed) >>> 0 }); this.counts.bridge++; break;
       }
     }
+    this.svccol = new SvcCol(city, this.gaps, this.fit); // b_svccol: service-face hatch / meter colliders + slot baffles / heap in place at startup (svccol.js; after every planner)
   }
   buildChunk(key, list) {
     const W = mkWorld();
