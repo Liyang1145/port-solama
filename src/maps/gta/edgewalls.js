@@ -13,6 +13,7 @@
 //     bollards, seawall bollards) gets fitted oriented boxes, queued by the builders in city.clutAdd and applied here after
 //     every layer is placed. Yard trees (front / back yards of the houses) are left alone: not on a sidewalk.
 // &noedgewalls switches both off (census "before" in the same build).
+import { fileYardBoxes } from './yardcol.js'; // a_yardcol
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const EDGE_OFF = Q.has('noedgewalls');
 const axes = (a) => [[Math.cos(a), -Math.sin(a)], [Math.sin(a), Math.cos(a)]];
@@ -76,17 +77,20 @@ const KT = ['flamp', 'ftree', 'fpalm'];
 // own 8 m grid, every box filed once in the cell of its centre; a query widens by the largest half size (same shape as a_parkcol)
 export function attachStreetColliders(city) { const S = { trunks: 0, clut: 0, byKind: {}, ms: 0 }; const col = city.col; if (EDGE_OFF || !col) return S; const T0 = performance.now();
   for (const c of city.clutAdd || []) { const b = col.addOBB(c.x, c.z, Math.cos(c.ang), -Math.sin(c.ang), c.hl, c.hw, c.h, 'clut'); b.k = c.k; S.clut++; S.byKind[c.k] = (S.byKind[c.k] || 0) + 1; }
-  const fab = city.fabric || (city.region && city.region.fabric); const A = fab && fab._trunks;
-  if (A && A.length && !col._trunks) { const C = 8; let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity, E = 0;
-    for (let i = 0; i < A.length; i += 5) { if (A[i] < x0) x0 = A[i]; if (A[i] > x1) x1 = A[i]; if (A[i + 1] < z0) z0 = A[i + 1]; if (A[i + 1] > z1) z1 = A[i + 1]; if (A[i + 2] > E) E = A[i + 2]; }
-    const I0 = Math.floor(x0 / C), K0 = Math.floor(z0 / C), NI = Math.floor(x1 / C) - I0 + 1, NK = Math.floor(z1 / C) - K0 + 1; const cells = new Array(NI * NK).fill(null); const boxes = [];
-    for (let i = 0; i < A.length; i += 5) { const x = A[i], z = A[i + 1], r = A[i + 2]; const b = { minX: x - r, minZ: z - r, maxX: x + r, maxZ: z + r, h: A[i + 3], tag: KT[A[i + 4]] }; b.o = { cx: x, cz: z, ux: 1, uz: 0, hl: r, hw: r }; boxes.push(b);
-      const j = (Math.floor(x / C) - I0) * NK + (Math.floor(z / C) - K0); (cells[j] || (cells[j] = [])).push(b); S.byKind[b.tag] = (S.byKind[b.tag] || 0) + 1; }
-    const q0 = col.query; E += 0.01;
-    col.query = function (x, z, r, out = []) { q0.call(this, x, z, r, out); const R = r + E; const a0 = Math.max(0, Math.floor((x - R) / C) - I0), a1 = Math.min(NI - 1, Math.floor((x + R) / C) - I0), k0 = Math.max(0, Math.floor((z - R) / C) - K0), k1 = Math.min(NK - 1, Math.floor((z + R) / C) - K0);
-      for (let a = a0; a <= a1; a++) for (let k = k0; k <= k1; k++) { const l = cells[a * NK + k]; if (l) for (let j = 0; j < l.length; j++) { const b = l[j]; if (b.maxX >= x - r && b.minX <= x + r && b.maxZ >= z - r && b.minZ <= z + r) out.push(b); } }
+  const fab = city.fabric || (city.region && city.region.fabric); const A = fab && fab._trunks; const Y = fab && fab._ycol; // a_yardcol: fitted trunk shapes + yard trees + hedges
+  if (((A && A.length) || Y) && !col._trunks) { const C = 8; const boxes = [];
+    // a_yardcol: with Y the street trees / palms come from Y (two fitted boxes each), only the lamps keep their 0.12 m square
+    if (A) for (let i = 0; i < A.length; i += 5) { if (Y && A[i + 4] !== 0) continue; const x = A[i], z = A[i + 1], r = A[i + 2]; boxes.push({ minX: x - r, minZ: z - r, maxX: x + r, maxZ: z + r, h: A[i + 3], tag: KT[A[i + 4]], o: { cx: x, cz: z, ux: 1, uz: 0, hl: r, hw: r } }); }
+    if (Y) fileYardBoxes(Y, (b) => boxes.push(b));
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const b of boxes) { if (b.minX < x0) x0 = b.minX; if (b.maxX > x1) x1 = b.maxX; if (b.minZ < z0) z0 = b.minZ; if (b.maxZ > z1) z1 = b.maxZ; }
+    const I0 = Math.floor(x0 / C), K0 = Math.floor(z0 / C), NI = Math.floor(x1 / C) - I0 + 1, NK = Math.floor(z1 / C) - K0 + 1; const cells = new Array(NI * NK).fill(null);
+    // a_yardcol: every box filed in each cell its AABB touches (hedges are up to ~20 m long); a per-query stamp returns it once
+    for (const b of boxes) { b._s = 0; for (let a = Math.floor(b.minX / C) - I0; a <= Math.floor(b.maxX / C) - I0; a++) for (let k = Math.floor(b.minZ / C) - K0; k <= Math.floor(b.maxZ / C) - K0; k++) { const j = a * NK + k; (cells[j] || (cells[j] = [])).push(b); } S.byKind[b.tag] = (S.byKind[b.tag] || 0) + 1; }
+    const q0 = col.query; let stamp = 0;
+    col.query = function (x, z, r, out = []) { q0.call(this, x, z, r, out); const st = ++stamp; const a0 = Math.max(0, Math.floor((x - r) / C) - I0), a1 = Math.min(NI - 1, Math.floor((x + r) / C) - I0), k0 = Math.max(0, Math.floor((z - r) / C) - K0), k1 = Math.min(NK - 1, Math.floor((z + r) / C) - K0);
+      for (let a = a0; a <= a1; a++) for (let k = k0; k <= k1; k++) { const l = cells[a * NK + k]; if (l) for (let j = 0; j < l.length; j++) { const b = l[j]; if (b._s !== st && b.maxX >= x - r && b.minX <= x + r && b.maxZ >= z - r && b.minZ <= z + r) { b._s = st; out.push(b); } } }
       return out; };
-    col._trunks = { boxes, cells, C, I0, K0, NI, NK }; S.trunks = boxes.length; fab._trunks = null; }
+    col._trunks = { boxes, cells, C, I0, K0, NI, NK }; S.trunks = boxes.length; if (fab) { fab._trunks = null; fab._ycol = null; } }
   S.ms = Math.round(performance.now() - T0); return S; }
 // queue a fitted oriented box for an island kerb item (applied by attachStreetColliders after every layer is placed)
 export function queueClut(city, k, x, z, ang, hl, hw, h) { (city.clutAdd = city.clutAdd || []).push({ k, x, z, ang, hl, hw, h }); }
