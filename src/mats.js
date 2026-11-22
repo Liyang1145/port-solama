@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
 import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
-import { envReg, envPatch, envFamily } from './envprog.js'; // b_envprog: merged environment programs
+import { envReg, envPatch, envFamily, OLDENV } from './envprog.js'; // b_envprog: merged environment programs
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
@@ -13,7 +13,7 @@ export function prep(mat, key = 'std', patch = null) {
   mat.onBeforeCompile = function (s, r) {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
     if (patch) patch(s);
-    if (this.userData.envOn) envPatch(s, this); // b_envprog: normalised environment material (see envprog.js)
+    if (this.userData.envOn) envPatch(s, this, U); // b_envprog: normalised environment material (see envprog.js)
   };
   // b_verify ?shotfast (test only): unpatched names share one program ('std'): same shader text, so the same pixels, fewer SwiftShader JITs
   // b_envprog: normalised materials share one program per family, 'std' for every unpatched name (?oldenvmat: old keys)
@@ -860,6 +860,8 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   M.metal = prep(new THREE.MeshStandardMaterial({ color: 0x5a5d60, roughness: 0.45, metalness: 0.85 }), 'metal');
   M.darkmetal = prep(new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.5, metalness: 0.6 }), 'dmetal');
   M.glassRail = prep(new THREE.MeshStandardMaterial({ color: 0x8fb4b8, roughness: 0.05, metalness: 0.9, transparent: true, opacity: 0.45 }), 'grail');
+  // b_envprog: the glow term lives in the shared environment program (uEK = 1); ?oldenvmat keeps the 'neon' patch
+  if (!OLDENV) { const nm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, color: 0x222222 }); nm.userData.envEK = 1; M.neon = prep(nm, 'neon'); } else
   M.neon = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, color: 0x222222 }), 'neon', (s) => {
     s.uniforms.uNight = U.uNight;
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')

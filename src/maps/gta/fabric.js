@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { shoreX, mulberry } from './mapgeo.js';
 import { prep } from '../../mats.js';
 import { U } from '../../env.js';
+import { OLDENV } from '../../envprog.js'; // b_envprog
 
 export const XL = [-3560, -3180, -2800, -2420, -2040, -1740, -1345]; // x-lines (west -> east); index 7 = coastal boulevard
 export const ZL = [-2856, -2408, -1960, -1512, -1064, -504, 56, 504, 1064, 1512, 1960, 2408, 2856];
@@ -570,13 +571,23 @@ function mats(M) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.12, fGlass); if (fk > 5.5 && fk < 6.5) roughnessFactor = 1.0;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * vec3(1.0, 0.72, 0.42) * 1.6;');
   });
-  const roof = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), 'fabRoof', (s) => {
+  // b_envprog: roof / tree / flat differed only in one colour line -> one program, branch picked by uniform uFS (?oldenvmat: 3 programs)
+  const fabSmall = (kind) => (s) => { s.uniforms.uFS = { value: kind };
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uFS; varying vec3 vFW; varying vec3 vIB; varying float vIH;' + HASH)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+  if (uFS < 0.5) { float rows = fract((vFW.y - vIB.y) * 3.2); diffuseColor.rgb *= 0.86 + 0.14 * smoothstep(0.0, 0.25, rows); diffuseColor.rgb *= 0.88 + 0.2 * fnoise(vFW.xz * 0.9 + vIB.xz); }
+  else if (uFS < 1.5) { float n = fnoise(vFW.xz * 1.3 + vFW.y * 1.1) * 0.6 + fnoise(vFW.xy * 3.1 + vFW.zz) * 0.4; diffuseColor.rgb *= 0.62 + 0.62 * n; diffuseColor.rgb *= 0.8 + 0.35 * clamp((vFW.y - vIB.y) / 4.0, 0.0, 1.0); }
+  else { diffuseColor.rgb *= 0.86 + 0.2 * fnoise(vFW.xz * 0.8) ; }`); };
+  const roof = !OLDENV ? prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), 'fabS', fabSmall(0)) :
+  prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), 'fabRoof', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;' + HASH)
       .replace('#include <color_fragment>', `#include <color_fragment>
   { float rows = fract((vFW.y - vIB.y) * 3.2); diffuseColor.rgb *= 0.86 + 0.14 * smoothstep(0.0, 0.25, rows); diffuseColor.rgb *= 0.88 + 0.2 * fnoise(vFW.xz * 0.9 + vIB.xz); }`);
   });
-  const tree = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), 'fabTree', (s) => {
+  const tree = !OLDENV ? prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), 'fabS', fabSmall(1)) :
+  prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), 'fabTree', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;' + HASH)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -585,7 +596,8 @@ function mats(M) {
   const palm = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.9, side: THREE.DoubleSide }), 'fabPalm');
   const trunk = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 }), 'fabTrunk');
   const car = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.35, metalness: 0.4 }), 'fabCar');
-  const flat = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), 'fabFlat', (s) => {
+  const flat = !OLDENV ? prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), 'fabS', fabSmall(2)) :
+  prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), 'fabFlat', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;' + HASH).replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= 0.86 + 0.2 * fnoise(vFW.xz * 0.8) ;');
   });
@@ -616,7 +628,8 @@ function mats(M) {
   });
   const roadF = M.road.clone(); roadF.onBeforeCompile = M.road.onBeforeCompile; roadF.customProgramCacheKey = M.road.customProgramCacheKey; roadF.polygonOffset = true; roadF.polygonOffsetFactor = -1; roadF.polygonOffsetUnits = -4;
   const walkF = M.sidewalk.clone(); walkF.onBeforeCompile = M.sidewalk.onBeforeCompile; walkF.customProgramCacheKey = M.sidewalk.customProgramCacheKey; walkF.polygonOffset = true; walkF.polygonOffsetFactor = -1; walkF.polygonOffsetUnits = -5;
-  const lampM = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.5 }), 'fabLamp', (s) => {
+  // b_envprog: lamp-head glow in the shared environment program (uEK = 2); ?oldenvmat keeps the 'fabLamp' patch
+  const lampM = !OLDENV ? prep(Object.assign(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.5 }), { userData: { envEK: 2 } }), 'fabLamp') : prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.5 }), 'fabLamp', (s) => {
     s.uniforms.uNight = U.uNight; s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += step(0.9, vColor.r) * uNight * vec3(1.0, 0.72, 0.42) * 6.0;'); });
   const glow = prep(new THREE.MeshBasicMaterial({ color: 0xffb070, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -10 }), 'fabGlow', (s) => {

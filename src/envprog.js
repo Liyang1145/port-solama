@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 
 export const OLDENV = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldenvmat');
+const DBG = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('envdbg') || '') : ''; // test-only bisect switches
 export const envStats = { mats: 0, skipped: 0, ph: 0, cull: 0, blend: 0, vc: 0 };
 // patched families whose patch differs only in constants (now uniforms) share one program
 const FAM = { leaf: 'fol', tbark: 'fol', frond: 'fol', ptrunk: 'fol', pcrown: 'fol', jleaf: 'fol', jvine: 'fol', fern: 'fol', jpalm: 'fol', bigleaf: 'fol', litter: 'fol', grassb: 'wind', flower: 'wind' };
@@ -33,6 +34,8 @@ export function envFamily(key, patched) { return patched ? (FAM[key] || key) : '
 export function envReg(mat, key, patched) {
   if (OLDENV || !mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || key === 'npc' || key === 'ch') return;
   mat.userData.envFam = envFamily(key, patched); PENDING.add(mat); hook();
+  // Material.clone() drops onBeforeCompile / customProgramCacheKey: clones keep the hooks and are normalised too
+  if (!mat.__envClone && !DBG.includes('noclone')) { mat.__envClone = 1; const c0 = mat.clone; mat.clone = function () { const c = c0.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = this.customProgramCacheKey; c.clone = this.clone; c.__envClone = 1; if (!c.userData.envOn) PENDING.add(c); return c; }; }
 }
 
 function normalise(m) {
@@ -56,12 +59,13 @@ function normalise(m) {
     m.userData.envCull = s0; if (sh !== THREE.DoubleSide) m.userData.envDCull = sh;
     m.side = THREE.DoubleSide; m.shadowSide = THREE.DoubleSide; if (m.transparent) m.forceSinglePass = true; envStats.cull++;
   }
-  m.userData.eu = { uEVC: { value: vc }, uEOpq: { value: opq ? 1 : 0 }, uENM: { value: nm } };
+  m.userData.eu = { uEVC: { value: vc }, uEOpq: { value: opq ? 1 : 0 }, uENM: { value: nm }, uEK: { value: m.userData.envEK || 0 } };
   m.userData.envOn = 1; m.needsUpdate = true;
-  if (!m.__envClone) { m.__envClone = 1; const c0 = m.clone; m.clone = function () { const c = c0.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = this.customProgramCacheKey; c.clone = this.clone; return c; }; }
 }
 
-export function envFlush() { if (!PENDING.size) return; for (const m of PENDING) normalise(m); PENDING.clear(); }
+export function envFlush() {
+  if (PENDING.size) { for (const m of PENDING) normalise(m); PENDING.clear(); }
+}
 
 // shader edits common to every normalised program (identical text -> one program per family)
 const ENV_VC = `#if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA ) || defined( USE_INSTANCING_COLOR ) || defined( USE_BATCHING_COLOR )
@@ -76,11 +80,15 @@ const ENV_VC = `#if defined( USE_COLOR ) || defined( USE_COLOR_ALPHA ) || define
 	vColor.rgb *= instanceColor.rgb;
 #endif`;
 const ENV_AT = '#ifdef USE_ALPHATEST\nif ( alphaTest > 0.0015 && diffuseColor.a < alphaTest ) discard;\n#endif';
-export function envPatch(s, m) {
-  Object.assign(s.uniforms, m.userData.eu);
+// uEK: small emissive patches folded in (were their own programs): 1 = 'neon' trims (vertex colour glow), 2 = 'fabLamp' heads
+const ENV_EK = `#include <emissivemap_fragment>
+  if ( uEK > 0.5 ) totalEmissiveRadiance += uEK < 1.5 ? vColor.rgb * ( 0.25 + uENight * 5.0 ) : step( 0.9, vColor.r ) * uENight * vec3( 1.0, 0.72, 0.42 ) * 6.0;`;
+export function envPatch(s, m, U) {
+  Object.assign(s.uniforms, m.userData.eu); s.uniforms.uENight = U.uNight; // own name: family patches declare uNight themselves
   s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uEVC;').replace('#include <color_vertex>', ENV_VC);
   // flat placeholder normal map: keep the normal exactly as it was before the normal-map step (patches may bend it in between)
-  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uEOpq; uniform float uENM;')
+  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uEOpq; uniform float uENM; uniform float uEK; uniform float uENight;')
+    .replace('#include <emissivemap_fragment>', DBG.includes('noek') ? '#include <emissivemap_fragment>' : ENV_EK)
     .replace('#include <normal_fragment_maps>', 'vec3 eN0 = normal;\n#include <normal_fragment_maps>\nif ( uENM < 0.5 ) normal = eN0;')
     .replace('#include <alphatest_fragment>', ENV_AT)
     .replace('#include <opaque_fragment>', 'if ( uEOpq > 0.5 ) diffuseColor.a = 1.0;\n#include <opaque_fragment>');
@@ -93,8 +101,23 @@ function hook() { HOOKED = true; } // kept for clarity: the renderer is wrapped 
 export function envInstall(r) {
   if (OLDENV || r.__envInst) return; r.__envInst = true;
   for (const fn of ['render', 'compile', 'compileAsync']) { const f0 = r[fn]; if (typeof f0 !== 'function') continue; r[fn] = function (...a) { envFlush(); return f0.apply(this, a); }; }
-  wrapRenderer(r);
+  if (!DBG.includes('noic')) icAccessor(); wrapRenderer(r);
 }
+// instanced meshes whose materials are all normalised read a white instanceColor (x1) when they have none, so 'instanced' and
+// 'instanced + colour' share programs. Done in an accessor so the buffer exists before three uploads the frame's attributes and
+// picks the program (a buffer attached mid-draw would stay unbound in the cached VAO); code that sets or fills its own colours
+// (setColorAt, nature.js grass) goes through the same accessor unchanged.
+function icAccessor() {
+  const P = THREE.InstancedMesh.prototype; if (Object.getOwnPropertyDescriptor(P, 'instanceColor')) return;
+  Object.defineProperty(P, 'instanceColor', { configurable: true,
+    set(v) { this.__ic = v; },
+    get() { let ic = this.__ic; const im = this.instanceMatrix; if (!im) return ic === undefined ? null : ic;
+      if (ic) { if (ic.__env && ic.count < im.count) ic = this.__ic = whiteIC(im.count); return ic; }
+      const ms = Array.isArray(this.material) ? this.material : [this.material];
+      if (ms.length && ms.every((m) => m && m.userData.envOn)) return (this.__ic = whiteIC(im.count));
+      return ic === undefined ? null : ic; } });
+}
+function whiteIC(n) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); a.__env = 1; return a; }
 function wrapRenderer(r) {
   if (r.__envWrap) return; r.__envWrap = true; const st = r.state; const gl = r.getContext();
   const rbd = r.renderBufferDirect; r.renderBufferDirect = function (camera, scene, geometry, material, object, group) { CUR = object; CURG = group; return rbd.call(this, camera, scene, geometry, material, object, group); };
