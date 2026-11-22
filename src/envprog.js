@@ -3,7 +3,8 @@
 // the first frame (ANGLE/D3D: FXC, serial; sandbox: SwiftShader JIT). Many environment programs differed only in parameters that
 // can be made uniform without changing the result:
 //  1. which texture slots are bound -> missing map / emissiveMap filled with a shared 1x1 white (multiplies by 1), roughness /
-//     metalness with 1x1 white (x1), normalMap with a flat 1x1 + normalScale 0 (result = the geometric normal);
+//     metalness with 1x1 white (x1), normalMap with a flat 1x1 + normalScale 0, and uniform uENM = 0 keeps the normal exactly as
+//     it was before the normal-map step (foliage patches bend back-face normals before it);
 //  2. vertexColors on/off -> always on in the program; uniform uEVC = 0 replaces the vertex colour by exactly 1.0 (the attribute
 //     may be absent: the generic attribute value is finite, mix(1, c, 0) == 1);
 //  3. opaque vs transparent (OPAQUE define) -> opaque materials use NoBlending (the same GL state three uses for opaque) and
@@ -43,7 +44,7 @@ function normalise(m) {
   const P = ph(); envStats.mats++;
   if (!m.map) { m.map = P.white; envStats.ph++; }
   if (!m.emissiveMap) { m.emissiveMap = P.white; envStats.ph++; }
-  if (!m.normalMap) { m.normalMap = P.flat; m.normalScale.set(0, 0); envStats.ph++; }
+  const nm = m.normalMap ? 1 : 0; if (!nm) { m.normalMap = P.flat; m.normalScale.set(0, 0); envStats.ph++; }
   if (!m.roughnessMap) { m.roughnessMap = P.lin; envStats.ph++; }
   if (!m.metalnessMap) { m.metalnessMap = P.lin; envStats.ph++; }
   const vc = m.vertexColors ? 1 : 0; if (!vc) { m.vertexColors = true; envStats.vc++; }
@@ -55,7 +56,7 @@ function normalise(m) {
     m.userData.envCull = s0; if (sh !== THREE.DoubleSide) m.userData.envDCull = sh;
     m.side = THREE.DoubleSide; m.shadowSide = THREE.DoubleSide; if (m.transparent) m.forceSinglePass = true; envStats.cull++;
   }
-  m.userData.eu = { uEVC: { value: vc }, uEOpq: { value: opq ? 1 : 0 } };
+  m.userData.eu = { uEVC: { value: vc }, uEOpq: { value: opq ? 1 : 0 }, uENM: { value: nm } };
   m.userData.envOn = 1; m.needsUpdate = true;
   if (!m.__envClone) { m.__envClone = 1; const c0 = m.clone; m.clone = function () { const c = c0.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = this.customProgramCacheKey; c.clone = this.clone; return c; }; }
 }
@@ -78,7 +79,9 @@ const ENV_AT = '#ifdef USE_ALPHATEST\nif ( alphaTest > 0.0015 && diffuseColor.a 
 export function envPatch(s, m) {
   Object.assign(s.uniforms, m.userData.eu);
   s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uEVC;').replace('#include <color_vertex>', ENV_VC);
-  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uEOpq;')
+  // flat placeholder normal map: keep the normal exactly as it was before the normal-map step (patches may bend it in between)
+  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uEOpq; uniform float uENM;')
+    .replace('#include <normal_fragment_maps>', 'vec3 eN0 = normal;\n#include <normal_fragment_maps>\nif ( uENM < 0.5 ) normal = eN0;')
     .replace('#include <alphatest_fragment>', ENV_AT)
     .replace('#include <opaque_fragment>', 'if ( uEOpq > 0.5 ) diffuseColor.a = 1.0;\n#include <opaque_fragment>');
 }
