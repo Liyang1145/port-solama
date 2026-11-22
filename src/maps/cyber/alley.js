@@ -23,6 +23,8 @@ import { cnFace, plume } from './street2.js';
 
 // b_overlayfit test switch: ?nooverlayfit dresses the alleys exactly as before this lane
 const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
+// b_core test switch: ?nobcore puts the wall fixtures back on the bounding-box face (over the rounded Deco hotel corners)
+const BC_OFF = typeof location !== 'undefined' && /[?&]nobcore/.test(location.search);
 const BAGY = 0.0788; // lowest point of the unit bag above its origin
 const ON_R = 70, OFF_R = 78; // alleys sit 150 m apart (z) -> at most one row (2 alleys) active; detail is hidden by the walls beyond this anyway
 
@@ -144,7 +146,16 @@ export class AlleyLayer {
     for (const b of near) {
       if (b.minZ < zc - 0.5 && b.maxZ > zc + 0.5) continue;
       const s = b.maxZ <= zc ? 1 : -1; const zw = s > 0 ? b.maxZ : b.minZ; if (Math.abs(zw - zc) > hw + 2.2) continue;
-      const wa = Math.max(b.minX, xs), wb = Math.min(b.maxX, xe); if (wb - wa < 3) continue;
+      let wa = Math.max(b.minX, xs), wb = Math.min(b.maxX, xe); if (wb - wa < 3) continue;
+      // b_core: a Deco hotel with rounded front corners (city.js volume() leaves the real footprint on its box as b.poly) only has
+      // a flat wall on the alley side where its polygon has an edge on the box face; over the rounded corner the face curves in by
+      // up to R = 3.2 m, so AC units, conduit runs, cables and crates hung on the box face floated in front of the curved glass at
+      // the alley mouth. Clip the wall to the straight part of the polygon edge.
+      if (!BC_OFF && b.poly) { const P = b.poly, n = P.length; let sa = Infinity, sb = -Infinity;
+        for (let i = 0; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; if (Math.abs(p[1] - zw) < 0.05 && Math.abs(q[1] - zw) < 0.05) { sa = Math.min(sa, p[0], q[0]); sb = Math.max(sb, p[0], q[0]); } }
+        const ca = Math.max(wa, sa + 0.1), cb = Math.min(wb, sb - 0.1); const st = this.stats.bcore || (this.stats.bcore = { walls: 0, cut: 0, cutLen: 0, dropped: 0 });
+        if (ca > wa + 1e-3 || cb < wb - 1e-3) { st.cut++; st.cutLen += Math.max(0, ca - wa) + Math.max(0, wb - cb); }
+        if (cb - ca < 3) { st.dropped++; continue; } wa = ca; wb = cb; st.walls++; }
       walls.push({ s, zw, wa, wb, h: b.h, y0: city.groundH((wa + wb) / 2, zc) });
     }
     const A = { a, idx, xs, xe, z: zc, through: xs <= a.x0 + 0.01 && xe >= a.x1 - 0.01, walls, inst: {}, uniq: [], cols: [], cx: (xs + xe) / 2 };
