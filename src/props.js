@@ -333,9 +333,10 @@ export function updateProps(P, cam, night, phase) {
     P.signal.green.color.setRGB(nsGreen ? 0.1 : 0.01, nsGreen ? 3.0 : 0.06, nsGreen ? 1.2 : 0.03);
   }
 }
-// b_lampfix (霓港 only): the 10 cool-LED street-lamp point lights were 60 / range 30 / decay 1.6 — a lamp head 8.6 m up lit the
-// asphalt under it ~16x brighter than the moon key and turned the stall-street road into white patches. New default: a dimmer,
-// shorter, physically-falling-off pool so the road reads as a lamp pool and the neon practicals stay the key light.
+// b_lampfix (霓港 only): the stall-street road under the cool-LED lamps was a white sheet. Measured (same camera, post on): the
+// additive 16 m ground-pool decal (gain 0.55 × cool white) gave almost all of it; the 10 point lights (60 / range 30 / decay 1.6)
+// added the pink/cyan specular blobs on the wet asphalt. New default: decal 0.45 gain on a 0.7× radius (a pool with an edge),
+// point lights 24 / 24 / 2.0, wet streaks unchanged — the road keeps lamp pools, the neon stays the key light.
 //   K = [intensity, range m, decay, ground-pool decal gain, wet-streak gain, ground-pool radius scale (build time)]; ?oldlamp → the old values (for comparison);
 //   ?lampk=I,R,D,pool,streak,poolscale overrides for tuning; globalThis.__LAMPK = [...] swaps them at runtime (test plans).
 // Map 索拉纳港 (A) keeps 60 / 30 / 1.6 untouched. No new lights, no new shader programs (distance / decay / colours are uniforms).
