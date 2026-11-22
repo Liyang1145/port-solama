@@ -74,7 +74,7 @@ function port(ctx, p) {
   for (let x = -hx + 2; x < hx - 2.4; x += 3) for (let z = -hz + 1; z < hz - 12; z += 13.2) { const n = randi(1, 4); for (let k = 0; k < n; k++) { const c = pick(CC); box(v, x, 0.05 + k * 2.6, z, x + 2.44, 0.05 + (k + 1) * 2.6, z + 12.2, {}, c, false);
     for (let r = 1; r < 12; r++) box(v, x - 0.05, 0.15 + k * 2.6, z + r * 1.0, x + 2.49, 2.5 + k * 2.6, z + r * 1.0 + 0.08, {}, c.map((q) => q * 0.72)); } }
 }
-function genParcel(ctx, p) {
+export function genParcel(ctx, p) { // b_parcelfit: exported for the footprint census (tests only)
   const hx = p.d / 2, hz = p.w / 2;
   switch (p.style) {
     case 'deco': decoHotel(ctx, -hx, -hz, hx, hz, false, 1); break;

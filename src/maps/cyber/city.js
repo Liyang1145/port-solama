@@ -22,13 +22,20 @@ const Q_NOSP = Q_NOPALM || (typeof location !== 'undefined' && /[?&]nostreetpeds
 const streamed = (ctx) => !(ctx.col instanceof ColliderGrid);
 
 // v4.4: an oriented box as a few axis-aligned slices (the collider grid is AABB-only)
+// b_parcelfit: returns the boxes it added (PARCEL_COLS keeps them per streamed parcel; no rng use)
 export function obbCollider(col, cx, cz, hx, hz, ang, h, tag = 'bld') {
-  const c = Math.cos(ang), s = Math.sin(ang); const ax = Math.abs(c), az = Math.abs(s);
-  if (ax < 0.08 || az < 0.08) { const ex = ax * hx + az * hz, ez = az * hx + ax * hz; col.add(cx - ex, cz - ez, cx + ex, cz + ez, h, tag); return; }
+  const c = Math.cos(ang), s = Math.sin(ang); const ax = Math.abs(c), az = Math.abs(s); const out = [];
+  if (ax < 0.08 || az < 0.08) { const ex = ax * hx + az * hz, ez = az * hx + ax * hz; out.push(col.add(cx - ex, cz - ez, cx + ex, cz + ez, h, tag)); return out; }
   const long = hx >= hz; const L = long ? hx : hz, S = long ? hz : hx; const n = Math.max(2, Math.ceil(L / Math.max(1.5, S * 0.7)));
   const ux = long ? c : -s, uz = long ? s : c; // long axis
-  for (let i = 0; i < n; i++) { const t = -L + (2 * L) * (i + 0.5) / n; const x = cx + ux * t, z = cz + uz * t; const r = Math.max(S * 0.82, L / n) * 0.92; col.add(x - r * 0.75, z - r * 0.75, x + r * 0.75, z + r * 0.75, h, tag); }
+  for (let i = 0; i < n; i++) { const t = -L + (2 * L) * (i + 0.5) / n; const x = cx + ux * t, z = cz + uz * t; const r = Math.max(S * 0.82, L / n) * 0.92; out.push(col.add(x - r * 0.75, z - r * 0.75, x + r * 0.75, z + r * 0.75, h, tag)); }
+  return out;
 }
+// b_parcelfit: streamed parcel -> its building collider boxes (city.js obbCollider, replaced by parcelgap.js / parcelfit.js)
+export const PARCEL_COLS = new WeakMap();
+// b_parcelfit: footprints (parcel frame) of the walking-height volumes a streamed parcel's generator lays (volume() y0 < 1.75);
+// parcelfit.js reads them per parcel (Stream.onParcel) to check its startup prediction. No rng use.
+export const FOOT_LOG = [];
 export const LAYOUT = {
   // v4.0 "one perfect district": only the Deco beachfront (Tideline Dr, x=290), two inner avenues (x=170, x=50) and five cross
   // streets survive; downtown across the bay is a low-poly skyline silhouette (no roads, no colliders).
@@ -188,7 +195,7 @@ export function buildCity(scene, mats, T) {
   const parcels = genParcels(graph);
   const wild = wildField(graph); // v4.5 草原 / 雨林 height field (src/nature.js)
   for (const p of parcels) {
-    if (p.far) continue; obbCollider(col, p.x, p.z, p.d / 2, p.w / 2, p.ang, p.h);
+    if (p.far) continue; PARCEL_COLS.set(p, obbCollider(col, p.x, p.z, p.d / 2, p.w / 2, p.ang, p.h));
     if (p.style === 'canal' || p.style === 'villa' || p.style === 'mansion') { const bx = -Math.cos(p.ang), bz = -Math.sin(p.ang); // back yard palm
       const x = p.x + bx * (p.d / 2 + 3), z = p.z + bz * (p.d / 2 + 3); if (landAt(x, z) && !graph.index.near(x, z)) palms.push({ x, z, h: rand(7, 12), lean: rand(-0.08, 0.08), rot: rand(0, 6.28), s: 1, region: true }); }
   }
@@ -326,6 +333,7 @@ export function volume(ctx, poly, y0, y1, opts) {
   const { W, col } = ctx; const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
   const b = W.b('building', cx, cz);
   const seed = rand(0, 100);
+  if (y0 < 1.75 && streamed(ctx)) FOOT_LOG.push(poly); // b_parcelfit
   const ground = opts.ground ?? 4.6;
   if (opts.store && y0 < 1) {
     prismWalls(b, poly, y0, y0 + ground, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]), null, 0, true);

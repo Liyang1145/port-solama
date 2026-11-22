@@ -22,7 +22,7 @@ import * as THREE from 'three';
 import { mulberry, withSeed, rng, rand, randi, pick } from '../../util.js';
 import { prep } from '../../mats.js';
 import { U } from '../../env.js';
-import { ROOF_LOG } from './city.js';
+import { ROOF_LOG, PARCEL_COLS } from './city.js';
 
 const CH = 160, RMAX = 150, BUDGET = 15000, /* layer triangles; the frame draws it ~3x (main + 2 extra scene passes) */ GMAX = 3.3, NARROW = 1.2;
 const URBAN = new Set(['deco', 'mid', 'downtown', 'condo', 'port']);
@@ -153,7 +153,7 @@ export class ParcelGapLayer {
     let n = 0, rm = 0;
     for (const p of ps) { const c = Math.cos(p.ang), s = Math.sin(p.ang); const inP = (x, z) => { const dx = x - p.x, dz = z - p.z; return Math.abs(dx * c + dz * s) <= p.d / 2 + 0.3 && Math.abs(-dx * s + dz * c) <= p.w / 2 + 0.3; };
       const r = Math.hypot(p.d, p.w) / 2 + 2; const own = col.query(p.x, p.z, r, []).filter((b) => b.tag === 'bld' && !b.o && inP((b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2));
-      if (!own.length) continue; for (const b of own) col.remove(b); rm += own.length; col.addOBB(p.x, p.z, c, s, p.d / 2, p.w / 2, p.h, 'bld'); n++; }
+      if (!own.length) continue; for (const b of own) col.remove(b); rm += own.length; PARCEL_COLS.set(p, [col.addOBB(p.x, p.z, c, s, p.d / 2, p.w / 2, p.h, 'bld')]); n++; }
     this.stats.exact = n; this.stats.exactRemoved = rm;
   }
   // lowest roof deck the parcel's generator just logged (read only; roofs.js consumes the log right after) -> wall-height cap

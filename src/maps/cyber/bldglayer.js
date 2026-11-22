@@ -18,6 +18,7 @@ import { AlleyLayer } from './alley.js';
 import { RoofLayer } from './roofs.js';
 import { ParcelGapLayer } from './parcelgap.js';
 import { StorefrontLayer } from './storefront.js';
+import { ParcelFit } from './parcelfit.js'; // r6.4 b_parcelfit
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -86,6 +87,8 @@ export class BldgLayer {
       if ((dt || p.style === 'mid' || q.style === 'mid') && hmin > 14 && r < (dt ? 0.4 : 0.22)) { used.add(i); used.add(best); add(keyOf(A.x, A.z), { kind: 'walk', A, B: Bp, y: Math.min(hmin - 4, 6.5 + R() * 2.5), seed, dt }); this.counts.walk++; }
       else if (p.style !== 'downtown' && q.style !== 'downtown' && hmin > 9 && r < 0.75) { used.add(i); used.add(best); add(keyOf(A.x, A.z), { kind: 'cables', A, B: Bp, hmin, seed }); this.counts.cables++; }
     }
+    // r6.4 b_parcelfit: streamed-parcel colliders fitted to the drawn footprint + shop rows (parcelfit.js; after every planner, chains onParcel)
+    this.fit = new ParcelFit(city, [...this.items.values()].flat().filter((it) => it.kind === 'side'));
     // sky bridges between megatowers
     const tall = P.filter((p) => p.style === 'downtown' && p.h >= 90 && p.w > 26 && p.d > 26); const tu = new Set();
     for (let i = 0; i < tall.length; i++) {
