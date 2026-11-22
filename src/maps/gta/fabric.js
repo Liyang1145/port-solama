@@ -498,6 +498,7 @@ function dtFill(fab, b, col) {
     const kind = r < 0.25 ? 5 : r < 0.6 ? 4 : 3; const h = kind === 5 ? rr(12, 21) : rr(14, 30) + tall * rr(15, 70);
     const wall = kind === 4 ? pickR(fab, [[0.78, 0.80, 0.82], [0.86, 0.86, 0.84], [0.70, 0.74, 0.78], [0.90, 0.88, 0.82]]) : kind === 5 ? [0.80, 0.79, 0.76] : pickR(fab, WALLS);
     addBody(fab, cx, cz, 0, w, d, h, 0, wall, kind, col);
+    { const I = chunkOf(fab, cx, cz).I.body; (fab.dtBodies || (fab.dtBodies = [])).push({ rec: I[I.length - 1], cx, cz, w, d, h, kind, b }); } // a_downtown: podium pass (downtown.js) reads these after the bake hashes
     if (kind !== 5 && h > 25 && R() < 0.6) addBody(fab, cx + rr(-w * 0.15, w * 0.15), cz + rr(-d * 0.15, d * 0.15), h, w * rr(0.45, 0.7), d * rr(0.45, 0.7), rr(4, 12), 0, wall, kind, col);
   }
 }
@@ -698,10 +699,60 @@ function mats(M) {
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.08, 0.085, 0.09), open);
     } else if (fk < 6.5) { diffuseColor.rgb *= 0.75 + 0.45 * fnoise(vec2(fu, fy) * 2.3); } // hedge
   }
+  float dtCov = -1.0; // a_downtown: downtown podium coverage for the far-view average (-1 = not a podium pixel)
+  if (fn.y > -0.5 && fn.y < 0.5) {
+    float dtF = vK.x - fk; bool dtM = fk > 2.5 && fk < 5.5 && dtF > 0.1; float lu = dot(vFW.xz - vIB.xz, ft);
+    // dtM: generated downtown mid-rise (3 residential 4 office 5 garage, street face in the fraction); 18 lobby glazing panel (towers)
+    float GF = dtM ? (fk < 3.5 ? 4.4 : fk < 4.5 ? 4.8 : 3.8) : vIH;
+    if ((dtM || (fk > 17.5 && fk < 18.5)) && fy < GF) {
+      float sF = floor((dtF - 0.15) / 0.07 + 0.5); vec2 sN = !dtM || sF > 3.5 ? vec2(0.0) : sF < 0.5 ? vec2(-1.0, 0.0) : sF < 1.5 ? vec2(1.0, 0.0) : sF < 2.5 ? vec2(0.0, -1.0) : vec2(0.0, 1.0);
+      float ent = step(0.9, dot(fn.xz, sN)) * step(abs(lu), 1.75); // double entrance door at the middle of the street face
+      float pl = step(fy, 0.55), fas = step(GF - 0.9, fy); float jn = step(fract(lu / 1.2 + 0.5), 0.025);
+      vec3 gran = mix(vec3(0.24, 0.235, 0.23), vec3(0.37, 0.355, 0.34), fh12(vec2(floor(lu / 1.2 + 0.5), fsd * 9.0))) * (1.0 - 0.45 * jn) * (1.0 - 0.3 * step(abs(fy - 0.53), 0.02));
+      vec3 fasC = vec3(0.72, 0.69, 0.63) * (1.0 - 0.35 * step(abs(fy - (GF - 0.45)), 0.018)) * (1.0 - 0.25 * step(GF - 0.06, fy)) * (1.0 - 0.3 * step(abs(fy - (GF - 0.9)), 0.03));
+      vec3 frmC = vec3(0.16, 0.15, 0.14);
+      if (dtM && fk > 4.5) { // garage base: board-formed concrete, a vehicle entry on the street face (striped header, clearance bar), louvre bands
+        float op = step(0.9, dot(fn.xz, sN)) * step(abs(lu), 3.1) * step(fy, 3.0); float hd = step(0.9, dot(fn.xz, sN)) * step(abs(lu), 3.4) * step(3.0, fy) * step(fy, 3.38);
+        vec3 conc = vec3(0.60, 0.59, 0.56) * (0.92 + 0.08 * step(0.5, fract(fy / 0.3))) * (1.0 - 0.3 * step(fract(lu / 4.0 + 0.5), 0.012));
+        float lv = (1.0 - op) * step(1.2, fy) * step(fy, 2.9) * step(0.12, fract(lu / 4.0 + 0.5)) * step(fract(lu / 4.0 + 0.5), 0.88) * step(0.45, fract(fy / 0.12));
+        vec3 c = mix(conc, vec3(0.13, 0.135, 0.14), lv); c = mix(c, gran, pl * (1.0 - op));
+        c = mix(c, mix(vec3(0.08), vec3(0.88, 0.70, 0.10), step(0.5, fract((lu + fy) / 0.5))), hd);
+        float bar = op * step(abs(fy - 2.45), 0.06) * step(abs(lu), 2.6); c = mix(c, mix(vec3(0.85, 0.66, 0.10), vec3(0.1), step(0.5, fract(lu / 0.6))), bar);
+        c = mix(c, vec3(0.045, 0.047, 0.05) * (1.0 + 2.0 * step(2.6, fy)), op * (1.0 - bar));
+        diffuseColor.rgb = c; fGlass = 0.0; fLit = 0.0; fEm = op * (1.0 - bar) * step(2.75, fy) * step(fy, 2.85) * step(0.5, fract(lu / 1.6)) * 0.6; dtCov = 0.0; }
+      else {
+        float m = fract(lu / 1.5 + 0.5); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tr = step(abs(fy - 3.2), 0.035) * step(4.0, GF);
+        float dr = ent * step(fy, 2.55); float ax = abs(lu); float dfr = ent * max(step(abs(fy - 2.55), 0.04), step(abs(ax - 0.875), 0.03) * step(fy, 2.55) + step(1.7, ax));
+        float bar = dr * step(abs(fy - 1.05), 0.022) * step(0.15, abs(ax - 0.875)) * step(abs(ax - 0.875), 0.62);
+        float pq = abs(fract(lu / 6.0 + 0.5) - 0.5) * 6.0; float pier = step(2.65, pq) * (1.0 - step(0.5, ent + step(abs(lu), 2.3) * step(0.9, dot(fn.xz, sN)))) * (1.0 - fas); // limestone pier every 6 m
+        float gl = (1.0 - pl) * (1.0 - fas) * (1.0 - max(mul * (1.0 - ent), tr)) * (1.0 - dfr) * (1.0 - bar) * (1.0 - pier);
+        vec3 lime = vec3(0.74, 0.71, 0.65) * (0.94 + 0.06 * fnoise(vec2(lu, fy) * 3.0)) * (1.0 - 0.3 * step(fract(fy / 0.9), 0.02));
+        vec3 room = mix(vec3(0.30, 0.27, 0.23), vec3(0.66, 0.61, 0.52), smoothstep(0.6, GF - 1.0, fy)) * (1.0 + 0.25 * step(GF - 1.35, fy)); // lobby seen through the glass
+        vec3 c = mix(mix(frmC, gran, pl * (1.0 - dr)), fasC, fas); c = mix(c, lime, pier * (1.0 - pl)); c = mix(c, vec3(0.78, 0.76, 0.72), bar); c = mix(c, vec3(0.12), dfr); c = mix(c, room, gl);
+        diffuseColor.rgb = c; fGlass = gl * 0.74; fLit = (0.62 + 0.38 * step(GF - 1.35, fy) + 0.25 * dr) * (0.8 + 0.2 * fh12(vec2(floor(lu / 6.0), fsd))) * 1.25;
+        dtCov = 0.6 * step(0.55, fy) * step(fy, GF - 0.9); } }
+    else if (fk > 18.5 && fk < 19.5) { // signal head: housing = instance colour, three lenses on the face the seed points at (seed = (lit + angle / 2pi) / 4, lit 0 red 1 amber 2 green)
+      float lt = floor(fsd * 4.0); float th = fract(fsd * 4.0) * 6.2831853; vec2 dv = vec2(cos(th), sin(th));
+      if (dot(fn.xz, dv) > 0.7) { float cell = vIH / 3.0; float k = floor(fy / cell); vec2 q = vec2(lu, fy - (k + 0.5) * cell); float rr = length(q);
+        vec3 lc = k > 1.5 ? vec3(0.95, 0.10, 0.06) : k > 0.5 ? vec3(1.0, 0.62, 0.05) : vec3(0.10, 0.95, 0.55); float on = step(abs(k - (2.0 - lt)), 0.1);
+        float lens = step(rr, cell * 0.36); float vis = step(cell * 0.36, rr) * step(rr, cell * 0.44) * step(0.0, q.y);
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(lc * 0.12, lc, on), lens); diffuseColor.rgb *= 1.0 - 0.6 * vis; fEm = lens * on * 1.4; } }
+    else if (fk > 19.5 && fk < 20.5) { // lobby vestibule: glass box, revolving door (drum + wings) in the middle of the street face, swing doors each side
+      float th = fsd * 6.2831853; vec2 dv = vec2(cos(th), sin(th)); float fr = dot(fn.xz, dv); // seed = street-side normal angle / 2pi
+      float ax = abs(lu); float top = step(vIH - 0.42, fy); float m = fract(lu / 1.1 + 0.5); float mul = 1.0 - step(0.03, m) * step(m, 0.97);
+      float g = (1.0 - top) * step(0.06, fy); vec3 c = vec3(0.17, 0.16, 0.15);
+      if (fr > 0.7) { float drum = step(ax, 1.15); float post = drum * step(ax, 0.035); float wing = drum * step(abs(ax - 0.6), 0.025) * step(fy, 2.3);
+        float sw = (1.0 - drum) * step(ax, 2.1) * (step(abs(ax - 1.18), 0.05) + step(abs(fy - 1.0), 0.025) * step(abs(ax - 1.6), 0.25)); mul *= 1.0 - drum;
+        g *= (1.0 - post) * (1.0 - wing) * (1.0 - sw) * (1.0 - mul); c = mix(c, vec3(0.62, 0.58, 0.50), drum * step(abs(fy - 2.36), 0.05)); }
+      else g *= 1.0 - mul;
+      c = mix(c, vec3(0.56, 0.53, 0.48) * (1.0 - 0.3 * step(abs(fy - (vIH - 0.2)), 0.02)), top);
+      diffuseColor.rgb = c; fGlass = g; fLit = g * 0.95; dtCov = 0.6; }
+  }
   if (fk > 16.5 && fk < 17.5 && fn.y < -0.5) { diffuseColor.rgb = vec3(0.95, 0.93, 0.86); fEm = 1.6; } // a_strip: lot-light lens
   { // footprint anti-aliasing: past ~0.5 m per pixel the window grid becomes its average coverage (aerials sparkled white/black)
     float fAA = smoothstep(0.3, 1.1, length(fwidth(vFW))) * step(fn.y, 0.5) * step(-0.5, fn.y);
     float cov = fk < 0.5 ? 0.13 : fStrip > 1.5 ? 0.0 : fStrip > 0.5 ? step(0.45, fy) * step(fy, 3.0) * 0.9 : fk < 1.5 ? step(0.35, fy) * step(fy, 3.3) * 0.92 : fk < 2.5 ? step(vIH - 2.1, fy) * step(fy, vIH - 1.3) * 0.5 : fk < 3.5 ? 0.3 * step(0.6, fy) : fk < 4.5 ? 0.58 : 0.0;
+    if (dtCov >= 0.0) cov = dtCov; // a_downtown
     fGlass = mix(fGlass, cov, fAA); fLit = mix(fLit, 0.12, fAA); }
   vec3 fglassC = mix(vec3(0.07, 0.10, 0.13), vec3(0.14, 0.18, 0.22), fh12(vec2(fsd, fk)));
   diffuseColor.rgb = mix(diffuseColor.rgb, fglassC, fGlass);`)

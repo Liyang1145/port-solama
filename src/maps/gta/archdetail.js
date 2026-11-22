@@ -113,7 +113,7 @@ export function towerDetail(W, p) {
     for (const e of E) { const { n, cw } = cells(e.len, p.kind === 1 ? 99 : 2);
       if (p.kind === 1) { lb(bk, e, -0.06, 0.06, -0.02, 0.35, 0, p.h, mull); } else for (let k = 0; k <= n; k += 2) lb(bk, e, k * cw - 0.06, k * cw + 0.06, -0.02, k % 4 ? 0.22 : 0.42, 0.15, p.h, mull);
       for (let y = 3.8 * 2; y < p.h - 2; y += 3.8 * 2) lb(bk, e, 0, e.len, -0.02, 0.1, y, y + 0.22, band, true);
-      if (e.len > 10) { lb(bk, e, e.len * 0.2, e.len * 0.8, 0, 3.2, 4.6, 4.9, COL.dkalu, true); door(bk, e, e.len / 2, 2.4, 2.7, 0.15, { double: true, frame: COL.dkalu, leaf: COL.glass }); }
+      if (e.len > 10 && !p.dt) { lb(bk, e, e.len * 0.2, e.len * 0.8, 0, 3.2, 4.6, 4.9, COL.dkalu, true); /* a_downtown: downtown towers get the podium kit (downtown.js) instead */ door(bk, e, e.len / 2, 2.4, 2.7, 0.15, { double: true, frame: COL.dkalu, leaf: COL.glass }); }
     }
   } else if (p.kind === 2) { // residential: balcony slab every floor on the two long faces + glass guards
     const g = W.b('glassRail', p.cx, p.cz);

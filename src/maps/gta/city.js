@@ -7,6 +7,7 @@ import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
 import { planFabric, attachFabric, updateFabric, inCanal, inCanalWater } from './fabric.js';
+import { prepDowntown, attachDowntown, updateDowntown } from './downtown.js'; // a_downtown
 import { fixFabricProps } from './propfix.js';
 import { fixFabricCars } from './parkfix.js';
 import { curbPass } from './curbfix.js'; // a_curbalign
@@ -177,8 +178,8 @@ export function buildCity(scene, mats, T) {
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; fab.dtKit = prepDowntown(fab, col); region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); region.downtown = attachDowntown(fab.dtKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); updateDowntown(fab.dtKit, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;
@@ -818,12 +819,12 @@ function skyline(ctx) {
   // shared rng sequence is exactly as before (and records every pick); phase 2 snaps the downtown towers into the fabric's paved
   // blocks (shrunk / slid / dropped if they would hit a street or a neighbour) and builds them for real, replaying the picks.
   const recs = []; const SCR = { W: new World(1e6), col: { add() {}, addOBB() {} }, ds: null };
-  let REC = null, REPLAY = null; const draw = (f) => { if (REPLAY) return REPLAY.shift(); const v = f(); REC.push(v); return v; };
+  let REC = null, REPLAY = null, CUR_B = null; const draw = (f) => { if (REPLAY) return REPLAY.shift(); const v = f(); REC.push(v); return v; };
   const rngR = () => draw(rng), pickR = (a) => draw(() => pick(a));
   const tower = (cx, cz, w, d, h, kind) => { REC = []; build(SCR, cx, cz, w, d, h, kind); recs.push({ cx, cz, w, d, h, kind, picks: REC, seed: Math.floor(cx * 31 + cz * 17) }); REC = null; };
   const build = (ctx, cx, cz, w, d, h, kind) => {
     const opt = { collide: false, relief: false }; const rng = rngR, pick = pickR;
-    const tdet = (poly, wall) => { if (!ctx.ds) return; const p = { kind, poly, cx, cz, w, d, h, wall }; ctx.ds.add(cx, cz, Math.max(w, d) / 2 + 4, job('tower', (Wd) => towerDetail(Wd, p))); };
+    const tdet = (poly, wall) => { if (ctx.fab && CUR_B) (ctx.fab.dtTowers || (ctx.fab.dtTowers = [])).push({ kind, poly, cx, cz, w, d, h, wall, b: CUR_B }); if (!ctx.ds) return; const p = { kind, poly, cx, cz, w, d, h, wall, dt: !!CUR_B }; /* a_downtown: downtown towers recorded for the podium pass (no rng draws) */ ctx.ds.add(cx, cz, Math.max(w, d) / 2 + 4, job('tower', (Wd) => towerDetail(Wd, p))); };
     ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); // r5.0: the far skyline is reachable now (causeway / island ends)
     if (kind === 0) { const poly = rng() < 0.5 ? chamfer(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, Math.min(w, d) * 0.15) : rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2);
       volume(ctx, poly, 0, h, { ...opt, style: 0, fh: 3.8, ww: 2, wall: [0.55, 0.58, 0.6], glass: pick(glassT) });
@@ -854,7 +855,7 @@ function skyline(ctx) {
       if (!fits(x, z)) { let best = null, bd = 1e9; for (let zz = b.iz0 + 1 + d / 2; zz <= b.iz1 - 1 - d / 2; zz += 2) for (let xx = b.ix0 + 1 + w / 2; xx <= b.ix1 - 1 - w / 2; xx += 2) { const dd = Math.hypot(xx - x, zz - z); if (dd < bd && fits(xx, zz)) { bd = dd; best = [xx, zz]; } } if (!best) continue; [x, z] = best; }
       b.towers.push([x - w / 2, z - d / 2, x + w / 2, z + d / 2, r.h]); r.cx = x; r.cz = z; r.w = w; r.d = d;
     }
-    REPLAY = r.picks.slice(); withSeed(r.seed >>> 0, () => build(ctx, r.cx, r.cz, r.w, r.d, r.h, r.kind)); REPLAY = null;
+    CUR_B = b || null; REPLAY = r.picks.slice(); withSeed(r.seed >>> 0, () => build(ctx, r.cx, r.cz, r.w, r.d, r.h, r.kind)); REPLAY = null; CUR_B = null;
   }
 }
 // coast to the north and south of the district (beyond the jetties): condo/hotel strips on the barrier island
