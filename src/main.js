@@ -9,6 +9,7 @@ import { buildVegetation } from './veg.js';
 import { buildWater } from './water.js';
 import { buildPromenade } from './maps/gta/promenade.js';
 import { buildSignage } from './maps/gta/signage.js';
+import { buildBacklot } from './maps/gta/backlot.js';
 import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
 import { buildPost } from './post.js';
 import { Game } from './game.js';
@@ -84,6 +85,7 @@ async function load() {
   const street = buildStreet(scene, city); const shopSigns = buildShopSigns(scene, city);
   const prom = CYBER ? null : buildPromenade(scene, city); // a_promenade: map 索拉纳港 street-level detail (instanced, streamed)
   const sign = CYBER ? null : buildSignage(scene, city); // a_signage: bus stops, road text, street-name posts, guide gantries (instanced, streamed)
+  const blot = CYBER ? null : buildBacklot(scene, city); // a_backlot: service lanes / back yards behind the inner-block rows (instanced, streamed)
   if (CYBER) neon = buildNeon(scene, city);
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
   post.shaftLight = env.sunFar; post.shaft = U.uShaft.value; // light2 volumetric sun shafts (far cascade)
@@ -150,7 +152,7 @@ async function load() {
     if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1);
     veg.update?.(camera.position);
     if (CYBER) { nature.update(camera.position); nature.frame(env, scene); neon.update(env.look.night, U.uTime.value); scene.fog.density = env.look.fogD * nature.fogMul(camera.position); }
-    updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night, false, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
+    updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night, false, game.trafficPhase || 0); if (blot) blot.update(camera.position, env.look.night); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
     updateNeonLights(props, city.signs, camera.position, env.look.night);
     renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;
