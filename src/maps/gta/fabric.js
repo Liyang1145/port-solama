@@ -648,7 +648,14 @@ function mats(M) {
         diffuseColor.rgb *= mix(1.0, (0.92 + 0.08 * rim) * (1.0 - 0.3 * bd), fNr); float lite = step(1.95, fy) * step(fy, 2.08) * step(abs(lp), 0.33) * step(0.5, fh12(vec2(fsd * 5.0, 2.0))); fGlass = lite * fNr;
         float knob = step(abs(abs(lp) - 0.36), 0.03) * step(abs(fy - 1.0), 0.05); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75, 0.62, 0.36), knob * fNr); }
       else if (fk > 14.5) { // a_strip kit: 15 shop entrance (3.0 m: double glass door + sidelites + transom, frame = instance colour), 16 light-box face, 17 lens (below)
-        if (fk < 15.5) { float ax = abs(lu); float inD = step(ax, 0.9); float leaf = abs(ax - 0.45);
+        if (fk < 15.5 && vIH < 2.0) { // a_stripfix: drive-through pickup window (1.5 x 1.35, frame = instance colour): fixed right half, left sash slid open over it, transom light
+          float ax = abs(lu); float fw = 0.055; float frm = max(max(step(0.75 - fw, ax), step(fy, fw)), step(vIH - fw, fy)); float tb = step(abs(fy - (vIH - 0.36)), 0.022);
+          float meet = step(abs(lu - 0.02), 0.024) * step(fy, vIH - 0.36); float st2 = step(abs(lu + 0.33), 0.024) * step(fy, vIH - 0.36); // meeting stile, stile of the slid sash
+          float opn = step(lu, -0.36) * step(fw, fy) * step(fy, vIH - 0.38) * (1.0 - frm); float bars = max(max(frm, tb), max(meet, st2));
+          float glz = (1.0 - bars) * (1.0 - opn); float pull = step(abs(lu + 0.06), 0.012) * step(abs(fy - 0.62), 0.09);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.52, 0.40) * (0.85 + 0.15 * step(0.5, fract(fy * 3.0))), opn); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2), pull);
+          fGlass = glz * (1.0 - pull); fLit = max(fGlass * 0.9, opn * 0.6); }
+        else if (fk < 15.5) { float ax = abs(lu); float inD = step(ax, 0.9); float leaf = abs(ax - 0.45);
           float g1 = inD * step(leaf, 0.39) * step(0.24, fy) * step(fy, 2.2); float g2 = (1.0 - inD) * step(0.95, ax) * step(ax, 1.44) * step(0.47, fy) * step(fy, 2.2);
           float g3 = step(2.3, fy) * step(fy, vIH - 0.06) * step(ax, 1.44) * step(0.04, abs(ax - 0.9)); float g = max(max(g1, g2), g3);
           float bar = inD * step(abs(fy - 1.05), 0.025) * step(leaf, 0.3); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.81, 0.82), bar);

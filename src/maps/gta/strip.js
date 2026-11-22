@@ -26,7 +26,7 @@ import { KIT_LAYER } from './houses.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const STRIP_OFF = Q.has('nostrip');
 const AUDIT = Q.has('stripaudit');
-const RAD = 110, NEAR = 50, FADE = 14, FADE1 = 8, CAP = 2600, NF = 21, TCAP = 9000, TXT_R = 80, TXT_RL = 125;
+const RAD = 110, NEAR = 50, FADE = 14, FADE1 = 8, CAP = 2600, NF = 21, TCAP = 9000, TXT_R = 80, TXT_RL = 125, TFADE = 14, TMOVE = 1.5; // a_stripfix: text dissolves over its last 14 m
 const hh = (s, k) => { const x = Math.sin(s * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
 const axes = (a) => [[Math.cos(a), -Math.sin(a)], [Math.sin(a), Math.cos(a)]];
 const fangP = (P, a, b) => { const p = P(a, b), q = P(a + 1, b); return Math.atan2(-(q[1] - p[1]), q[0] - p[0]); };
@@ -251,7 +251,13 @@ export function prepStrip(fab) {
       LIM = bi * 4 + 2; const lb = SB._lb; // decided in phase A (zone + car drop done there)
       if (!lb) {
         // pickup window + awning on the back wall
-        cb(u.F, w / 4, -2 * D - 0.04, 0.9, 1.5, 1.35, 0.08, [0.25, 0.25, 0.26], 15); cb(u.S, w / 4, -2 * D - 0.55, 2.45, 2.4, 0.12, 1.1, bgc);
+        // a_stripfix: the fabBody kind-15 branch draws a < 2 m tall entrance as a pickup window (aluminium frame, sliding sash slid open,
+        // transom light, lit kitchen); stainless transaction shelf, header plate with the brand colour + '取餐' under the awning
+        cb(u.F, w / 4, -2 * D - 0.04, 0.85, 1.5, 1.2, 0.08, [0.66, 0.67, 0.69], 15); cb(u.S, w / 4, -2 * D - 0.55, 2.45, 2.4, 0.12, 1.1, bgc);
+        cb(u.F1, w / 4, -2 * D - 0.17, 0.80, 1.7, 0.05, 0.26, [0.72, 0.73, 0.74]); cb(u.F, w / 4, -2 * D - 0.03, 0.77, 1.62, 0.08, 0.07, [0.62, 0.63, 0.65]);
+        cb(u.F, w / 4, -2 * D - 0.05, 2.1, 1.3, 0.3, 0.06, bgc, 16);
+        { const p = F2.W(w / 4, -2 * D - 0.085); const sg = newSign(p[0], p[1], TXT_R); const rs = ras('pick' + bi2, 40, 14, [bg, fg], (g) => { g.fillStyle = fg; g.font = `bold 11px ${FONT}`; g.fillText('取餐', 20, 8); });
+          if (rs) print(sg, rs, V3(p[0], 2.25, p[1]), UP, V3(-F2.N[0], 0, -F2.N[1]), 0.86, 0.3); }
         // menu board + speaker post on the outer side of the lane, clearance bar at the entry
         { const s = -w / 2 - 2.6, t = -2 * D - 4.75; const p = F2.W(s, t); const R = { x: p[0], z: p[1], a, hl: 1.3, hw: 0.25 }; const bw = blocked(R, { own: r, nozone: true });
           if (!bw) { for (const q of [-1, 1]) cb(u.S, s + q * 1.0, t, 0, 0.12, 1.2, 0.12, DKB); cb(u.S, s, t, 1.2, 2.5, 1.5, 0.18, [0.12, 0.12, 0.13]); cb(u.F, s, t + 0.1, 1.28, 2.32, 1.34, 0.04, [0.96, 0.95, 0.9], 16);
@@ -392,11 +398,12 @@ function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attri
 export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh, tm = K.tmesh;
   if ((m.userData.warm & 3) !== 3) return;
   if (p.y > 140) { if (m.visible) { m.visible = false; tm.visible = false; K.last = null; K.lastT = null; } return; }
-  // text decals (no dissolve; signs inside their own radius)
-  if (!K.lastT || Math.hypot(p.x - K.lastT[0], p.z - K.lastT[1]) > 3) { K.lastT = [p.x, p.z]; K.ensureNear(p.x, p.z, Math.max(RAD, TXT_RL) + 5); // a_stripfix: bands built on approach const M = tm.instanceMatrix.array, Cc = tm.instanceColor.array; let n = 0; const list = [];
+  // text decals: signs inside their own radius; a_stripfix: over the last TFADE m each rect drops out at its own hashed threshold
+  // (an ordered rect-level dissolve on the existing decal program, matching the boxes' dissolve instead of a hard cut)
+  if (!K.lastT || Math.hypot(p.x - K.lastT[0], p.z - K.lastT[1]) > TMOVE) { K.lastT = [p.x, p.z]; K.ensureNear(p.x, p.z, Math.max(RAD, TXT_RL) + 5); // a_stripfix: bands built on approach const M = tm.instanceMatrix.array, Cc = tm.instanceColor.array; let n = 0; const list = [];
     K.sg.near(p.x - TXT_RL, p.z - TXT_RL, p.x + TXT_RL, p.z + TXT_RL, (s) => { const d = Math.hypot(s.x - p.x, s.z - p.z); if (d < s.R) list.push([d, s]); return false; }); list.sort((a, b) => a[0] - b[0]);
-    for (const [, s] of list) { if (n + s.n > TCAP) break; for (const it of s.L) { const { rs, o, r, u, n: nn, px, py } = it;
-        for (const [x, y, w, h, ci] of rs.rects) { const cx = (x + w / 2 - rs.W / 2) * px, cy = (rs.H / 2 - (y + h / 2)) * py, sw = w * px, sh = h * py, j = n * 16;
+    for (const [d, s] of list) { if (n + s.n > TCAP) break; const f = sstep(s.R - TFADE, s.R, d); const sh0 = s.x * 0.0131 + s.z * 0.0071; let ri = 0; for (const it of s.L) { const { rs, o, r, u, n: nn, px, py } = it;
+        for (const [x, y, w, h, ci] of rs.rects) { if (f > 0 && f > ((ri++ * 0.6180339887 + sh0) % 1 + 1) % 1) continue; const cx = (x + w / 2 - rs.W / 2) * px, cy = (rs.H / 2 - (y + h / 2)) * py, sw = w * px, sh = h * py, j = n * 16;
           M[j] = r[0] * sw; M[j + 1] = r[1] * sw; M[j + 2] = r[2] * sw; M[j + 3] = 0; M[j + 4] = u[0] * sh; M[j + 5] = u[1] * sh; M[j + 6] = u[2] * sh; M[j + 7] = 0;
           M[j + 8] = nn[0]; M[j + 9] = nn[1]; M[j + 10] = nn[2]; M[j + 11] = 0; M[j + 12] = o[0] + r[0] * cx + u[0] * cy; M[j + 13] = o[1] + r[1] * cx + u[1] * cy; M[j + 14] = o[2] + r[2] * cx + u[2] * cy; M[j + 15] = 1;
           const c = rs.pal[ci]; Cc[n * 3] = c[0]; Cc[n * 3 + 1] = c[1]; Cc[n * 3 + 2] = c[2]; n++; } } }
