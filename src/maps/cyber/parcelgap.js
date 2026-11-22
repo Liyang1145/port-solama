@@ -237,8 +237,12 @@ export class ParcelGapLayer {
         if (nt === null) S.backStuck++; else { L.t1 = nt; S.backMoved++; } }
       return; }
     if (L.t1 && L.bBox && L.bBox[L.t1] && L.bBox[L.t2]) { const sc = !SC_OFF(); // b_svccol: the walk-through openings (baffle 1 by wall −sA, baffle 2 by wall sA) also keep clear of the hatch sills / meter cabinets, which have colliders now
-      const hit = (t1) => this.svcHit(g, L.sA, t1 - 0.12, t1 + 0.12, 0, 99) || this.svcHit(g, -L.sA, t1 + 1.3 - 0.12, t1 + 1.3 + 0.12, 0, 99) || (sc && (this.svcProud(g, -L.sA, t1 - 0.5, t1 + 0.5) || this.svcProud(g, L.sA, t1 + 1.3 - 0.5, t1 + 1.3 + 0.5)));
-      if (hit(L.t1)) { let nt = null; for (let d = 0.05; d < 9 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = L.t1 + s * d; if (u < 2.6 || u + 1.3 > g.D - 0.7) continue; if (!hit(u)) { nt = u; break; } }
+      const hit0 = (t1) => this.svcHit(g, L.sA, t1 - 0.12, t1 + 0.12, 0, 99) || this.svcHit(g, -L.sA, t1 + 1.3 - 0.12, t1 + 1.3 + 0.12, 0, 99);
+      const proud = (t1) => sc && (this.svcProud(g, -L.sA, t1 - 0.5, t1 + 0.5) || this.svcProud(g, L.sA, t1 + 1.3 - 0.5, t1 + 1.3 + 0.5)); const hit1 = (t1) => hit0(t1) || proud(t1);
+      const seek = (h) => { let nt = null; for (let d = 0.05; d < 9 && nt === null; d += 0.05) for (const s of [1, -1]) { const u = L.t1 + s * d; if (u < 2.6 || u + 1.3 > g.D - 0.7) continue; if (!h(u)) { nt = u; break; } } return nt; };
+      // the b_alleyface2 placement first; only where it leaves a walk-through opening against a sill / cabinet, the search that avoids both
+      let nt = hit0(L.t1) ? seek(hit0) : L.t1; if (nt !== null && proud(nt)) { nt = seek(hit1); S.bafProud = (S.bafProud || 0) + 1; }
+      if (nt !== L.t1) {
         if (nt === null) S.bafStuck++; else { S.bafMoved++; const old = [L.t1, L.t2]; for (const t of old) { C.remove(L.bBox[t]); delete L['b' + t]; } L.t1 = nt; L.t2 = nt + 1.3; const nb = {};
           for (const [t, side] of [[L.t1, L.sA], [L.t2, -L.sA]]) { const w0 = this.wall(g, t, side), w1 = this.wall(g, t, -side); const dir = Math.sign(w1 - w0); const a = w0 - dir * 0.3, b = w1 - dir * L.ow;
             L['b' + t] = [a, b]; nb[t] = this.obb(g, (a + b) / 2, t, Math.abs(b - a) / 2, 0.08, 4); this.stats.colliders--; } L.bBox = nb; } } }
