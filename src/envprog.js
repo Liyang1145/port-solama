@@ -295,15 +295,18 @@ function buildUber(cls) {
       // bodies: hoist a member's top-level locals that another of its blocks uses (renamed _u<idx>), then wrap in its branch
       const st2 = []; for (const [E, stage] of [[ev, 'v'], [ef, 'f']]) { const units = []; for (const n in E) { if (isDecl(n)) continue; const e = E[n];
           if (e.rep !== undefined) units.push({ n, j: 'r', c: stripC(e.rep) }); else for (const j of [0, 1]) if (e[j].trim()) units.push({ n, j, c: stripC(e[j]) }); }
-        const glob = [];
+        const glob = [], ren = [];
         for (const u of units) for (const st of splitTop(u.c)) { const m = DTYPE.exec(st); const cst = /^const\s/.test(st);
           const ds = m ? splitComma(m[2]).map((d) => { const q = /^(\w+)\s*(\[[^\]]*\])?\s*(?:=\s*([\s\S]*))?$/.exec(d); return q ? { name: q[1], arr: q[2], init: q[3] } : null; }) : null;
           const names = ds ? ds.filter(Boolean).map((d) => d.name) : cst ? declNames(st) : [];
           const used = names.some((nm) => units.some((o) => o !== u && new RegExp('\\b' + nm + '\\b').test(o.c))); if (!used) continue;
           if (!ds || ds.some((d) => !d || d.arr)) throw new Error('hoist ' + names.join(','));
           const sfx = '_u' + idx; glob.push(m[1] + ' ' + ds.map((d) => d.name + sfx).join(', ') + ';');
-          u.c = u.c.replace(st, ds.filter((d) => d.init !== undefined).map((d) => d.name + ' = ' + d.init + ';').join(' '));
-          for (const o of units) for (const d of ds) o.c = o.c.replace(new RegExp('\\b' + d.name + '\\b', 'g'), d.name + sfx); }
+          const k = u.c.indexOf(st); if (k < 0) throw new Error('hoist stmt');
+          u.c = u.c.slice(0, k) + ds.filter((d) => d.init !== undefined).map((d) => d.name + ' = ' + d.init + ';').join(' ') + u.c.slice(k + st.length);
+          ren.push(...ds.map((d) => d.name)); }
+        // renames last: renaming while statements are still being matched broke later declarations that mention an earlier name
+        for (const nm of ren) for (const o of units) o.c = o.c.replace(new RegExp('\\b' + nm + '\\b', 'g'), nm + '_u' + idx);
         st2.push({ stage, units, glob }); }
       // commit
       B.sigs.push(sig); B.idx.set(fam, idx); Object.assign(B.U0, t.uniforms); B.samp += samp; B.attr += attr; B.vary += vary; for (const [k, v] of nn) B.names.set(k, v);
@@ -322,14 +325,15 @@ function buildUber(cls) {
   return (UBS[cls] = B);
 }
 function clsOf(m) { if ((m.polygonOffset && DBG.includes('noo')) || (!m.polygonOffset && DBG.includes('nou'))) return null; if (m.transparent || m.depthWrite === false || m.depthTest === false || m.depthFunc !== THREE.LessEqualDepth || m.colorWrite === false) return null; return m.polygonOffset ? 'o' : 'u'; }
-function inUber(m, fam) { if (!m.userData.envOn || m.userData.envBad) return null; const c = clsOf(m); if (!c) return null; const B = buildUber(c); return B.ok && B.idx.has(fam) ? B : null; }
+function inUber(m, fam) { if (!m.userData.envOn || m.userData.envBad || (DBG && DBG.includes('nx_' + fam + ','))) return null; const c = clsOf(m); if (!c) return null; const B = buildUber(c); return B.ok && B.idx.has(fam) ? B : null; }
 export function envClsNote(m) { const c = clsOf(m); if (c) CLS[m.userData.envFam] |= c === 'u' ? 1 : 2; } // normalise(): which classes a family is used in
 // prep() hook: patch (or null for an unpatched material) -> patch that compiles to the merged program when the material qualifies
 export function envUberWrap(fn, key) {
   const fam = envFamily(key, !!fn); if (OLDENV2 || !UBF[fam] || key === 'npc' || key === 'ch') return fn;
   const f0 = fn || (() => {}); if (!REPF.has(fam)) REPF.set(fam, f0); // a family first seen after a build keeps its own program (not in B.idx)
   const w = (s, m) => { const UB = m && inUber(m, fam); if (!UB) return f0(s); const t = { uniforms: {}, vertexShader: '', fragmentShader: '' }; f0(t);
-    Object.assign(s.uniforms, UB.U0, t.uniforms, { uPK: { value: UB.idx.get(fam) } }); const d = s.instancing ? '#define EU_INST\n' : ''; // three defines USE_INSTANCING in the vertex stage only
+    for (const k in UB.U0) if (!(k in s.uniforms)) s.uniforms[k] = UB.U0[k]; // other members' uniforms only fill gaps (never a built-in or this material's own)
+    Object.assign(s.uniforms, t.uniforms, { uPK: { value: UB.idx.get(fam) } }); const d = s.instancing ? '#define EU_INST\n' : ''; // three defines USE_INSTANCING in the vertex stage only
     s.vertexShader = d + applyEdits2(s.vertexShader, UB.ev); s.fragmentShader = d + applyEdits2(s.fragmentShader, UB.ef); };
   w.envKey = (m) => (inUber(m, fam) ? 'env' + clsOf(m) + '|e' : fam + '|e'); w.envFam = fam; return w;
 }
