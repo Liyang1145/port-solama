@@ -132,3 +132,68 @@ function wrapRenderer(r) {
   };
 }
 if (typeof window !== 'undefined') window.__ENVSTATS = envStats; // test harness readout
+
+// ---- merging patch families (b_envprog step 3) --------------------------------------------------------------------------------
+// envMerger(name): materials whose prep() patches differ in code (not only constants) share one program: every member's insertions
+// go into one shader, each wrapped in `if (uPK == i)` (uniform, coherent branch). The insertions are read by running each original
+// patch on a probe shader made of the real include lines, and verified: applying the extracted edits alone to the stock physical
+// shader must give exactly what the original patch gives. Any mismatch (a patch editing something other than an include, or
+// anything unexpected) -> no merge, every member keeps its own program and code.
+const STMT_T = /^(float|vec2|vec3|vec4|int|bool)\s+(\w+)\s*=/;
+function incs(src) { const r = []; src.replace(/#include <(\w+)>/g, (m, n) => { if (!r.includes(n)) r.push(n); }); return r; }
+function probe(names) { return names.map((n) => `\n//@@${n}\n#include <${n}>\n`).join(''); }
+function readEdits(names, txt) { // -> { name: [pre, post] } or null
+  const out = {}; const parts = txt.split(/\n\/\/@@(\w+)\n/); if (parts[0] !== '' || parts.length !== names.length * 2 + 1) return null;
+  for (let i = 0; i < names.length; i++) { const n = parts[1 + 2 * i], seg = parts[2 + 2 * i]; if (n !== names[i]) return null; const inc = `#include <${n}>`; const k = seg.indexOf(inc); if (k < 0 || seg.indexOf(inc, k + 1) >= 0) return null;
+    const pre = seg.slice(0, k), post = seg.slice(k + inc.length); if (!post.endsWith('\n')) return null; const p2 = post.slice(0, -1); if (pre || p2) out[n] = [pre, p2]; }
+  return out;
+}
+function applyEdits(src, E) { for (const n in E) src = src.replace(`#include <${n}>`, E[n][0] + `#include <${n}>` + E[n][1]); return src; }
+function isDecl(n) { return n === 'common' || /_pars_/.test(n); }
+function stripC(t) { return t.replace(/\/\/[^\n]*/g, ''); }
+function splitTop(t) { // top-level statements / function bodies
+  const r = []; let d = 0, s = 0; for (let i = 0; i < t.length; i++) { const c = t[i]; if (c === '{') d++; else if (c === '}') { d--; if (d === 0) { r.push(t.slice(s, i + 1).trim()); s = i + 1; } } else if (c === ';' && d === 0) { r.push(t.slice(s, i + 1).trim()); s = i + 1; } }
+  const rest = t.slice(s).trim(); if (rest) r.push(rest); return r.filter(Boolean);
+}
+export function envMerger(name) {
+  const P = []; let B = null;
+  const build = () => {
+    try {
+      const L = THREE.ShaderLib.physical; const VN = incs(L.vertexShader), FN = incs(L.fragmentShader); const PV = probe(VN), PF = probe(FN);
+      const K = P.map((fn) => { const t = { uniforms: {}, vertexShader: PV, fragmentShader: PF }; fn(t); const ev = readEdits(VN, t.vertexShader), ef = readEdits(FN, t.fragmentShader); if (!ev || !ef) throw new Error('probe');
+        const r = { uniforms: {}, vertexShader: L.vertexShader, fragmentShader: L.fragmentShader }; fn(r);
+        if (applyEdits(L.vertexShader, ev) !== r.vertexShader || applyEdits(L.fragmentShader, ef) !== r.fragmentShader) throw new Error('verify');
+        for (const E of [ev, ef]) for (const n in E) if (/#/.test(E[n][0] + E[n][1])) throw new Error('preprocessor'); // keep it simple: no #if in merged edits
+        return { ev, ef, uniforms: t.uniforms }; });
+      // identical members share an index
+      const sig = K.map((k) => JSON.stringify([k.ev, k.ef])); const idx = sig.map((s) => sig.indexOf(s));
+      const U0 = {}; for (const k of K) Object.assign(U0, k.uniforms);
+      const V = {}, F = {}, VD = {}, FD = {}; const decl = { f: [] }; // VD / FD: global-scope hooks (common, *_pars_*): deduplicated declarations
+      const addDecl = (arr, txt) => { for (const st of splitTop(stripC(txt))) if (!arr.includes(st)) arr.push(st); };
+      const done = new Set();
+      K.forEach((k, i) => { if (done.has(idx[i])) return; done.add(idx[i]);
+        for (const n in k.ev) { const [pre, post] = k.ev[n]; if (isDecl(n)) { const D = VD[n] || (VD[n] = [[], []]); addDecl(D[0], pre); addDecl(D[1], post); continue; }
+          for (const part of [pre, post]) for (const st of splitTop(stripC(part))) if (STMT_T.test(st)) throw new Error('vdecl'); // vertex edits must be plain assignments
+          const cur = V[n] || (V[n] = ['', '']); for (const [j, part] of [pre, post].entries()) { const sts = splitTop(stripC(part)); for (const st of sts) if (!cur[j].includes(st)) cur[j] += '\n' + st; } }
+        // fragment: hoist top-level declarations used by another hook of the same member, renamed per member
+        const hooks = Object.keys(k.ef).filter((n) => !isDecl(n)); const code = {}; for (const n of hooks) code[n] = k.ef[n].map(stripC);
+        for (const n of hooks) for (const j of [0, 1]) for (const st of splitTop(code[n][j])) { const m = STMT_T.exec(st); if (!m) continue; const nm = m[2];
+          if (!hooks.some((o) => o !== n && new RegExp('\\b' + nm + '\\b').test(code[o].join(' ')))) continue; const g = nm + '_pk' + idx[i]; const re = new RegExp('\\b' + nm + '\\b', 'g');
+          decl.f.push(m[1] + ' ' + g + ';'); for (const o of hooks) code[o] = code[o].map((c) => c.replace(re, g)); code[n][j] = code[n][j].replace(m[1] + ' ' + g, g).replace(new RegExp('^\\s*' + m[1] + '\\s+' + g), g); }
+        for (const n in k.ef) if (isDecl(n)) { const D = FD[n] || (FD[n] = [[], []]); addDecl(D[0], k.ef[n][0]); addDecl(D[1], k.ef[n][1]); }
+        for (const n of hooks) { const cur = F[n] || (F[n] = ['', '']); for (const j of [0, 1]) if (code[n][j].trim()) cur[j] += `\nif ( uPK == ${idx[i]}.0 ) {\n${code[n][j]}\n}`; } });
+      const ev = {}, ef = {}; for (const n in V) ev[n] = [V[n][0] ? V[n][0] + '\n' : '', V[n][1]]; for (const n in F) ef[n] = [F[n][0] ? F[n][0] + '\n' : '', F[n][1]];
+      const dj = (a) => (a.length ? '\n' + a.join('\n') : '');
+      for (const n in VD) ev[n] = [VD[n][0].length ? VD[n][0].join('\n') + '\n' : '', dj(VD[n][1])];
+      for (const n in FD) ef[n] = [FD[n][0].length ? FD[n][0].join('\n') + '\n' : '', dj(FD[n][1])];
+      const fc = ef.common || ['', '']; ef.common = [fc[0], '\nuniform float uPK;' + dj(decl.f) + fc[1]];
+      B = { ok: true, ev, ef, idx, U0, K, n: done.size }; (envStats.merge || (envStats.merge = {}))[name] = P.length + '->' + done.size + ' branches';
+    } catch (e) { console.warn('[envprog] merge ' + name + ' skipped:', e.message); B = { ok: false }; (envStats.merge || (envStats.merge = {}))[name] = 'skipped: ' + e.message; }
+    return B;
+  };
+  return { wrap(fn, key) {
+    const i = P.length; P.push(fn);
+    const w = (s) => { if (!B) build(); if (!B.ok) return fn(s); const t = { uniforms: {}, vertexShader: '', fragmentShader: '' }; fn(t); // own uniform values
+      Object.assign(s.uniforms, B.U0, t.uniforms, { uPK: { value: B.idx[i] } }); s.vertexShader = applyEdits(s.vertexShader, B.ev); s.fragmentShader = applyEdits(s.fragmentShader, B.ef); };
+    w.envKey = () => { if (!B) build(); return (B.ok ? name : key) + '|e'; }; return w; } };
+}
