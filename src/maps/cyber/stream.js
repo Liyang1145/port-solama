@@ -157,6 +157,7 @@ export class Stream {
       withSeed(p.seed, () => genParcel(ctx, p));
       const m = parcelMatrix(p);
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
+      if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
     }
     c.near = W.build(this.group, this.mats, { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } });
     for (const m of c.far) m.visible = c.parcels.some((p) => p.far); // keep far-only parcels' boxes (none in near chunks normally)

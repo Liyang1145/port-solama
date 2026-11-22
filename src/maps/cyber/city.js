@@ -433,7 +433,11 @@ function rgeo() {
   RG.fan = new THREE.CylinderGeometry(1, 1, 1, 8, 1); RG.fan.translate(0, 0.5, 0);
   return RG;
 }
+// r6.4 b_rooftop: every roof deck rooftop() / decoHotel() lays down is logged here (no rng use, geometry unchanged) so the
+// rooftop-detail layer (roofs.js) can dress it; stream.js hands the streamed ones over per parcel (Stream.onParcel)
+export const ROOF_LOG = [];
 export function rooftop(ctx, x0, z0, x1, z1, y, kind = 'any', excl = []) {
+  const used = excl.slice(); ROOF_LOG.push({ st: streamed(ctx), x0, z0, x1, z1, y, kind, used, ph: 1.15 });
   const b = ctx.W.b('vcol', (x0 + x1) / 2, (z0 + z1) / 2); const G = rgeo();
   const conc = [0.72, 0.71, 0.68], cap = [0.84, 0.83, 0.8], met = [0.62, 0.64, 0.66], dark = [0.16, 0.17, 0.18];
   const t = 0.3, ph = 1.05;
@@ -441,7 +445,6 @@ export function rooftop(ctx, x0, z0, x1, z1, y, kind = 'any', excl = []) {
   P(x0, z0, x1, z0 + t, conc, y, y + ph); P(x0, z1 - t, x1, z1, conc, y, y + ph); P(x0, z0, x0 + t, z1, conc, y, y + ph); P(x1 - t, z0, x1, z1, conc, y, y + ph);
   for (const [a0, b0, a1, b1] of [[x0 - 0.08, z0 - 0.08, x1 + 0.08, z0 + t + 0.05], [x0 - 0.08, z1 - t - 0.05, x1 + 0.08, z1 + 0.08], [x0 - 0.08, z0, x0 + t + 0.05, z1], [x1 - t - 0.05, z0, x1 + 0.08, z1]]) P(a0, b0, a1, b1, cap, y + ph, y + ph + 0.1, true);
   const W = x1 - x0, D = z1 - z0; if (W < 7 || D < 7) return;
-  const used = excl.slice();
   const free = (a0, b0, a1, b1) => !used.some((u) => a0 < u[2] && a1 > u[0] && b0 < u[3] && b1 > u[1]);
   const place = (w, d) => { for (let i = 0; i < 12; i++) { const a = rand(x0 + 1.2, x1 - 1.2 - w), c = rand(z0 + 1.2, z1 - 1.2 - d); if (free(a - 0.6, c - 0.6, a + w + 0.6, c + d + 0.6)) { used.push([a, c, a + w, c + d]); return [a, c]; } } return null; };
   // penthouse
@@ -618,6 +621,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   ledge(tb, poly, true, -0.02, 0.3, top - 0.2, top + 0.2, lighter);
   prismWalls(tb, poly, top + 0.2, top + 1.2, null, wall); polyCap(tb, poly, top + 1.2, {}, wall);
   ledge(tb, poly, true, -0.02, 0.12, top + 1.2, top + 1.32, lighter); // parapet coping
+  { const fs = R * 0.3 + 2.8; ROOF_LOG.push({ st: streamed(ctx), x0, z0, x1, z1, y: top + 1.2, kind: 'deco', ph: 0.12, facing, used: [facing > 0 ? [x1 - fs, z0 - 1, x1 + 1, z1 + 1] : [x0 - 1, z0 - 1, x0 + fs, z1 + 1]] }); } // b_rooftop
   // stepped Deco parapet "ziggurat" blocks at the front corners and centre
   for (const zz of [z0 + 0.6 + R * 0.4, z1 - 0.6 - R * 0.4]) { const pxa = s > 0 ? fx - 1.6 - R * 0.3 : fx + 0.2 + R * 0.3; box(tb, pxa, top + 1.2, zz - 0.5, pxa + 1.4, top + 1.9, zz + 0.5, {}, lighter); box(tb, pxa + 0.25, top + 1.9, zz - 0.3, pxa + 1.15, top + 2.4, zz + 0.3, {}, accent); }
   // accent stripes on the parapet front
