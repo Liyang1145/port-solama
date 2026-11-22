@@ -15,8 +15,9 @@ import { neonGlowMat, neonReflMat } from './neontube.js';
 import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
-import { pedLoop, addPropCols, lanePoint } from './pedlane.js';
+import { pedLoop, addPropCols, lanePoint, pedPath, pathLanePoint, pedWarm, pedWant } from './pedlane.js';
 const Q_NOPALM = typeof location !== 'undefined' && /[?&]nopalmloop\b/.test(location.search); // test switch: old loops, no prop colliders
+const Q_NOSP = Q_NOPALM || (typeof location !== 'undefined' && /[?&]nostreetpeds\b/.test(location.search)); // test switch (b_streetpeds): old graph paths, loops solved on first use, no bollard colliders
 // r6.2: streamed parcels are built with a stub collider (stream.js nullCol); the hand-built Deco core uses the real grid
 const streamed = (ctx) => !(ctx.col instanceof ColliderGrid);
 
@@ -254,7 +255,9 @@ export function buildCity(scene, mats, T) {
   const junctions = graph.nodes.filter((n) => n.deg >= 3);
   const out = { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild, viaduct };
   // r6.x b_palmloop: pedestrian lanes of the Deco block loops (off the palm / tree pits) + colliders for uncollided sidewalk props
-  if (!Q_NOPALM) { out.pedLoop = (b) => pedLoop(out, b); out.pedInit = () => addPropCols(out); out.lanePoint = lanePoint; }
+  if (!Q_NOPALM) { out.pedLoop = (b) => pedLoop(out, b); out.pedInit = () => addPropCols(out, !Q_NOSP); out.lanePoint = lanePoint; }
+  // r6.x b_streetpeds: road-graph sidewalk paths off the palm line + lanes solved a slice per frame around the player
+  if (!Q_NOSP) { out.pedPath = (p) => pedPath(out, p); out.pathLanePoint = pathLanePoint; out.pedWarm = (PE, at) => pedWarm(out, PE, at); out.pedWant = (o, isPath) => pedWant(out, o, isPath); }
   return out;
 }
 

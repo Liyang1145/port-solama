@@ -401,13 +401,16 @@ export class Pedestrians {
     if (city.graph) for (const e of city.graph.edges) {
       if (e.legacy || !e.sw || e.L < 30) continue;
       for (const sg of [1, -1]) {
-        const pts = []; const off = (e.hw + e.sw * 0.55) * sg; const s0 = e.n0.trim + 2, s1 = e.L - e.n1.trim - 2; if (s1 - s0 < 20) continue;
-        for (let s = s0; s <= s1; s += 3) { const q = pointAt(e, s); const x = q.x - q.tz * off, z = q.z + q.tx * off; if (!city.isLand(x, z) || city.groundH(x, z) < 0.1) { if (pts.length > 6) break; pts.length = 0; continue; } pts.push([x, z]); }
+        const pts = [], ss = []; const off = (e.hw + e.sw * 0.55) * sg; const s0 = e.n0.trim + 2, s1 = e.L - e.n1.trim - 2; if (s1 - s0 < 20) continue;
+        for (let s = s0; s <= s1; s += 3) { const q = pointAt(e, s); const x = q.x - q.tz * off, z = q.z + q.tx * off; if (!city.isLand(x, z) || city.groundH(x, z) < 0.1) { if (pts.length > 6) break; pts.length = 0; ss.length = 0; continue; } pts.push([x, z]); ss.push(s); }
         if (pts.length < 6) continue; const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-        this.paths.push({ pts, cum, L: cum[cum.length - 1], mx: pts[pts.length >> 1][0], mz: pts[pts.length >> 1][1] });
+        this.paths.push({ pts, cum, L: cum[cum.length - 1], mx: pts[pts.length >> 1][0], mz: pts[pts.length >> 1][1], e, sg, ss }); // e / sg / ss: 霓港 lane (b_streetpeds)
       }
     }
   }
+  // 霓港 lane of a block loop / sidewalk path: ready -> lane; not yet -> null and queued first for the per-frame solver (b_streetpeds).
+  // Without the per-frame solver (?nostreetpeds) loops are solved on the spot as in b_palmloop and paths keep the old polyline.
+  laneOf(o, isPath) { const C = this.city; if (C.pedWarm) { if (o._lane) return o._lane; C.pedWant(o, isPath); return null; } return isPath ? null : C.pedLoop ? C.pedLoop(o) : null; }
   pathPoint(path, u) { u = Math.max(0, Math.min(path.L, u)); const C = path.cum; let lo = 0, hi = C.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (C[m] <= u) lo = m; else hi = m; } const a = path.pts[lo], b = path.pts[hi]; const t = (u - C[lo]) / (C[hi] - C[lo] || 1); return { x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t }; }
   spawn(near, minD = 25, maxD = 110, kinds = ['woman', 'man', 'man']) {
     // r5.0: on the mainland / causeway / island ends people walk the ribbon sidewalks (mode 'line')
@@ -428,11 +431,12 @@ export class Pedestrians {
       const nearLoops = this.loops.filter((b) => Math.hypot((b.x0 + b.x1) / 2 - near.x, (b.z0 + b.z1) / 2 - near.z) < maxD + 150);
       for (let t = 0; t < 24 && nearPaths.length; t++) {
         if (nearLoops.length && rng() >= nearPaths.length / (nearPaths.length + nearLoops.length * 2)) break;
-        const path = pick(nearPaths); const u = rng() * path.L; const p = this.pathPoint(path, u);
+        const path = pick(nearPaths); const u = rng() * path.L; let p = this.pathPoint(path, u);
         const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
         if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
+        const LP = this.laneOf(path, true); if (LP) p = this.city.pathLanePoint(LP, path, u); // 霓港 (b_streetpeds): same accept / reject as the old polyline (rng stream), then stand on the lane when it is solved
         const c = new Character(this.scene, pick(kinds)); c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
-        c.ai = { mode: 'walk', path, u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.25 ? rand(10, 60) : 0 };
+        c.ai = { mode: 'walk', path, u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.25 ? rand(10, 60) : 0 }; c.ai.lw = LP ? 1 : 0;
         this.list.push(c); return c;
       }
       if (!nearLoops.length) return null;
@@ -446,10 +450,11 @@ export class Pedestrians {
       const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
       if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
       // 霓港 (b_palmloop): same accept / reject as the old rectangle (keeps the rng stream), then stand on the lane
-      let LN = null; if (this.city.pedLoop) { LN = this.city.pedLoop(b); p = this.city.lanePoint(LN, u * LN.per / per); }
+      const LN = this.laneOf(b, false); if (LN) p = this.city.lanePoint(LN, u * LN.per / per);
       const c = new Character(this.scene, pick(kinds));
       c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
-      c.ai = { mode: 'walk', loop: LN ? [LN.x0, LN.z0, LN.x1, LN.z1, LN.per, LN, [x0, z0, x1, z1, per]] : [x0, z0, x1, z1, per], u: LN ? u * LN.per / per : u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.3 ? rand(15, 90) : 0 }; // 30 % loiter (idle, chatting, waiting)
+      c.ai = { mode: 'walk', loop: [x0, z0, x1, z1, per], u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.3 ? rand(15, 90) : 0 }; // 30 % loiter (idle, chatting, waiting)
+      if (this.city.pedLoop) { c.ai.blk = b; c.ai.lw = LN ? 1 : 0; } // 霓港: u stays on the old rectangle's parameter, the lane is looked up per frame
       this.list.push(c); return c;
     }
     return null;
@@ -462,6 +467,7 @@ export class Pedestrians {
   update(dt, ctx) {
     const cp = ctx && ctx.camera ? ctx.camera.position : null;
     Character.lookTarget = ctx && ctx.P && ctx.P.onFoot && !ctx.P.car ? ctx.P.pos : null;
+    if (this.city.pedWarm) this.city.pedWarm(this, ctx && ctx.P ? ctx.P.pos : cp); // 霓港 (b_streetpeds): solve lanes near the player a slice per frame
     for (const c of this.list) {
       const a = c.ai;
       if (cp) c.setLod(Math.hypot(c.pos.x - cp.x, c.pos.z - cp.z));
@@ -472,14 +478,20 @@ export class Pedestrians {
         else {
           a.u += a.dir * a.speed * dt; let p, p2;
           if (a.path) { if (a.u > a.path.L - 0.5 || a.u < 0.5) { a.dir *= -1; a.u = Math.max(0.5, Math.min(a.path.L - 0.5, a.u)); } p = this.pathPoint(a.path, a.u); p2 = this.pathPoint(a.path, a.u + a.dir * 0.8); }
-          else if (a.loop[5]) { const LN = a.loop[5]; p = this.city.lanePoint(LN, a.u); p2 = this.city.lanePoint(LN, a.u + a.dir * 0.8); }
           else { const [x0, z0, x1, z1] = a.loop; p = this.loopPoint(x0, z0, x1, z1, a.u); p2 = this.loopPoint(x0, z0, x1, z1, a.u + a.dir * 0.8); }
+          // 霓港 (b_palmloop / b_streetpeds): the walker follows its lane (off the palm / tree line) once the lane is solved; a walker
+          // spawned before that walks the old line and eases over to the lane in ~0.7 s. The rng below is still drawn from the old line.
+          const p0 = p; let LN = null;
+          if (a.path ? this.city.pedPath : a.blk) LN = this.laneOf(a.path || a.blk, !!a.path);
+          if (LN) { let q, q2; if (a.path) { q = this.city.pathLanePoint(LN, a.path, a.u); q2 = this.city.pathLanePoint(LN, a.path, a.u + a.dir * 0.8); } else { const f = LN.per / a.loop[4]; q = this.city.lanePoint(LN, a.u * f); q2 = this.city.lanePoint(LN, (a.u + a.dir * 0.8) * f); }
+            a.lw = Math.min(1, (a.lw || 0) + dt * 1.4); const w = a.lw * a.lw * (3 - 2 * a.lw);
+            p = w >= 1 ? q : { x: p0.x + (q.x - p0.x) * w, z: p0.z + (q.z - p0.z) * w }; p2 = w >= 1 ? q2 : { x: p2.x + (q2.x - p2.x) * w, z: p2.z + (q2.z - p2.z) * w }; }
           const nx = p.x, nz = p.z; const yawT = Math.atan2(p2.x - p.x, p2.z - p.z);
           c.yaw += angWrap(yawT - c.yaw) * (1 - Math.exp(-8 * dt));
           // avoid obstacles: if blocked, pause briefly and turn back
           const r = this.city.col.resolve(nx, nz, 0.35, 0.5);
           c.pos.x = r.x; c.pos.z = r.z; let hit = r.hit;
-          if (!a.path && a.loop[6]) { const o = a.loop[6], q = this.loopPoint(o[0], o[1], o[2], o[3], a.u * o[4] / a.loop[4]); hit = this.city.col.resolve(q.x, q.z, 0.35, 0.5).hit; } // 霓港 lane: draw rng as the old rectangle would (shared stream)
+          if (p !== p0) hit = this.city.col.resolve(p0.x, p0.z, 0.35, 0.5).hit; // 霓港 lane: draw rng as the old line would (shared stream)
           if (hit && rng() < 0.02) a.dir *= -1;
           sp = a.speed; if (rng() < 0.0015) a.wait = rand(1, 4);
         }
@@ -504,7 +516,7 @@ export class Pedestrians {
       c.setLocomotion(sp, dt); c.update(dt);
     }
   }
-  nearestU(loop, p) { const [x0, z0, x1, z1] = loop; let best = 0, bd = 1e9; const per = 2 * (x1 - x0 + z1 - z0); for (let u = 0; u < per; u += 2) { const q = loop[5] ? this.city.lanePoint(loop[5], u) : this.loopPoint(x0, z0, x1, z1, u); const d = (q.x - p.x) ** 2 + (q.z - p.z) ** 2; if (d < bd) { bd = d; best = u; } } return best; }
+  nearestU(loop, p) { const [x0, z0, x1, z1] = loop; let best = 0, bd = 1e9; const per = 2 * (x1 - x0 + z1 - z0); for (let u = 0; u < per; u += 2) { const q = this.loopPoint(x0, z0, x1, z1, u); const d = (q.x - p.x) ** 2 + (q.z - p.z) ** 2; if (d < bd) { bd = d; best = u; } } return best; }
   panic(from, radius = 40) { for (const c of this.list) { if (c.dead) continue; if (c.pos.distanceTo(from) < radius) { c.ai.mode = 'flee'; c.ai.from = from.clone(); c.ai.t = 0; } } }
   remove(c) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.dispose(); }
 }
