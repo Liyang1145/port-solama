@@ -52,7 +52,7 @@ function normalise(m) {
   if (!m.metalnessMap) { m.metalnessMap = P.lin; envStats.ph++; }
   const vc = m.vertexColors ? 1 : 0; if (!vc) { m.vertexColors = true; envStats.vc++; }
   const opq = !m.transparent; if (opq) m.blending = THREE.NoBlending; else envStats.blend++;
-  if (ATFAM[m.userData.envFam] && !(m.alphaTest > 0)) m.alphaTest = 0.001;
+  if ((ATFAM[m.userData.envFam] || envUberAT(m.userData.envFam)) && !(m.alphaTest > 0)) m.alphaTest = 0.001;
   if (m.side !== THREE.DoubleSide) {
     // main pass culls like the original side; shadow depth culls like three's default shadow side for it (Front -> Back)
     const s0 = m.side; const sh = m.shadowSide !== null ? m.shadowSide : (s0 === THREE.FrontSide ? THREE.BackSide : THREE.FrontSide);
@@ -99,7 +99,7 @@ let CUR = null, CURG = null;
 // main.js calls this right after creating the renderer: every render / compile first normalises pending materials
 export function envInstall(r) {
   if (OLDENV || r.__envInst) return; r.__envInst = true;
-  for (const fn of ['render', 'compile', 'compileAsync']) { const f0 = r[fn]; if (typeof f0 !== 'function') continue; r[fn] = function (...a) { envFlush(); return f0.apply(this, a); }; }
+  for (const fn of ['render', 'compile', 'compileAsync']) { const f0 = r[fn]; if (typeof f0 !== 'function') continue; r[fn] = function (...a) { envFlush(); if (fn !== 'render' && !OLDENV2 && a[0] && a[0].traverse) a[0].traverse(prepObj); return f0.apply(this, a); }; }
   if (!DBG.includes('noic')) icAccessor(); wrapRenderer(r); envCaps(r);
 }
 // instanced meshes whose materials are all normalised read a white instanceColor (x1) when they have none, so 'instanced' and
@@ -120,7 +120,7 @@ function whiteIC(n) { const a = new THREE.InstancedBufferAttribute(new Float32Ar
 function wrapRenderer(r) {
   if (r.__envWrap) return; r.__envWrap = true; const st = r.state; const gl = r.getContext();
   const rbd = r.renderBufferDirect; r.renderBufferDirect = function (camera, scene, geometry, material, object, group) { CUR = object; CURG = group;
-    if (!OLDENV2) { if (material.userData.envFam) kindCheck(object, material); else if (scene === null && material.isMeshDepthMaterial && object.customDepthMaterial !== material && !DBG.includes('nodepth')) material = envDepth(object, group, material); }
+    if (!OLDENV2) { if (scene !== null) { instAT(object, material); if (material.isMeshBasicMaterial && !material.map) basicPH(material); } if (material.userData.envFam) kindCheck(object, material); else if (scene === null && material.isMeshDepthMaterial && object.customDepthMaterial !== material && !DBG.includes('nodepth')) material = envDepth(object, group, material); }
     return rbd.call(this, camera, scene, geometry, material, object, group); };
   const sm = st.setMaterial;
   st.setMaterial = function (material, frontFaceCW, ...rest) {
@@ -220,13 +220,21 @@ const UBF = {
   std: '--', // unpatched prep() materials: no code of their own, they just stop being a separate program
   // B 霓港 / shared
   road: 'm-', vcol: 'm-', sidewalk: 'm-', sand: 'm-', mgc: 'm-', grass: 'm-', mgg2: 'm-', terrain: 'm-',
-  boulder: 'in', creek: 'm-', furn63: 'm-',
+  boulder: 'ia', creek: 'm-', furn63: 'm-',
   // 霓港 decals (were hand-made materials, now prep()'d: envAdopt). viaconc stays out: adopting it moved 2 % of pixels by 1/255
   cnsign: 'm-', puddleN: 'm-', qpuddle: 'm-',
-  fol: 'ia', wind: 'in', jbark: 'in', portbox: 'in',
+  fol: 'ia', wind: 'ia', jbark: 'ia', portbox: 'ia',
   // A 索拉纳港 far city
-  fabLot: 'm-', fabBody: 'in', fabS: 'in',
+  fabLot: 'm-', fabBody: 'ia', fabS: 'ia',
 };
+// instanced families (and unpatched materials first drawn instanced, see instAT) get alphaTest 0.001: ENV_AT never discards at that
+// value in the main pass and envDepth gives every normalised source the same rule in the shadow pass, so pixels and shadows are
+// unchanged and all instanced environment draws share the alpha-tested variant with the foliage (one program instead of two)
+export function envUberAT(fam) { return !OLDENV2 && !!UBF[fam] && UBF[fam][1] === 'a'; }
+function instAT(o, m) { if (o.isInstancedMesh && m.userData.envOn && m.userData.envFam === 'std' && !(m.alphaTest > 0) && clsOf(m) === 'u' && !DBG.includes('noinstat')) { m.alphaTest = 0.001; envStats.instAT = (envStats.instAT || 0) + 1; } }
+// MeshBasicMaterial without a map -> shared white 1x1 map (x 1.0): same program as the mapped ones
+function basicPH(m) { if (m && m.isMeshBasicMaterial && !m.map && !DBG.includes('nobasic')) { m.map = ph().white; m.needsUpdate = true; envStats.basic = (envStats.basic || 0) + 1; } }
+function prepObj(o) { if (!o.material) return; const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { instAT(o, m); basicPH(m); } }
 const REP_OK = new Set(['map_fragment', 'color_fragment', 'roughnessmap_fragment']); // chunks safe to put in braces
 const REP_DECL = { roughnessmap_fragment: 'float roughnessFactor' }; // ...once this local is declared before the branches
 const CAPS = { tex: 16, attr: 16, vary: 15 };
@@ -329,15 +337,19 @@ export function envUberWrap(fn, key) {
 // b_envprog2 shadow depth: three's depth material for a normalised source comes with or without alphaTest (and a clone per
 // alpha-tested source) -> 2 programs per instancing kind. Normalised sources get their own depth material (one per source, so its
 // map / alphaTest never change) that always has the alpha test, with ENV_AT's rule (no discard at alphaTest <= 0.0015): one program
-// per instancing kind, same depth values as before.
+// per instancing kind, same depth values as before. Non-environment mesh sources get the same treatment (white placeholder map,
+// double-sided program + their own culling restored in setMaterial).
 const DEPTHM = new WeakMap();
 function envDepth(object, group, dm) {
-  const src = Array.isArray(object.material) ? (group ? object.material[group.materialIndex] : null) : object.material; if (!src || !src.userData.envOn) return dm;
+  const src = Array.isArray(object.material) ? (group ? object.material[group.materialIndex] : null) : object.material; if (!src) return dm;
+  // other mesh sources (vehicles, GLB props, basic materials) too: placeholder map, double-sided program with their culling restored
+  const env = !!src.userData.envOn; if (!env && (DBG.includes('nodepth2') || src.isShaderMaterial || !object.isMesh || object.isSkinnedMesh)) return dm;
   let d = DEPTHM.get(src);
   if (!d) { d = new THREE.MeshDepthMaterial({ depthPacking: dm.depthPacking }); d.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('#include <alphatest_fragment>', ENV_AT); };
     d.customProgramCacheKey = () => 'envd'; DEPTHM.set(src, d); }
   // what three's getDepthMaterial copied from the source for this draw
-  d.visible = dm.visible; d.wireframe = dm.wireframe; d.side = dm.side; d.alphaMap = dm.alphaMap; d.alphaTest = Math.max(dm.alphaTest, 0.001); d.map = dm.map;
+  d.visible = dm.visible; d.wireframe = dm.wireframe; d.alphaMap = dm.alphaMap; d.alphaTest = Math.max(dm.alphaTest, 0.001); d.map = dm.map || ph().white;
+  d.side = THREE.DoubleSide; if (!env && dm.side !== THREE.DoubleSide) d.userData.envCull = dm.side; else delete d.userData.envCull; // env sources: envDCull via CUR
   d.clipShadows = dm.clipShadows; d.clippingPlanes = dm.clippingPlanes; d.clipIntersection = dm.clipIntersection; d.displacementMap = dm.displacementMap;
   d.displacementScale = dm.displacementScale; d.displacementBias = dm.displacementBias; d.wireframeLinewidth = dm.wireframeLinewidth; d.linewidth = dm.linewidth; d.depthPacking = dm.depthPacking;
   return d;
