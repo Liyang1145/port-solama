@@ -19,8 +19,10 @@
 //    InstancedMesh of text decals on the 'fabCar' program: no new shader program. Colliders for every standing piece.
 //  &nostrip switches the layer off, &stripaudit counts / checks everything eagerly (region.stripAudit).
 import * as THREE from 'three';
-import { fabKit, LOTZ } from './fabric.js';
+import { fabKit, LOTZ, OLD_ANIGHT } from './fabric.js';
+import { POI } from './mapdata.js';
 import { prep } from '../../mats.js';
+import { U } from '../../env.js';
 import { raster, FONT } from './raster.js';
 import { KIT_LAYER } from './houses.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
@@ -73,7 +75,7 @@ function frameAt(O, a, flip) { const [U, V] = axes(a); const N = flip ? [-V[0], 
 // ---------------------------------------------------------------- prep (before attachFabric) ----
 export function prepStrip(fab) {
   if (STRIP_OFF || !fab || !fab.strips || !fab.strips.length) return null; const T0 = performance.now();
-  const K = { units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], raise: new Grid(16), stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
+  const K = { lotPools: [], units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], raise: new Grid(16), stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
   const S = K.stats; const why = (k) => { S.refused[k] = (S.refused[k] || 0) + 1; };
   // test grids from the final records (bodies, trunks, arterial sidewalks, parked cars). a_stripfix: filed lazily per 640 m
   // chunk (only the chunks around a band, when that band is built); the record arrays are kept by reference here because
@@ -333,7 +335,7 @@ export function prepStrip(fab) {
         const fr = frameAt(c0, ang, false); const cb = cbF(fr, bandSeed + a1); const u = newUnit(c0[0], c0[1]);
         cb(u.S, 0, 0, 0, 0.55, 0.75, 0.55, CONC); cb(u.S, 0, 0, 0.75, 0.18, 8.2, 0.18, [0.24, 0.23, 0.22]); cb(u.S, 0, 0, 8.85, 0.1, 0.1, 2.4, [0.24, 0.23, 0.22]);
         for (const q of [-1, 1]) cb(u.S, 0, q * 1.25, 8.72, 0.5, 0.18, 0.8, [0.26, 0.25, 0.24], 17);
-        addCol(R, 9.0, 'pole'); } }
+        K.lotPools.push(c0[0], c0[1], ang); /* a_nightcheck: ground light under the twin heads (read only, no random draw) */ addCol(R, 9.0, 'pole'); } }
     // pack this band's units (subarray views of the arenas), file them; colliders straight into the collision grid once it is attached
     for (let i = u0; i < K.units.length; i++) { const u = K.units[i], v = K.units[i + 1]; const end = (k) => (v ? v.o[k] : AR[k].n);
       u.S = AR[0].a.subarray(u.o[0], end(0)); u.S1 = AR[1].a.subarray(u.o[1], end(1)); u.F = AR[2].a.subarray(u.o[2], end(2)); u.F1 = AR[3].a.subarray(u.o[3], end(3)); u.o = null; K.ug.add(u, u.x, u.z, u.x, u.z); }
@@ -389,13 +391,30 @@ export function attachStrip(K, scene) { if (!K) return null; const { box: G, bod
   const tm = new THREE.InstancedMesh(quadGeo(), prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.05 }), 'fabCar'), TCAP);
   tm.instanceMatrix.setUsage(THREE.DynamicDrawUsage); tm.setColorAt(0, new THREE.Color(1, 1, 1)); tm.instanceColor.setUsage(THREE.DynamicDrawUsage); tm.frustumCulled = false; tm.castShadow = false; tm.receiveShadow = true;
   tm.instanceMatrix.array.fill(0, 0, 16); tm.count = 1; scene.add(tm); K.tmesh = tm;
+  // a_nightcheck: night light pools for fixtures that lit nothing: the lot poles' twin heads (filled as bands are built) and the
+  // Ferris wheel's bulb rings (static). One instanced mesh on the fabric street-lamp pool material (same fabGlow program, its own
+  // instance colour is unused: the material colour * per-instance scale of the unit flat; colour per kind rides in the matrix
+  // scale y, which the flat ignores) -> +1 draw call at night, 0 programs. ?oldanight: not created.
+  { const { flat: GF, glow: GM } = fabKit(); if (!OLD_ANIGHT && GF && GM) { K.wheelY = K.wheelY || 0; const PC = 1024; const pm = new THREE.InstancedMesh(GF, GM, PC); pm.renderOrder = 2; pm.frustumCulled = false; pm.castShadow = false; pm.receiveShadow = false;
+      pm.count = 0; pm.visible = false; pm.userData.n = -1; scene.add(pm); K.pm = pm; } }
   K.last = null; K.lastT = null; K.info = { units: 0, boxes: 0, tris: 0, rects: 0 }; K.stats.attachMs = Math.round(performance.now() - T0); return K; }
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attributes.aK.array, sg = K.segs; let lo = 1e9, hi = -1; K.lastF = [p.x, p.z];
   for (let k = 0; k < sg.length; k += 5) { const dd = Math.hypot(sg[k + 2] - p.x, sg[k + 3] - p.z); const f = Math.max(sstep(RAD - FADE, RAD, dd), sg[k + 4] ? sstep(NEAR - FADE1, NEAR, dd) : 0);
     for (let j = sg[k], e = sg[k] + sg[k + 1]; j < e; j++) { const v = Math.round(A[j * 2]) - 0.45 * f; if (fresh || v !== A[j * 2]) { A[j * 2] = v; if (j < lo) lo = j; if (j > hi) hi = j; } } }
   if (hi >= lo && !fresh) { const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(lo * 2, (hi - lo + 1) * 2); ga.needsUpdate = true; } }
+// a_nightcheck: lot pools 22 m under each lot pole (both heads); the wheel: an ellipse along its rim plane (bulb rings, ~3 m above the
+// sand at the bottom) plus a tighter pool at the boarding deck. The fabGlow falloff reads the unit flat's position.xz, so the instance
+// scale only sizes / stretches a pool; every pool shares the fabric lamp colour (FAB_GLOW).
+const LOT_D = 22, WHEEL = [[0, 0, 34, 15], [0, -3.4, 12, 9]];
+function nightPools(K) { const pm = K.pm, L = K.lotPools, n = Math.min(L.length / 3 + WHEEL.length, pm.instanceMatrix.count); pm.visible = U.uNight.value > 0.03 && n > 0;
+  if (pm.userData.n === n) return; pm.userData.n = n; const A = pm.instanceMatrix.array; let k = 0;
+  const put = (x, z, a, sx, sz, y = 0.07) => { const c = Math.cos(a), s = Math.sin(a), j = k * 16; A.fill(0, j, j + 16); A[j] = c * sx; A[j + 2] = -s * sx; A[j + 5] = 1; A[j + 8] = s * sz; A[j + 10] = c * sz; A[j + 12] = x; A[j + 13] = y; A[j + 14] = z; A[j + 15] = 1; k++; };
+  const w = POI.wheel; for (const [dx, dz, sx, sz] of WHEEL) put(w.x + dx, w.z + dz, 0, sx, sz, K.wheelY + 0.06);
+  for (let i = 0; i + 2 < L.length && k < n; i += 3) put(L[i], L[i + 1], L[i + 2], LOT_D, LOT_D);
+  pm.count = k; pm.instanceMatrix.needsUpdate = true; }
 export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh, tm = K.tmesh;
+  if (K.pm) nightPools(K);
   if ((m.userData.warm & 3) !== 3) return;
   if (p.y > 140) { if (m.visible) { m.visible = false; tm.visible = false; K.last = null; K.lastT = null; } return; }
   // text decals: signs inside their own radius; a_stripfix: over the last TFADE m each rect drops out at its own hashed threshold

@@ -843,6 +843,7 @@ function mats(M) {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vLP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvLP = position.xz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight; varying vec2 vLP;')
       .replace('#include <color_fragment>', '#include <color_fragment>\n  { float r = length(vLP) * 2.0; diffuseColor.rgb *= uNight * 0.62 * pow(max(0.0, 1.0 - r), 1.4); /* g3: pools read at street level */ }'); });
+  if (FAB_GLOW.c) glow.color.setRGB(...FAB_GLOW.c); // a_nightcheck (uniform only: same fabGlow program)
   MATS = { body, roof, tree, palm, trunk, car, lamp: lampM, glow, flat, pool, lot, road: roadF, walk: walkF };
   return MATS;
 }
@@ -856,8 +857,14 @@ function inst(geo, mat, n, fill, extra) {
 }
 // a_houses: the house kit draws on the existing fabBody program (same box geometry, same material object -> no new program)
 // a_strip: up to 28 oriented zones painted by the lot shader (strip.js fills them before the lot material exists): A = cx, cz, cos, sin; B = hl, hw, kind (1 apron 2 lane, 0 = end), dashed
+// a_nightcheck: night tuning of the map-A light pools (?oldanight = values before this pass). FAB_GLOW: fabric street-lamp pool decal
+// diameter (m) and linear colour (the fabGlow shader multiplies it by uNight * 0.62 * falloff); the old 24 m 0xffb070 pools overlapped
+// into one saturated orange carpet on the dense downtown / arterial grid.
+const _QN = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
+export const OLD_ANIGHT = _QN.has('oldanight');
+export const FAB_GLOW = OLD_ANIGHT ? { d: 24, c: null } : { d: 17, c: [0.92, 0.57, 0.29] };
 export const LOTZ = { a: new Float32Array(28 * 4), b: new Float32Array(28 * 4) };
-export function fabKit() { return { box: geos().box, body: MATS && MATS.body }; }
+export function fabKit() { return { box: geos().box, body: MATS && MATS.body, flat: geos().flat, glow: MATS && MATS.glow }; }
 // attach: build every chunk's meshes once (resident; tiers toggle visibility), returns triangle counts
 export function attachFabric(fab, scene, M) {
   const G = geos(), MT = mats(M); let tris = 0, inst0 = 0;
@@ -882,7 +889,7 @@ export function attachFabric(fab, scene, M) {
     if (I.flat.length) { add(inst(G.flat, MT.flat, I.flat.length, (i, m) => { const p = I.flat[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), p[4]); m.compose(_v.set(p[0], p[8], p[1]), _q, _s.set(p[2], 1, p[3])); return [p[5], p[6], p[7]]; }), 'mid'); }
     if (I.lamp.length) { const n = I.lamp.length; const fillL = (sc, y) => (i, m) => { const p = I.lamp[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), p[2]); m.compose(_v.set(p[0], y, p[1]), _q, _s.set(sc, 1, sc)); return null; };
       add(inst(G.lamp, MT.lamp, n, fillL(1, 0)), 'near', false);
-      const gl = inst(G.flat, MT.glow, n, (i, m) => { const p = I.lamp[i]; const ox = Math.cos(p[2]) * 2.1, oz = -Math.sin(p[2]) * 2.1; m.compose(_v.set(p[0] + ox, 0.06, p[1] + oz), _q.identity(), _s.set(24, 1, 24)); return null; });
+      const gl = inst(G.flat, MT.glow, n, (i, m) => { const p = I.lamp[i]; const ox = Math.cos(p[2]) * 2.1, oz = -Math.sin(p[2]) * 2.1; m.compose(_v.set(p[0] + ox, 0.06, p[1] + oz), _q.identity(), _s.set(FAB_GLOW.d, 1, FAB_GLOW.d)); return null; });
       gl.renderOrder = 2; add(gl, 'night', false); }
     if (I.pool.length) { add(inst(G.flat, MT.pool, I.pool.length, (i, m) => { const p = I.pool[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), p[4]); m.compose(_v.set(p[0], 0.03, p[1]), _q, _s.set(p[2], 1, p[3])); return null; }), 'mid'); }
     c.meshes = ms; c.I = null; c.road = c.walk = c.plaza = c.lot = null;
