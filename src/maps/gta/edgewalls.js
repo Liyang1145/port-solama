@@ -14,6 +14,7 @@
 //     every layer is placed. Yard trees (front / back yards of the houses) are left alone: not on a sidewalk.
 // &noedgewalls switches both off (census "before" in the same build).
 import { fileYardBoxes } from './yardcol.js'; // a_yardcol
+import { filePoleBoxes, attachPoleCol } from './polecol.js'; // a_polecol
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const EDGE_OFF = Q.has('noedgewalls');
 const axes = (a) => [[Math.cos(a), -Math.sin(a)], [Math.sin(a), Math.cos(a)]];
@@ -78,10 +79,12 @@ const KT = ['flamp', 'ftree', 'fpalm'];
 export function attachStreetColliders(city) { const S = { trunks: 0, clut: 0, byKind: {}, ms: 0 }; const col = city.col; if (EDGE_OFF || !col) return S; const T0 = performance.now();
   for (const c of city.clutAdd || []) { const b = col.addOBB(c.x, c.z, Math.cos(c.ang), -Math.sin(c.ang), c.hl, c.hw, c.h, 'clut'); b.k = c.k; S.clut++; S.byKind[c.k] = (S.byKind[c.k] || 0) + 1; }
   const fab = city.fabric || (city.region && city.region.fabric); const A = fab && fab._trunks; const Y = fab && fab._ycol; // a_yardcol: fitted trunk shapes + yard trees + hedges
+  const P = fab && fab._pcol; // a_polecol: fitted pentagon boxes for the fabric street lights
   if (((A && A.length) || Y) && !col._trunks) { const C = 8; const boxes = [];
     // a_yardcol: with Y the street trees / palms come from Y (two fitted boxes each), only the lamps keep their 0.12 m square
-    if (A) for (let i = 0; i < A.length; i += 5) { if (Y && A[i + 4] !== 0) continue; const x = A[i], z = A[i + 1], r = A[i + 2]; boxes.push({ minX: x - r, minZ: z - r, maxX: x + r, maxZ: z + r, h: A[i + 3], tag: KT[A[i + 4]], o: { cx: x, cz: z, ux: 1, uz: 0, hl: r, hw: r } }); }
+    if (A) for (let i = 0; i < A.length; i += 5) { if (Y && A[i + 4] !== 0) continue; if (P && A[i + 4] === 0) continue; const x = A[i], z = A[i + 1], r = A[i + 2]; boxes.push({ minX: x - r, minZ: z - r, maxX: x + r, maxZ: z + r, h: A[i + 3], tag: KT[A[i + 4]], o: { cx: x, cz: z, ux: 1, uz: 0, hl: r, hw: r } }); }
     if (Y) fileYardBoxes(Y, (b) => boxes.push(b));
+    if (P) filePoleBoxes(P, (b) => boxes.push(b));
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const b of boxes) { if (b.minX < x0) x0 = b.minX; if (b.maxX > x1) x1 = b.maxX; if (b.minZ < z0) z0 = b.minZ; if (b.maxZ > z1) z1 = b.maxZ; }
     const I0 = Math.floor(x0 / C), K0 = Math.floor(z0 / C), NI = Math.floor(x1 / C) - I0 + 1, NK = Math.floor(z1 / C) - K0 + 1; const cells = new Array(NI * NK).fill(null);
     // a_yardcol: every box filed in each cell its AABB touches (hedges are up to ~20 m long); a per-query stamp returns it once
@@ -90,7 +93,8 @@ export function attachStreetColliders(city) { const S = { trunks: 0, clut: 0, by
     col.query = function (x, z, r, out = []) { q0.call(this, x, z, r, out); const st = ++stamp; const a0 = Math.max(0, Math.floor((x - r) / C) - I0), a1 = Math.min(NI - 1, Math.floor((x + r) / C) - I0), k0 = Math.max(0, Math.floor((z - r) / C) - K0), k1 = Math.min(NK - 1, Math.floor((z + r) / C) - K0);
       for (let a = a0; a <= a1; a++) for (let k = k0; k <= k1; k++) { const l = cells[a * NK + k]; if (l) for (let j = 0; j < l.length; j++) { const b = l[j]; if (b._s !== st && b.maxX >= x - r && b.minX <= x + r && b.maxZ >= z - r && b.minZ <= z + r) { b._s = st; out.push(b); } } }
       return out; };
-    col._trunks = { boxes, cells, C, I0, K0, NI, NK }; S.trunks = boxes.length; if (fab) { fab._trunks = null; fab._ycol = null; } }
+    col._trunks = { boxes, cells, C, I0, K0, NI, NK }; S.trunks = boxes.length; if (fab) { fab._trunks = null; fab._ycol = null; fab._pcol = null; } }
+  S.pole = attachPoleCol(city); // a_polecol: island / city pole furniture, palms and trees (main grid, swapped in place)
   S.ms = Math.round(performance.now() - T0); return S; }
 // queue a fitted oriented box for an island kerb item (applied by attachStreetColliders after every layer is placed)
 export function queueClut(city, k, x, z, ang, hl, hw, h) { (city.clutAdd = city.clutAdd || []).push({ k, x, z, ang, hl, hw, h }); }
