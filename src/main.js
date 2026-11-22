@@ -20,9 +20,11 @@ import { Stream } from './maps/cyber/stream.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
+import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_verify: test-only ?shotfast (screenshot first frame)
 
 const Q = new URLSearchParams(location.search);
 const SNAP = Q.has('snap');
+if (SHOTFAST) window.__SF = shotfastShaders();
 if (SNAP) document.body.classList.add('snap');
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SNAP });
@@ -119,6 +121,7 @@ async function load() {
     get hour() { return hour; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
     render() { renderFrame(0); },
+    finish() { return shotfastFinish(renderer); }, // b_verify: ms until the GPU queue (SwiftShader pipeline JIT) is done
     reset() { game.testReset(); if (Q.has('hour')) { this.setHour(+Q.get('hour')); } return game.state(); }, // r6.2 per-test isolation (shot.cjs)
     // vis-sweep debug: what is under screen pixel (px,py) of a w×h frame -> [{name, path, mat, dist, point, instanceId}]
     pick(px, py, w = 1280, h = 720, n = 3) { const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(px / w * 2 - 1, 1 - py / h * 2), camera);

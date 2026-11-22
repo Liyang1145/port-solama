@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
+import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
@@ -12,7 +13,8 @@ export function prep(mat, key = 'std', patch = null) {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
     if (patch) patch(s);
   };
-  mat.customProgramCacheKey = () => key;
+  // b_verify ?shotfast (test only): unpatched names share one program ('std'): same shader text, so the same pixels, fewer SwiftShader JITs
+  mat.customProgramCacheKey = SHOTFAST && !patch ? () => 'std' : () => key;
   return mat;
 }
 
