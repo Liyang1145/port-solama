@@ -222,7 +222,7 @@ function buildHouse(K, i) {
         if (R0 && look !== 3) bx(tS, td, (pd + 0.15) / 2, cy + 0.2, pw + 0.4, 0.22, pd + 0.3, [R0[7] * 0.95, R0[8] * 0.95, R0[9] * 0.95], 7);
         near(true); bx(tF, td, pd + 0.17, cy + 0.02, 0.44, 0.16, 0.04, plC, 11); near(false); }
       if (!plaque) { near(true); bx(tF, td, 0.05, 2.62, 0.44, 0.16, 0.04, plC, 11); near(false); plaque = true; } }
-    if (porchT !== null) { const q = P(porchT + Math.sign(td - porchT) * 0.7, 1.15); porch = [q[0], q[1], 4.6, 4.6, fa, Rp ? 0.19 : 0.075]; } // a_porchlamp: pool on the porch slab / walk
+    if (porchT !== null) { const q = P(porchT + Math.sign(td - porchT) * 0.7, 1.15); porch = [q[0], q[1], 4.6, 4.6, fa, Rp && Math.abs(porchT - td) < pw / 2 + 0.4 ? 0.19 : 0.075]; } // a_porchlamp: pool on the porch slab / walk
     if (Rp) {
       // front walk: from the step to the driveway edge (L-free: straight along the face)
       if (tg !== null && Y) { const tEdge = tg + sgd * (Y[2] / 2 - 0.05); const tFrom = td - sgd * 0.0; const L = Math.abs(tFrom - tEdge); const o = pd + 0.37 + 0.55;
