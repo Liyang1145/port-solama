@@ -77,6 +77,7 @@ export class SvcCol {
     this.city = city; this.gaps = gaps; const t0 = performance.now(); const off = SC_OFF();
     this.stats = { off, nf: { off: NF_OFF(), faces: 0, fixed: 0, bays: 0, pairs: 0, ms: 0 }, lots: 0, predicted: 0, miss: 0, err: 0, open: 0, boxes: { hatch: 0, meter: 0 }, core: 0, checked: 0, mismatch: 0, slots: 0, ms: 0, plane: { lots: 0, proudMax: 0, removed: 0, added: 0 } };
     this.recs = new Map(); // parcel -> edge records (parcel frame)
+    this.nfSpots = []; // b_narrowfix: world spots of the bays that got flush pieces
     if (off) return;
     const col = city.col; const add = (P, rec, pc) => { // world box for one piece; P maps (u along, d out) -> world
       const um = (pc.u0 + pc.u1) / 2, dm = pc.d / 2; const [cx, cz] = P(rec, um, dm); const [ux, uz] = P.dir(rec);
@@ -111,7 +112,9 @@ export class SvcCol {
       for (const rec of r.recs) { S.faces++; const F = { P: r.PL, rec, own: ownF, self: p, near }; const fx = nfFace(col, F); if (!fx) continue; ents.push({ F, fx, fixed: false, p, rec }); } }
     S.pairs = nfPairs(ents);
     for (const e of ents) { if (e.fixed) continue; const fx = e.fx; const full = fx.cp == null && fx.c.every((v) => v == null || v >= 0.36); if (full) continue; // nothing changes
-      S.fixed++; S.bays += fx.c.filter((v) => v != null && v < 0.36).length; (e.p.svcFix || (e.p.svcFix = {}))[e.rec.i] = fx; e.rec.fx = fx; }
+      S.fixed++; S.bays += fx.c.filter((v) => v != null && v < 0.36).length; (e.p.svcFix || (e.p.svcFix = {}))[e.rec.i] = fx; e.rec.fx = fx;
+      const P = e.F.P, r = e.rec; const [ux, uz] = P.dir(r); svcBays(r.len, r.ww, r.ps).forEach((o, i) => { const c = fx.c[i]; if (c == null || c >= 0.36) return; const [x, z] = P(r, o.c, 0); // debug / screenshot spots (31 today)
+        this.nfSpots.push({ x: +x.toFixed(3), z: +z.toFixed(3), ux: +ux.toFixed(4), uz: +uz.toFixed(4), c, t: o.t, hw: o.hw, y0: r.y0 }); }); }
     S.ms = Math.round(performance.now() - t0); }
   // the lot's collider must stop at the service-face plane: a kept parcel box (city.js obbCollider AABB of a near-axis lot, within
   // b_parcelfit's 0.3 m tolerance) can stand up to ~0.3 m proud of a back / slot wall -> that lot gets parcelfit's exact pieces
