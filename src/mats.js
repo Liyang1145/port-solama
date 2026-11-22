@@ -309,7 +309,7 @@ if (style == 6.0) {
   if (ww < 2.4) t = 0.0;
   float hs = h12(vec2(kb * 1.31 + 0.7, seed * 0.53));
   float px = max(max(fwidth(uu), fwidth(yb)), 1e-4); float fine = 1.0 - smoothstep(0.012, 0.04, px);
-  vec3 wc = mix(wallCol, concP * vec3(0.62, 0.62, 0.60), 0.55 + 0.2 * vGlass.y) * (0.92 + 0.16 * hs);
+  vec3 wc = mix(mix(wallCol, vec3(dot(wallCol, vec3(0.3, 0.59, 0.11))), 0.55), concP * vec3(0.6, 0.6, 0.58), 0.62 + 0.15 * vGlass.y) * (0.92 + 0.16 * hs);
   float dado = step(yb, 1.25);
   vec2 tg = vec2(uu / 0.2, yb / 0.15); vec2 tq = abs(fract(tg) - 0.5); float tin = 1.0 - smoothstep(0.43, 0.48, max(tq.x, tq.y));
   tin = mix(tin, 0.88, 1.0 - fine); float tv = h12(floor(tg) + seed);
@@ -334,7 +334,11 @@ if (style == 6.0) {
     vec3 sc = mix(vec3(0.52, 0.55, 0.57), vec3(0.34, 0.38, 0.42), step(0.5, hs)) * (0.82 + 0.3 * vnoise(vec2(uu * 2.6, yb * 0.9) + seed));
     sc *= mix(0.86, 0.68 + 0.36 * smoothstep(0.0, 0.55, sl) * smoothstep(1.0, 0.75, sl), fine);
     sc = mix(sc, vec3(0.30, 0.19, 0.12), smoothstep(0.7, 0.0, oy) * 0.55 * vnoise(vec2(uu * 4.0, 3.0)));
-    float tag = step(0.45, hs) * smoothstep(0.5, 0.56, vnoise(vec2(lu * 1.6, yb * 2.4) + hs * 17.0)) * step(abs(lu), hw - 0.15) * step(0.35, oy) * step(yb, o1 - 0.3);
+    // spray tag: a row of wavy letter strokes + an underline in a 1.6 x 0.5 m box at chest height (35 % of shutters)
+    float tx_ = lu - (fract(hs * 5.3) - 0.5) * max(hw - 0.9, 0.0); float ty_ = oy - (t == 4.0 ? 0.55 : 1.05);
+    float tbox = step(abs(tx_), min(0.8, hw - 0.2)) * step(abs(ty_), 0.26);
+    float tstr = 1.0 - smoothstep(0.05, 0.09, abs(fract(tx_ * 2.6 + 0.3 * sin(ty_ * 11.0 + hs * 40.0) + hs * 3.0) - 0.5));
+    float tag = step(hs, 0.35) * max(tbox * tstr * step(abs(ty_), 0.2), tbox * step(abs(ty_ + 0.23 - 0.03 * sin(tx_ * 6.0)), 0.025)) * fine;
     sc = mix(sc, neonPal(hs * 3.7) * 0.75 + 0.05, tag * 0.85);
     sc = mix(sc, vec3(0.12, 0.12, 0.13), step(oy, 0.07));
     sc = mix(sc, vec3(0.05), step(abs(lu), 0.06) * step(abs(oy - 0.16), 0.05) * step(o0, 0.5));
