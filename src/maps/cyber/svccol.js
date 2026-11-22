@@ -27,6 +27,16 @@ export { segFree, freeDepth, rayBox, inBoxNF as inBox };
 import { SVC_CORE, svcEdgesLot, svcEdgeFrame, PARCEL_COLS } from './city.js';
 import { genParcel } from './stream.js';
 
+// b_canopycol: overhead pieces of the service face (shutter housing 2.55–2.86, door hood 2.28–2.36 above the band base, i.e. ≥ 2.4 m
+// above the street) get one fitted box each when ≥ 0.15 m proud (same rule as b_svccol), spanning only their real height: in a grid
+// of their own (util.js ColliderGrid.addOver), read by resolve() for a body whose head reaches the piece (a jumping walker; a vehicle
+// by its body height, vehicles.js) — walkers pass under, the ground-up colliders, their queries and hashes are unchanged. The hatch
+// housing (2.05–2.26) is already inside the hatch box. Test switch ?nocanopycol (also off with ?nosvccol / ?noalleyface).
+export const CC_OFF = () => SC_OFF() || !!globalThis.__NOCANOPYCOL || (typeof location !== 'undefined' && /[?&]nocanopycol\b/.test(location.search));
+export const OVER_K = { 'shutter housing': 'housing', 'door hood': 'hood' };
+export function recOver(rec) { const out = [];
+  for (const q of recPieces(rec)) { const k = OVER_K[q.k]; if (!k) continue; out.push({ u0: q.u0, u1: q.u1, d: q.d, ya: q.ya, yb: q.yb, k, ok: q.d >= 0.15 }); }
+  return out; }
 export const SC_OFF = () => AF_OFF || !!globalThis.__NOSVCCOL || (typeof location !== 'undefined' && /[?&]nosvccol\b/.test(location.search));
 const STORE = new Set(['deco', 'mid', 'downtown']);
 const nullCol = { add() {} };
@@ -82,7 +92,10 @@ export class SvcCol {
     const col = city.col; const add = (P, rec, pc) => { // world box for one piece; P maps (u along, d out) -> world
       const um = (pc.u0 + pc.u1) / 2, dm = pc.d / 2; const [cx, cz] = P(rec, um, dm); const [ux, uz] = P.dir(rec);
       const b = col.addOBB(cx, cz, ux, uz, (pc.u1 - pc.u0) / 2, dm, rec.y0 + pc.h, 'svc'); b.svk = pc.k; this.stats.boxes[pc.k]++; return b; };
-    const boxes = (P, rec) => { if (!col || !col.addOBB) return; for (const pc of recBoxes(rec)) add(P, rec, pc); };
+    const cc = !CC_OFF() && col && col.addOver; const SO = this.stats.over = { off: !cc, housing: 0, hood: 0, flush: { housing: 0, hood: 0 } }; this.over = [];
+    const over = (P, rec) => { for (const q of recOver(rec)) { if (!q.ok) { SO.flush[q.k]++; continue; } const [cx, cz] = P(rec, (q.u0 + q.u1) / 2, q.d / 2); const [ux, uz] = P.dir(rec); const l = Math.hypot(ux, uz);
+      const b = col.addOver(cx, cz, ux / l, uz / l, (q.u1 - q.u0) / 2, q.d / 2, rec.y0 + q.ya, rec.y0 + q.yb, 'svcup'); b.svk = q.k; SO[q.k]++; this.over.push(b); } };
+    const boxes = (P, rec) => { if (!col || !col.addOBB) return; for (const pc of recBoxes(rec)) add(P, rec, pc); if (cc) over(P, rec); };
     // hand-built core: world-frame edges (b_narrowfix: city.js nfCore already gave them their flush pieces, rec.fx)
     for (const r of SVC_CORE) { this.stats.core++; this.stats.open += svcBays(r.len, r.ww, r.ps).length; boxes(PW, r); }
     // streamed lots: replay to the store volume

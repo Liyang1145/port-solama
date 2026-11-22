@@ -384,7 +384,7 @@ export class Vehicle {
     const r = this.dims.W * 0.5; const half = this.dims.L * 0.5 - r;
     for (const k of [-1, 0, 1]) {
       const cx = this.x + nfx * half * k, cz = this.z + nfz * half * k;
-      const res = city.col.resolve(cx, cz, r, 0.5);
+      const res = city.col.resolve(cx, cz, r, 0.5, undefined, this.y + this.dims.H, this.y); // b_canopycol: body height vs overhead boxes
       if (res.hit) {
         const dx = res.x - cx, dz = res.z - cz; this.x += dx; this.z += dz;
         const vn = this.vx * res.nx + this.vz * res.nz;
