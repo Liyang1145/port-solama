@@ -729,7 +729,7 @@ function mats(M) {
         vec3 lime = vec3(0.74, 0.71, 0.65) * (0.94 + 0.06 * fnoise(vec2(lu, fy) * 3.0)) * (1.0 - 0.3 * step(fract(fy / 0.9), 0.02));
         vec3 room = mix(vec3(0.46, 0.42, 0.36), vec3(0.80, 0.75, 0.66), smoothstep(0.6, GF - 1.0, fy)) * (1.0 + 0.2 * step(GF - 1.35, fy)); // lobby seen through the glass
         vec3 c = mix(mix(frmC, gran, pl * (1.0 - dr)), fasC, fas); c = mix(c, lime, pier * (1.0 - pl)); c = mix(c, vec3(0.78, 0.76, 0.72), bar); c = mix(c, vec3(0.12), dfr); c = mix(c, room, gl);
-        diffuseColor.rgb = c; fGlass = gl * 0.5; fLit = (0.62 + 0.38 * step(GF - 1.35, fy) + 0.25 * dr) * (0.8 + 0.2 * fh12(vec2(floor(lu / 6.0), fsd))) * 1.85; // lighter tint by day so the lit lobby reads through; fLit scaled so the night glow stays
+        diffuseColor.rgb = c; fGlass = gl * 0.5; fLit = (0.62 + 0.38 * step(GF - 1.35, fy) + 0.25 * dr) * (0.8 + 0.2 * fh12(vec2(floor(lu / 6.0), fsd))) * 1.45; // lighter tint by day so the lit lobby reads through; fLit scaled so the night glow stays
         dtCov = 0.6 * step(0.55, fy) * step(fy, GF - 0.9); } }
     else if (fk > 18.5 && fk < 19.5) { // signal head: housing = instance colour, three lenses on the face the seed points at (seed = (lit + angle / 2pi) / 4, lit 0 red 1 amber 2 green)
       float lt = floor(fsd * 4.0); float th = fract(fsd * 4.0) * 6.2831853; vec2 dv = vec2(cos(th), sin(th));
@@ -746,7 +746,7 @@ function mats(M) {
         g *= (1.0 - post) * (1.0 - wing) * (1.0 - sw) * (1.0 - mul); c = mix(c, vec3(0.62, 0.58, 0.50), drum * step(abs(fy - 2.36), 0.05)); }
       else g *= 1.0 - mul;
       c = mix(c, vec3(0.56, 0.53, 0.48) * (1.0 - 0.3 * step(abs(fy - (vIH - 0.2)), 0.02)), top);
-      c = mix(c, mix(vec3(0.50, 0.46, 0.40), vec3(0.78, 0.73, 0.64), smoothstep(0.3, 2.4, fy)), g); diffuseColor.rgb = c; fGlass = g * 0.5; fLit = g * 1.8; dtCov = 0.6; }
+      c = mix(c, mix(vec3(0.50, 0.46, 0.40), vec3(0.78, 0.73, 0.64), smoothstep(0.3, 2.4, fy)), g); diffuseColor.rgb = c; fGlass = g * 0.5; fLit = g * 1.4; dtCov = 0.6; }
   }
   if (fk > 16.5 && fk < 17.5 && fn.y < -0.5) { diffuseColor.rgb = vec3(0.95, 0.93, 0.86); fEm = 1.6; } // a_strip: lot-light lens
   { // footprint anti-aliasing: past ~0.5 m per pixel the window grid becomes its average coverage (aerials sparkled white/black)
