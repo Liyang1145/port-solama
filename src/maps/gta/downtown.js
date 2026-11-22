@@ -62,14 +62,20 @@ export function prepDowntown(fab, col, palms) {
       col.remove(T.cb); col.addOBB(cx, cz, 1, 0, (x1 - x0) / 2, (z1 - z0) / 2 - ch, T.h, 'bld'); col.addOBB(cx, cz, 1, 0, (x1 - x0) / 2 - ch, (z1 - z0) / 2, T.h, 'bld'); S.fitTowers = (S.fitTowers || 0) + 1; } }
 
   // palm crowns (fabric palms from the trunk table + the city's palms) for the signal mast arms: [x, z, r, y0, y1]
-  const crowns = []; const TR = fab._trunks; if (TR) for (let i = 0; i < TR.length; i += 5) if (TR[i + 4] === 2) { const h = TR[i + 3] / 0.94; crowns.push([TR[i], TR[i + 1], 0.34 * h + 0.08 * h + 0.35, 0.86 * h, 1.02 * h]); }
-  for (const p of palms || []) { const h = p.h * (p.s || 1); crowns.push([p.x, p.z, 0.46 * h + Math.abs(p.lean || 0) * 1.6 * h + 0.4, 0.62 * h, 1.08 * h]); }
+  const crowns = []; const TR = fab._trunks; if (TR) for (let i = 0; i < TR.length; i += 5) if (TR[i + 4] === 2) { const h = TR[i + 3] / 0.94; crowns.push([TR[i], TR[i + 1], 0.34 * h + 0.45, 0.9 * h - 4.2, 1.02 * h]); } // frond tips at 0.9 h; seen from the street an arm under a crown reads as running through it, so any crown up to ~4 m above the arm counts
+  for (const p of palms || []) { const h = p.h * (p.s || 1); crowns.push([p.x, p.z, 0.46 * h + Math.abs(p.lean || 0) * 1.6 * h + 0.4, 0.62 * h - 3.0, 1.08 * h]); }
   const cg = new Map(); crowns.forEach((c, i) => { const k = Math.floor(c[0] / 24) * 65536 + Math.floor(c[1] / 24); let l = cg.get(k); if (!l) cg.set(k, l = []); l.push(i); });
   // does the segment (ax,az)-(bx,bz) at heights y0..y1 pass through a crown?
   const armHits = (ax, az, bx, bz, y0, y1) => { const x0 = Math.floor((Math.min(ax, bx) - 9) / 24), x1 = Math.floor((Math.max(ax, bx) + 9) / 24), z0 = Math.floor((Math.min(az, bz) - 9) / 24), z1 = Math.floor((Math.max(az, bz) + 9) / 24);
     const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-6;
     for (let a = x0; a <= x1; a++) for (let k = z0; k <= z1; k++) { const l = cg.get(a * 65536 + k); if (!l) continue; for (const i of l) { const c = crowns[i]; if (c[4] < y0 || c[3] > y1) continue;
       const t = Math.min(1, Math.max(0, ((c[0] - ax) * dx + (c[1] - az) * dz) / L2)); if (Math.hypot(ax + dx * t - c[0], az + dz * t - c[1]) < c[2] + 0.25) return true; } } return false; };
+
+  // canopy width that keeps clear of palm trunks: centre (x,z), axis along (ux,uz), half depth hd; returns the usable width (0 = none)
+  const canopyFit = (x, z, ux, uz, w, hd, wmin) => { let W = w; const gx0 = Math.floor((x - w) / 24), gx1 = Math.floor((x + w) / 24), gz0 = Math.floor((z - w) / 24), gz1 = Math.floor((z + w) / 24);
+    for (let a = gx0; a <= gx1; a++) for (let k = gz0; k <= gz1; k++) { const l = cg.get(a * 65536 + k); if (!l) continue; for (const i of l) { const c = crowns[i]; const rx = c[0] - x, rz = c[1] - z;
+      const al = Math.abs(rx * ux + rz * uz), nr = Math.abs(-rx * uz + rz * ux); if (nr < hd + 0.45 && al < W / 2 + 0.45) W = 2 * (al - 0.45); } }
+    return W >= wmin ? W : 0; };
 
   // ---- 1) tower podiums ----
   const GFT = 5.6;
@@ -92,9 +98,11 @@ export function prepDowntown(fab, col, palms) {
     const vw = Math.min(4.6, e.L - 0.4); const af = ((Math.atan2(e.nz, e.nx) / (Math.PI * 2)) % 1 + 1) % 1;
     const vp = off(0.16 + 0.95); add(vp[0], 0, vp[1], vw, 3.1, 1.9, e.ang, C.bronze, 20, af); addCol(vp[0], vp[1], vw, 1.9, e.ang, 3.1); it('vestibule');
     const cw = Math.min(Math.max(e.L + 1.6, 7.5), 10); const canC = ih(cx, cz, 3) < 0.5 ? C.white : C.bronze; const cy = 4.15;
-    const cp = off(0.16 + 1.8); add(cp[0], cy, cp[1], cw, 0.32, 3.6, e.ang, canC, 8); S.canopies++;
-    const fp = off(0.16 + 3.62); add(fp[0], cy - 0.22, fp[1], cw, 0.6, 0.12, e.ang, canC, 8);
-    for (const o of [1.0, 2.6]) { const lp = off(0.16 + o); add(lp[0], cy - 0.04, lp[1], cw - 1.2, 0.04, 0.22, e.ang, C.white, 17, 0, NEAR); }
+    const cp = off(0.16 + 1.8); const cwF = canopyFit(cp[0], cp[1], e.dx, e.dz, cw, 1.85, vw + 0.8); // a_downtown2: narrowed (or dropped) where a palm trunk stands under it
+    if (cwF < cw) it(cwF ? 'canopyNarrowed' : 'canopyDropped');
+    if (cwF) { add(cp[0], cy, cp[1], cwF, 0.32, 3.6, e.ang, canC, 8); S.canopies++;
+      const fp = off(0.16 + 3.62); add(fp[0], cy - 0.22, fp[1], cwF, 0.6, 0.12, e.ang, canC, 8);
+      for (const o of [1.0, 2.6]) { const lp = off(0.16 + o); add(lp[0], cy - 0.04, lp[1], cwF - 1.2, 0.04, 0.22, e.ang, C.white, 17, 0, NEAR); } }
     for (const sg of [-1, 1]) { const pp = along(off(0.16 + 1.15), sg * (vw / 2 + 1.7)); if (!free(pp[0], pp[1], 1.5, 1.0, e.ang, 0.1)) { no('planter'); continue; }
       add(pp[0], 0, pp[1], 1.5, 0.75, 1.0, e.ang, C.granite, 8); add(pp[0], 0.75, pp[1], 1.3, 0.45, 0.8, e.ang, C.shrub, 6); addCol(pp[0], pp[1], 1.5, 1.0, e.ang, 0.75); it('planter'); }
   }
@@ -108,8 +116,9 @@ export function prepDowntown(fab, col, palms) {
     if (kind === 5) continue;
     const nx = s === 0 ? -1 : s === 1 ? 1 : 0, nz = s === 2 ? -1 : s === 3 ? 1 : 0; const fx = cx + nx * w / 2, fz = cz + nz * d / 2; const ang = nx ? Math.PI / 2 : 0;
     const y = GF[kind] - 1.25; const canC = ih(cx, cz, 5) < 0.6 ? C.bronze : C.white;
-    add(fx + nx * 1.22, y, fz + nz * 1.22, 6.4, 0.28, 2.4, ang, canC, 8); add(fx + nx * 2.4, y - 0.18, fz + nz * 2.4, 6.4, 0.46, 0.1, ang, canC, 8);
-    add(fx + nx * 1.3, y - 0.035, fz + nz * 1.3, 5.6, 0.035, 0.22, ang, C.white, 17, 0, NEAR); S.canopies++;
+    const cW = canopyFit(fx + nx * 1.22, fz + nz * 1.22, nz ? 1 : 0, nx ? 1 : 0, 6.4, 1.25, 4.0); if (cW < 6.4) it(cW ? 'canopyNarrowed' : 'canopyDropped'); if (!cW) continue;
+    add(fx + nx * 1.22, y, fz + nz * 1.22, cW, 0.28, 2.4, ang, canC, 8); add(fx + nx * 2.4, y - 0.18, fz + nz * 2.4, cW, 0.46, 0.1, ang, canC, 8);
+    add(fx + nx * 1.3, y - 0.035, fz + nz * 1.3, cW - 0.8, 0.035, 0.22, ang, C.white, 17, 0, NEAR); S.canopies++;
   }
 
   // ---- 3) junction furniture ----
@@ -157,7 +166,7 @@ export function prepDowntown(fab, col, palms) {
   }
   // 48 m grid of record indices
   K.recs.forEach((r, i) => { const k = Math.floor(r[0] / 48) * 65536 + Math.floor(r[2] / 48); let l = K.grid.get(k); if (!l) K.grid.set(k, l = []); l.push(i); });
-  S.boxes = K.recs.length; S.ms = Math.round(performance.now() - T0); return K;
+  S.crowns = crowns.length; S.boxes = K.recs.length; S.ms = Math.round(performance.now() - T0); return K;
 }
 
 export function attachDowntown(K, scene) {
