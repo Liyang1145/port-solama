@@ -311,11 +311,13 @@ function residentialCell(fab, cell, cuts, col, canal) {
     // a_bridgewalk: entries are [t, lo, hi] (dry for lo < t - tb < hi; -t = inland): the boulevard deck now also carries its
     // inland 4.5 m sidewalk out to the edge wall, local-street decks their verges + sidewalks, plus the bay-park promenade footbridge
     const pj = (Q) => (Q[0] - A[0]) * d[0] + (Q[1] - A[1]) * d[1]; const tBv = pj(F.P(La + AIN, c)); const br = [[tBv, -(AIN + 0.24), AW + 0.4]];
-    for (const a of crossBr.get(c) || []) br.push([pj(F.P(a, c)), -(LIN + 0.24), LIN + 0.24]);
+    // a_canaledge: deck slab extents along the canal [t0, t1] (region.js cuts the 0.12 m bank coping there, it used to stand across the deck)
+    const decks = [[tBv - (AIN + 0.3), tBv + AW + 0.7]];
+    for (const a of crossBr.get(c) || []) { const ta = pj(F.P(a, c)); br.push([ta, -(LIN + 0.24), LIN + 0.24]); decks.push([ta - (LIN + 0.35), ta + LIN + 0.35]); }
     { const Pm = F.P(La + AIN, c); const o = AW + 16; const x = Pm[0] + d[0] * o, z = Pm[1] + d[1] * o; // promenade walk (bayPark: AW+14..AW+18 on the water side)
-      if (x <= shoreX(z) - 1.5) { br.push([tBv, AW + 13.8, AW + 18.2]); const ang = Math.atan2(-d[1], d[0]);
+      if (x <= shoreX(z) - 1.5) { br.push([tBv, AW + 13.8, AW + 18.2]); decks.push([tBv + AW + 13.6, tBv + AW + 18.4]); const ang = Math.atan2(-d[1], d[0]);
         deck(fab, x, z, -0.8, 4.8, 24.2, 0.735, ang); for (const e of [-2.2, 2.2]) edgeWall(fab, x + d[0] * e, z + d[1] * e, 0.2, 26, 0.95, ang); } }
-    (fab.canals = fab.canals || []).push({ A, B, d, hw: 12, br });
+    (fab.canals = fab.canals || []).push({ A, B, d, hw: 12, br, decks });
     // the coastal boulevard crosses on a short bridge: parapets either side of the canal
     const P = F.P(La + AIN, c); const n = [-d[1], d[0]]; for (const o of [-(AW + 0.4), AW + 0.4]) { addBody(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0]), [0.86, 0.84, 0.8], 7, null, false); parapet(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0])); }
     // a_bridgewalk: boulevard deck slab (inland sidewalk edge to the outer face of the coast-side parapet) + inland edge wall

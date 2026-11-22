@@ -6,7 +6,7 @@
 // murals) is generated when the camera comes within ~320 m and disposed past ~460 m.
 import * as THREE from 'three';
 import { World, prismWalls, polyCap, box } from '../../geo.js';
-import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, smooth } from './mapgeo.js';
+import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, pointInPoly, smooth } from './mapgeo.js';
 import { REGION } from './mapdata.js';
 import { rng, rand, randi, pick, clamp } from '../../util.js';
 
@@ -31,6 +31,21 @@ function wallQ(bk, a, b, ya0, ya1, yb0, yb1, ox, oz, col, u0 = 0) {
   if (n.x * ox + n.z * oz >= 0) bk.quad(A, B, C, D, [u0, ya0, u0 + len, yb0, u0 + len, yb1, u0, ya1], {}, col || null);
   else bk.quad(B, A, D, C, [u0 + len, yb0, u0, ya0, u0, ya1, u0 + len, yb1], {}, col || null);
 }
+
+// a_canaledge: canal bank wall + 0.12 m coping, cut at the bridge decks (fabric c.decks, [t0, t1] along the canal from c.A): the coping
+// used to run straight across every deck (a 0.18 m vertical strip standing across the road / sidewalk / promenade); under a deck the
+// bulkhead stops just below its top (-0.1) so the bank still reads as one wall from the water. Geometry only; no collider, no RNG.
+const BANK_CUT = { cuts: 0 };
+const PEARL_POLY = pearlPoly();
+function bankWall(bk, e, c, ox, oz) {
+  const dx = e.s[0] - e.w[0], dz = e.s[1] - e.w[1], L = Math.hypot(dx, dz); const ux = dx / L, uz = dz / L;
+  const t0w = c ? (e.w[0] - c.A[0]) * c.d[0] + (e.w[1] - c.A[1]) * c.d[1] : 0; // bank start, along the canal from c.A
+  const iv = ((c && c.decks) || []).map(([a, b]) => [Math.max(0, a - t0w), Math.min(L, b - t0w)]).filter(([a, b]) => b > a).sort((p, q) => p[0] - q[0]);
+  const P = (t) => [e.w[0] + ux * t, e.w[1] + uz * t]; let t = 0;
+  for (const [a, b] of iv) { if (a > t) wallQ(bk, P(t), P(a), -3.2, 0.12, -3.2, 0.12, ox, oz, null, t); wallQ(bk, P(a), P(b), -3.2, -0.1, -3.2, -0.1, ox, oz, null, a); BANK_CUT.cuts++; t = Math.max(t, b); }
+  if (L > t) wallQ(bk, P(t), P(L), -3.2, 0.12, -3.2, 0.12, ox, oz, null, t);
+}
+export const bankCutStats = BANK_CUT;
 
 export function buildRegion(ctx, H) {
   const { W, col, lamps, palms, trees, shrubs } = ctx;
@@ -128,10 +143,10 @@ export function buildRegion(ctx, H) {
   // 0.12 m coping with no railing, and run straight across the coastal boulevard / canal bridges -> invisible walls on the road
   // and a swimmer trap; registered as before (layout unchanged), removed by colfix (fit = [])
   { const cw = W.b('concrete', -900, 2000);
-    for (const q of ccut) { const mc = [(q.hi.w[0] + q.lo.w[0] + q.hi.s[0] + q.lo.s[0]) / 4, (q.hi.w[1] + q.lo.w[1] + q.hi.s[1] + q.lo.s[1]) / 4];
+    ccut.forEach((q, qi) => { const mc = [(q.hi.w[0] + q.lo.w[0] + q.hi.s[0] + q.lo.s[0]) / 4, (q.hi.w[1] + q.lo.w[1] + q.hi.s[1] + q.lo.s[1]) / 4];
       for (const e of [q.hi, q.lo]) { const dx = e.s[0] - e.w[0], dz = e.s[1] - e.w[1]; const l = Math.hypot(dx, dz); const c = [(e.w[0] + e.s[0]) / 2, (e.w[1] + e.s[1]) / 2];
-        wallQ(cw, e.w, e.s, -3.2, 0.12, -3.2, 0.12, mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail').fit = []; }
-      wallQ(cw, q.hi.w, q.lo.w, -3.2, 0.12, -3.2, 0.12, 1, 0); } }
+        bankWall(cw, e, canals[qi], mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail').fit = []; }
+      wallQ(cw, q.hi.w, q.lo.w, -3.2, 0.12, -3.2, 0.12, 1, 0); }); }
   // ------------------------------------------------------------------ causeway: berm, rock revetment, guard rails, bridge ----
   {
     const R = sun; const sEnd = D.sunShoreS + 6; const g = W.b('grass', -400, 0), rk = W.b('vcol', -400, 0), m = W.b('metal', -400, 0), cn = W.b('concrete', -400, 0);
@@ -300,8 +315,12 @@ export function buildRegion(ctx, H) {
     const az = Math.abs(z);
     // pearl island
     const dp = Math.hypot(x - pearl.cx, z - pearl.cz);
-    if (dp < pearl.r * 0.97) { nearestRoad(x, z, nr); if (nr.road && (nr.road.id === 'pring' || nr.road.id === 'plink')) { const ad = nr.dist - nr.road.hw; if (ad < 0) return DY; if (ad < SW) return DY + 0.15; } return DY; }
-    if (x < -22 && x > shoreX(z) - 1) { // over the bay: causeway / link bridge
+    // a_canaledge: the whole island polygon (its rim reaches 1.055 r; palms on the rim were planted 4 m down)
+    if (dp < pearl.r * 0.97 || (dp < pearl.r * 1.06 && pointInPoly(x, z, PEARL_POLY))) { nearestRoad(x, z, nr); if (nr.road && (nr.road.id === 'pring' || nr.road.id === 'plink')) { const ad = nr.dist - nr.road.hw; if (ad < 0) return DY; if (ad < SW) return DY + 0.15; } return DY; }
+    // a_canaledge: the natural island ends reach west of x = -22 (westCoast down to about -70); their grass + shore skirt used to be
+    // read as open bay here (undefined -> -4 m), so the dune / mangrove vegetation there was planted 4 m under the grass and walkers swam on it
+    const islandEnd = az > ISLE.z0 && az < ISLE.tip + 30 && x > -200 && x >= westCoast(z) - 9;
+    if (x < -22 && x > shoreX(z) - 1 && !islandEnd) { // over the bay: causeway / link bridge
       nearestRoad(x, z, nr); if (!nr.road) return undefined; const r = nr.road;
       if (r.id === 'sun') { const h = r.h(nr.s, x); const ad = nr.dist - r.hw; if (ad < 0) return h; if (inBridge(x)) return ad < 1.6 ? h + 0.15 : undefined; if (ad < 5.2) return h + 0.15; if (ad < 9) return h + 0.15 - (ad - 5.2) * (1.75 + h) / 3.8; if (ad < 13.5) return -1.6 - (ad - 9) * 0.4; return undefined; }
       if (r.id === 'plink') return nr.dist - r.hw < 1.4 ? DY + (nr.dist > r.hw ? 0.15 : 0) : undefined;

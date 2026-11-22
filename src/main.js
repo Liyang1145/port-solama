@@ -11,6 +11,7 @@ import { buildPromenade } from './maps/gta/promenade.js';
 import { buildSignage } from './maps/gta/signage.js';
 import { buildBacklot } from './maps/gta/backlot.js';
 import { applyColliderFits } from './maps/gta/colfix.js';
+import { fixCityProps } from './maps/gta/propfix.js';
 import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
 import { buildPost } from './post.js';
 import { Game } from './game.js';
@@ -78,6 +79,7 @@ async function load() {
   let stream = null, nature = null, neon = null;
   if (CYBER) { water.setBed(bedTexture(city.bedH)); stream = new Stream(scene, M, city.parcels); city.stream = stream; }
   addStreetTrees(city);
+  if (!CYBER) city.propFix = fixCityProps(city); // a_canaledge: lamps / palms / trees / shrubs standing in the water moved to land or dropped (after placement, RNG untouched)
   if (!CYBER) city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
   const veg = buildVegetation(scene, city, T);
   if (CYBER) nature = buildNature(scene, city, T, city.wild);
