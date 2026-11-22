@@ -60,7 +60,7 @@ function normalise(m) {
     m.side = THREE.DoubleSide; m.shadowSide = THREE.DoubleSide; if (m.transparent) m.forceSinglePass = true; envStats.cull++;
   }
   m.userData.eu = { uEVC: { value: vc }, uEOpq: { value: opq ? 1 : 0 }, uENM: { value: nm }, uEK: { value: m.userData.envEK || 0 } };
-  m.userData.envOn = 1; m.needsUpdate = true;
+  m.userData.envOn = 1; m.needsUpdate = true; if (!OLDENV2) envClsNote(m);
 }
 
 export function envFlush() {
@@ -100,7 +100,7 @@ let CUR = null, CURG = null;
 export function envInstall(r) {
   if (OLDENV || r.__envInst) return; r.__envInst = true;
   for (const fn of ['render', 'compile', 'compileAsync']) { const f0 = r[fn]; if (typeof f0 !== 'function') continue; r[fn] = function (...a) { envFlush(); return f0.apply(this, a); }; }
-  if (!DBG.includes('noic')) icAccessor(); wrapRenderer(r);
+  if (!DBG.includes('noic')) icAccessor(); wrapRenderer(r); envCaps(r);
 }
 // instanced meshes whose materials are all normalised read a white instanceColor (x1) when they have none, so 'instanced' and
 // 'instanced + colour' share programs. Done in an accessor so the buffer exists before three uploads the frame's attributes and
@@ -119,7 +119,7 @@ function icAccessor() {
 function whiteIC(n) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); a.__env = 1; return a; }
 function wrapRenderer(r) {
   if (r.__envWrap) return; r.__envWrap = true; const st = r.state; const gl = r.getContext();
-  const rbd = r.renderBufferDirect; r.renderBufferDirect = function (camera, scene, geometry, material, object, group) { CUR = object; CURG = group; return rbd.call(this, camera, scene, geometry, material, object, group); };
+  const rbd = r.renderBufferDirect; r.renderBufferDirect = function (camera, scene, geometry, material, object, group) { CUR = object; CURG = group; if (!OLDENV2 && material.userData.envFam) kindCheck(object, material); return rbd.call(this, camera, scene, geometry, material, object, group); };
   const sm = st.setMaterial;
   st.setMaterial = function (material, frontFaceCW, ...rest) {
     sm.call(this, material, frontFaceCW, ...rest);
@@ -196,3 +196,137 @@ export function envMerger(name) {
       Object.assign(s.uniforms, B.U0, t.uniforms, { uPK: { value: B.idx[i] } }); s.vertexShader = applyEdits(s.vertexShader, B.ev); s.fragmentShader = applyEdits(s.fragmentShader, B.ef); };
     w.envKey = () => { if (!B) build(); return (B.ok ? name : key) + '|e'; }; return w; } };
 }
+
+// ---- b_envprog2: one merged program for the opaque environment families ('envu') ------------------------------------------------
+// Every member family's patch is read the same way as envMerger above (probe shader, edits verified against the original patch) and
+// goes into one shader behind `if (uPK == i)`; on top of envMerger this also takes
+//  - patches that replace a whole include (only the chunks in REP_OK: the member's code, else the stock chunk),
+//  - vertex edits (each member's own block, so two members writing one varying cannot clash),
+//  - preprocessor lines inside a member's code (#ifdef USE_INSTANCING ...),
+//  - declarations hoisted per member when a local is used by a later hook (comma lists too),
+// and trims by define: a member's code is compiled only into the program variants it can be drawn with (UBF: i = instanced only,
+// m = non-instanced only, a = alpha-tested) -> the instanced program does not carry road / ground code and the other way round.
+// A material drawn in a variant its family was not listed for is switched to its own old program before that draw (renderBufferDirect
+// wrapper below), so the table can only cost merging, never pixels. Conflicting declarations, too many samplers / attributes /
+// varyings for this GPU, or a failed check drop that one member (own program, console.warn); the others still merge.
+// Opaque default state only: transparent, polygon-offset, depthWrite / depthTest off, other depth funcs keep their own programs
+// (SwiftShader re-JITs a whole fragment program per depth / blend state, so a big shared program would cost more there).
+// ?oldenvmat2 -> exactly b_envprog (ground-family merger, nothing below).
+export const ENVDBG = DBG;
+export const OLDENV2 = OLDENV || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldenvmat2'));
+const UBF = {
+  std: '--', // unpatched prep() materials: no code of their own, they just stop being a separate program
+  // B 霓港 / shared
+  road: 'm-', vcol: 'm-', sidewalk: 'm-', sand: 'm-', mgc: 'm-', grass: 'm-', terrain: 'm-',
+  boulder: 'in', creek: 'm-', furn63: 'm-',
+  // 霓港 decals (were hand-made materials, now prep()'d: envAdopt). viaconc stays out: adopting it moved 2 % of pixels by 1/255
+  cnsign: 'm-', puddleN: 'm-', qpuddle: 'm-',
+  fol: 'ia', wind: 'in', jbark: 'in', portbox: 'in',
+  // A 索拉纳港 far city
+  fabLot: 'm-', fabBody: 'in', fabS: 'in',
+};
+const REP_OK = new Set(['map_fragment', 'color_fragment', 'roughnessmap_fragment']); // chunks safe to put in braces
+const REP_DECL = { roughnessmap_fragment: 'float roughnessFactor' }; // ...once this local is declared before the branches
+const CAPS = { tex: 16, attr: 16, vary: 15 };
+const AUTOI = new Set(); // families whose code reads instance attributes without an #ifdef USE_INSTANCING: instanced-only
+const REPF = new Map(); // family -> representative patch (code); same family = same code
+const UBS = {}; // build result per state class: u = opaque default state, o = polygon-offset decals (opaque, depth write on)
+const CLS = {}; // family -> bit set of the classes its materials were seen in (1 = u, 2 = o)
+const DTYPE = /^(?:(?:highp|mediump|lowp)\s+)?(float|vec2|vec3|vec4|int|bool|mat2|mat3|mat4|ivec2|ivec3|ivec4)\s+([\s\S]*);$/;
+function splitComma(t) { const r = []; let d = 0, s = 0; for (let i = 0; i < t.length; i++) { const c = t[i]; if (c === '(' || c === '[') d++; else if (c === ')' || c === ']') d--; else if (c === ',' && d === 0) { r.push(t.slice(s, i)); s = i + 1; } } r.push(t.slice(s)); return r.map((x) => x.trim()); }
+function nrm(t) { return t.replace(/\s+/g, ' ').trim(); }
+function declNames(st) {
+  st = st.trim(); if (st.startsWith('#')) { const m = /^#define\s+(\w+)/.exec(st); return m ? ['#' + m[1]] : []; }
+  if (/^precision\s/.test(st)) return [];
+  if (st.endsWith('}')) { const m = /^[\w\s]*?\b(\w+)\s*\(/.exec(st); if (m) return ['f:' + m[1]]; const s = /^struct\s+(\w+)/.exec(st); return s ? [s[1]] : ['?' + st]; }
+  if (/\(/.test(st) && !/=/.test(st)) { const m = /(\w+)\s*\(/.exec(st); return m ? ['f:' + m[1]] : []; }
+  const s = st.replace(/;$/, '').replace(/\b(uniform|varying|attribute|flat|smooth|highp|mediump|lowp|const|centroid|invariant)\b/g, ' ').trim();
+  const m = /^(\w+)\s+([\s\S]*)$/.exec(s); if (!m) return ['?' + st];
+  return splitComma(m[2]).map((d) => (/^(\w+)/.exec(d) || [])[1]).filter(Boolean);
+}
+const VSZ = { float: 0.25, vec2: 0.5, vec3: 1, vec4: 1, mat3: 3, mat4: 4, int: 0.25, ivec2: 0.5 };
+function readEdits2(names, txt) { // -> { name: [pre, post] | { rep } } or null
+  const out = {}; const parts = txt.split(/\n\/\/@@(\w+)\n/); if (parts[0] !== '' || parts.length !== names.length * 2 + 1) return null;
+  for (let i = 0; i < names.length; i++) { const n = parts[1 + 2 * i], seg = parts[2 + 2 * i]; if (n !== names[i]) return null; const inc = `#include <${n}>`; const k = seg.indexOf(inc);
+    if (!seg.endsWith('\n')) return null;
+    if (k < 0) { out[n] = { rep: seg.slice(0, -1) }; continue; }
+    if (seg.indexOf(inc, k + 1) >= 0) return null;
+    const pre = seg.slice(0, k), post = seg.slice(k + inc.length); const p2 = post.slice(0, -1); if (pre || p2) out[n] = [pre, p2]; }
+  return out;
+}
+function applyEdits2(src, E) { for (const n in E) { const inc = `#include <${n}>`; const e = E[n]; src = src.replace(inc, () => (e.rep !== undefined ? e.rep : e[0] + inc + e[1])); } return src; }
+function guardOf(f, stage) { const k = (UBF[f] || '--').replace(/./, (c) => (AUTOI.has(f) ? 'i' : c)); const c = []; if (k[0] === 'i') c.push('defined( EU_INST )'); else if (k[0] === 'm') c.push('!defined( EU_INST )'); if (stage === 'f') { if (k[1] === 'a') c.push('defined( USE_ALPHATEST )'); else if (k[1] === 'n') c.push('!defined( USE_ALPHATEST )'); } return c.join(' && '); }
+function gwrap(g, code) { return g ? `\n#if ${g}\n${code}\n#endif` : '\n' + code; }
+
+function buildUber(cls) {
+  if (UBS[cls]) return UBS[cls]; const bit = cls === 'u' ? 1 : 2;
+  const L = THREE.ShaderLib.physical; const VN = incs(L.vertexShader), FN = incs(L.fragmentShader); const PV = probe(VN), PF = probe(FN);
+  const B = { idx: new Map(), U0: {}, bad: {}, VD: {}, FD: {}, V: {}, F: {}, VR: {}, FR: {}, glob: { v: [], f: [] }, names: new Map(), samp: 0, attr: 0, vary: 0, sigs: [] };
+  for (const [fam, fn] of REPF) { if (!(CLS[fam] & bit)) continue;
+    try {
+      const t = { uniforms: {}, vertexShader: PV, fragmentShader: PF }; fn(t); const ev = readEdits2(VN, t.vertexShader), ef = readEdits2(FN, t.fragmentShader); if (!ev || !ef) throw new Error('probe');
+      const r = { uniforms: {}, vertexShader: L.vertexShader, fragmentShader: L.fragmentShader }; fn(r);
+      if (applyEdits2(L.vertexShader, ev) !== r.vertexShader || applyEdits2(L.fragmentShader, ef) !== r.fragmentShader) throw new Error('verify');
+      for (const E of [ev, ef]) for (const n in E) { if (E[n].rep !== undefined && (!REP_OK.has(n) || isDecl(n))) throw new Error('replaces ' + n); if ((E[n].rep !== undefined ? E[n].rep : E[n].join('\n')).split('\n').some((l) => l.includes('#') && !/^\s*#/.test(l))) throw new Error('inline #'); }
+      const sig = JSON.stringify([ev, ef]); let idx = B.sigs.indexOf(sig);
+      if (idx >= 0) { B.idx.set(fam, idx); Object.assign(B.U0, t.uniforms); continue; } // same code as an earlier member
+      idx = B.sigs.length; if (/\binstance(Matrix|Color)\b/.test(sig) && !/USE_INSTANCING/.test(sig)) AUTOI.add(fam);
+      const gv = guardOf(fam, 'v'), gf = guardOf(fam, 'f');
+      // declarations: dedupe identical statements, refuse a name declared differently, count samplers / attributes / varyings
+      const add = { VD: [], FD: [] }; const nn = new Map(); let samp = 0, attr = 0, vary = 0;
+      for (const [E, D, tag] of [[ev, B.VD, 'VD'], [ef, B.FD, 'FD']]) for (const n in E) { if (!isDecl(n)) continue;
+        for (const j of [0, 1]) for (const st of splitTop(stripC(E[n][j]))) { const s = nrm(st); const have = (D[n] && D[n][j].some((x) => nrm(x) === s)) || add[tag].some((a) => a[0] === n && a[1] === j && nrm(a[2]) === s); if (have) continue;
+          for (const nm of declNames(st)) { const o = B.names.get(nm) || nn.get(nm); if (o !== undefined && o !== s && !(nm.startsWith('f:') && false)) throw new Error('conflict ' + nm); nn.set(nm, s); }
+          if (/^uniform\s/.test(s) && /\bsampler\w*\b/.test(s)) samp += declNames(st).length;
+          if (/^attribute\s/.test(s)) attr += declNames(st).length;
+          if (tag === 'VD' && /^(flat\s+)?varying\s/.test(s)) { const m = /varying\s+(?:\w+\s+)?(float|vec2|vec3|vec4|mat3|mat4|int|ivec2)\s/.exec(s); vary += (m ? VSZ[m[1]] : 1) * declNames(st).length; }
+          add[tag].push([n, j, st]); } }
+      if (B.samp + samp > CAPS.tex - 9 || B.attr + attr > CAPS.attr - 9 || Math.ceil(B.vary + vary) > CAPS.vary - 13) throw new Error('limits');
+      // bodies: hoist a member's top-level locals that another of its blocks uses (renamed _u<idx>), then wrap in its branch
+      const st2 = []; for (const [E, stage] of [[ev, 'v'], [ef, 'f']]) { const units = []; for (const n in E) { if (isDecl(n)) continue; const e = E[n];
+          if (e.rep !== undefined) units.push({ n, j: 'r', c: stripC(e.rep) }); else for (const j of [0, 1]) if (e[j].trim()) units.push({ n, j, c: stripC(e[j]) }); }
+        const glob = [];
+        for (const u of units) for (const st of splitTop(u.c)) { const m = DTYPE.exec(st); const cst = /^const\s/.test(st);
+          const ds = m ? splitComma(m[2]).map((d) => { const q = /^(\w+)\s*(\[[^\]]*\])?\s*(?:=\s*([\s\S]*))?$/.exec(d); return q ? { name: q[1], arr: q[2], init: q[3] } : null; }) : null;
+          const names = ds ? ds.filter(Boolean).map((d) => d.name) : cst ? declNames(st) : [];
+          const used = names.some((nm) => units.some((o) => o !== u && new RegExp('\\b' + nm + '\\b').test(o.c))); if (!used) continue;
+          if (!ds || ds.some((d) => !d || d.arr)) throw new Error('hoist ' + names.join(','));
+          const sfx = '_u' + idx; glob.push(m[1] + ' ' + ds.map((d) => d.name + sfx).join(', ') + ';');
+          u.c = u.c.replace(st, ds.filter((d) => d.init !== undefined).map((d) => d.name + ' = ' + d.init + ';').join(' '));
+          for (const o of units) for (const d of ds) o.c = o.c.replace(new RegExp('\\b' + d.name + '\\b', 'g'), d.name + sfx); }
+        st2.push({ stage, units, glob }); }
+      // commit
+      B.sigs.push(sig); B.idx.set(fam, idx); Object.assign(B.U0, t.uniforms); B.samp += samp; B.attr += attr; B.vary += vary; for (const [k, v] of nn) B.names.set(k, v);
+      for (const tag of ['VD', 'FD']) for (const [n, j, st] of add[tag]) { const D = B[tag][n] || (B[tag][n] = [[], []]); D[j].push(st); }
+      for (const { stage, units, glob } of st2) { const H = stage === 'v' ? B.V : B.F, R = stage === 'v' ? B.VR : B.FR; const g = stage === 'v' ? gv : gf; if (glob.length) B.glob[stage].push(gwrap(g, glob.join('\n')));
+        for (const u of units) { if (u.j === 'r') { const dv = REP_DECL[u.n]; let c = u.c; if (dv) { if (!c.includes(dv)) throw new Error('rep ' + u.n); c = c.split(dv).join(dv.split(' ')[1]); } (R[u.n] || (R[u.n] = [])).push(gwrap(g, `if ( uPK == ${idx}.0 ) {\n${c}\n} else`)); continue; }
+          const cur = H[u.n] || (H[u.n] = ['', '']); cur[u.j] += gwrap(g, `if ( uPK == ${idx}.0 ) {\n${u.c}\n}`); } }
+    } catch (e) { B.bad[fam] = e.message; console.warn('[envprog2] ' + fam + ' keeps its own program:', e.message); }
+  }
+  const mk = (H, R, D, gl) => { const E = {}; const keys = new Set([...Object.keys(H), ...Object.keys(R)]);
+    for (const n of keys) { const h = H[n] || ['', '']; if (R[n]) { const dv = REP_DECL[n]; E[n] = { rep: h[0] + (dv ? '\n' + dv + ';' : '') + R[n].join('') + `\n{\n${dv ? THREE.ShaderChunk[n].split(dv).join(dv.split(' ')[1]) : `#include <${n}>`}\n}` + h[1] }; } else E[n] = [h[0] ? h[0] + '\n' : '', h[1]]; }
+    for (const n in D) { if (E[n]) throw new Error('hook clash ' + n); E[n] = [D[n][0].length ? D[n][0].join('\n') + '\n' : '', D[n][1].length ? '\n' + D[n][1].join('\n') : '']; }
+    const c = E.common || ['', '']; E.common = [c[0], '\nuniform float uPK;' + gl.join('') + c[1]]; return E; };
+  try { B.ev = mk(B.V, B.VR, B.VD, B.glob.v); B.ef = mk(B.F, B.FR, B.FD, B.glob.f); B.ok = true; } catch (e) { console.warn('[envprog2] no merge:', e.message); B.ok = false; }
+  (envStats.uber || (envStats.uber = {}))[cls] = { members: [...B.idx.keys()].join(' '), branches: B.sigs.length, bad: B.bad, samp: B.samp, attr: B.attr, vary: B.vary };
+  return (UBS[cls] = B);
+}
+function clsOf(m) { if ((m.polygonOffset && DBG.includes('noo')) || (!m.polygonOffset && DBG.includes('nou'))) return null; if (m.transparent || m.depthWrite === false || m.depthTest === false || m.depthFunc !== THREE.LessEqualDepth || m.colorWrite === false) return null; return m.polygonOffset ? 'o' : 'u'; }
+function inUber(m, fam) { if (!m.userData.envOn || m.userData.envBad) return null; const c = clsOf(m); if (!c) return null; const B = buildUber(c); return B.ok && B.idx.has(fam) ? B : null; }
+export function envClsNote(m) { const c = clsOf(m); if (c) CLS[m.userData.envFam] |= c === 'u' ? 1 : 2; } // normalise(): which classes a family is used in
+// prep() hook: patch (or null for an unpatched material) -> patch that compiles to the merged program when the material qualifies
+export function envUberWrap(fn, key) {
+  const fam = envFamily(key, !!fn); if (OLDENV2 || !UBF[fam] || key === 'npc' || key === 'ch') return fn;
+  const f0 = fn || (() => {}); if (!REPF.has(fam)) REPF.set(fam, f0); // a family first seen after a build keeps its own program (not in B.idx)
+  const w = (s, m) => { const UB = m && inUber(m, fam); if (!UB) return f0(s); const t = { uniforms: {}, vertexShader: '', fragmentShader: '' }; f0(t);
+    Object.assign(s.uniforms, UB.U0, t.uniforms, { uPK: { value: UB.idx.get(fam) } }); const d = s.instancing ? '#define EU_INST\n' : ''; // three defines USE_INSTANCING in the vertex stage only
+    s.vertexShader = d + applyEdits2(s.vertexShader, UB.ev); s.fragmentShader = d + applyEdits2(s.fragmentShader, UB.ef); };
+  w.envKey = (m) => (inUber(m, fam) ? 'env' + clsOf(m) + '|e' : fam + '|e'); w.envFam = fam; return w;
+}
+// main-pass check before three picks the program: a member drawn in a variant its family's code was trimmed out of -> own program
+function kindCheck(object, m) {
+  let k = UBF[m.userData.envFam]; if (k && AUTOI.has(m.userData.envFam)) k = 'i' + k[1]; if (!k || m.userData.envBad || !m.userData.envOn || m.isMeshDepthMaterial) return;
+  const inst = !!object.isInstancedMesh, at = m.alphaTest > 0;
+  if ((k[0] === 'i' && !inst) || (k[0] === 'm' && inst) || (k[1] === 'a' && !at) || (k[1] === 'n' && at)) { m.userData.envBad = 1; m.needsUpdate = true; envStats.kindBad = (envStats.kindBad || 0) + 1; console.warn('[envprog2] ' + m.userData.envFam + ' drawn as ' + (inst ? 'instanced' : 'mesh') + ': own program'); }
+}
+export function envCaps(r) { const c = r.capabilities; CAPS.tex = Math.min(c.maxTextures, 32); CAPS.attr = c.maxAttributes; CAPS.vary = c.maxVaryings; }

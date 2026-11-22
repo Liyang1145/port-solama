@@ -18,7 +18,7 @@ import { World, box, polyCap, prismWalls } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick, mulberry } from '../../util.js';
 import { kg, beam, tube, put, cable, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
-import { prep } from '../../mats.js';
+import { envAdopt, prep } from '../../mats.js';
 
 export const QUAY = { x: -1150, z: -1000, th: -0.0555, u0: -266, u1: 266 }; // edge (-1420,-1015)-(-880,-985) of LANDS.port
 const BASE_R = 2600, NEAR_R = 650, FAR_R = 850, DETAIL_R = 260;
@@ -174,7 +174,7 @@ function puddleMat() {
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.42, 0.1, uNight);')
       .replace('#include <opaque_fragment>', 'outgoingLight = min(outgoingLight, vec3(mix(0.42, 3.0, uNight)));\n#include <opaque_fragment>'); };
-  PUD.customProgramCacheKey = () => 'qpuddle'; return PUD;
+  PUD.customProgramCacheKey = () => 'qpuddle'; return (PUD = envAdopt(PUD, 'qpuddle')); // b_envprog2
 }
 function coneMat() {
   if (CONE) return CONE;

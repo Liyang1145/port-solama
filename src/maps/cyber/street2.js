@@ -10,6 +10,7 @@
 // alpha-blended, no shadows). Small parts go to 'vcolD' (hidden beyond the detail radius), steam LOD-hidden the same way.
 // All names / texts are invented; no real brands or marks.
 import * as THREE from 'three';
+import { envAdopt } from '../../mats.js'; // b_envprog2
 import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
@@ -73,7 +74,7 @@ export function cnSignMat() {
       .replace('#include <color_fragment>', '')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vColor.r * (0.06 + uNight * 1.25);'); };
   CN_MAT.customProgramCacheKey = () => 'cnsign';
-  return CN_MAT;
+  return (CN_MAT = envAdopt(CN_MAT, 'cnsign')); // b_envprog2
 }
 const CN_G = new Map();
 // unit plane facing +z for a sign cell (0..23) or a sticker cell (100..115)

@@ -1,6 +1,7 @@
 // "Port Solana": an original Miami-inspired city — a barrier island (Art Deco beachfront, condos)
 // across a bay from a glass-tower downtown, linked by a causeway.
 import * as THREE from 'three';
+import { envAdopt } from '../../mats.js'; // b_envprog2
 import { World, prismWalls, polyCap, rect, box } from '../../geo.js';
 import { ColliderGrid, rng, rand, randi, pick, clamp } from '../../util.js';
 import { ROADS, landAt, beachX, BEACH_Z, DECO_CORE } from './mapdata.js';
@@ -72,7 +73,7 @@ export function buildCity(scene, mats, T) {
       s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.6, 0.14, uNight);')
         .replace('#include <opaque_fragment>', 'outgoingLight = min(outgoingLight, vec3(mix(0.09, 3.0, uNight)));\n#include <opaque_fragment>'); };
-    mats.puddle.customProgramCacheKey = () => 'puddleN'; }
+    mats.puddle.customProgramCacheKey = () => 'puddleN'; envAdopt(mats.puddle, 'puddleN'); } // b_envprog2
   if (!mats.signface) mats.signface = signFaceMat();
   if (!mats.cnsign) mats.cnsign = cnSignMat(); // r6.4 b_street2: Chinese light-box signs / paper stickers (text atlas)
   if (!mats.steam) mats.steam = steamMat(); // r6.4 b_street2: stall steam / grill smoke

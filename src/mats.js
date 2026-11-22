@@ -3,24 +3,33 @@ import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
 import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
-import { envReg, envPatch, envFamily, envMerger, OLDENV } from './envprog.js'; // b_envprog: merged environment programs
+import { envReg, envPatch, envFamily, envMerger, envUberWrap, OLDENV, OLDENV2, ENVDBG } from './envprog.js'; // b_envprog: merged environment programs
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
 export function setCSM(csm, aniso) { CSMREF = csm; ANISO = aniso; }
 
 export function prep(mat, key = 'std', patch = null) {
+  const p2 = envUberWrap(patch, key); // b_envprog2: opaque environment families compile into one merged program (?oldenvmat2: off)
   mat.onBeforeCompile = function (s, r) {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
-    if (patch) patch(s);
+    if (p2) p2(s, this);
     if (this.userData.envOn) envPatch(s, this, U); // b_envprog: normalised environment material (see envprog.js)
   };
   // b_verify ?shotfast (test only): unpatched names share one program ('std'): same shader text, so the same pixels, fewer SwiftShader JITs
   // b_envprog: normalised materials share one program per family, 'std' for every unpatched name (?oldenvmat: old keys)
   const k0 = SHOTFAST && !patch ? 'std' : key, ke = envFamily(key, !!patch) + '|e';
-  mat.customProgramCacheKey = function () { return this.userData.envOn ? (patch && patch.envKey ? patch.envKey() : ke) : k0; }; // envKey: merged patch family
+  mat.customProgramCacheKey = function () { return this.userData.envOn ? (p2 && p2.envKey ? p2.envKey(this) : ke) : k0; }; // envKey: merged patch family
   envReg(mat, key, !!patch);
   return mat;
+}
+
+// b_envprog2: hand-made environment materials (own onBeforeCompile + cache key) join the merged programs. They never got prep()'s fog
+// uniforms, so their height fog read uSunDir / uFogSunCol / uFogFalloff as 0 -> those stay 0 explicitly (same pixels). ?oldenvmat2: untouched
+const FOG0 = { uSunDir: { value: new THREE.Vector3(0, 0, 0) }, uFogSunCol: { value: new THREE.Color(0, 0, 0) }, uFogFalloff: { value: 0 } };
+export function envAdopt(mat, key) {
+  if (OLDENV2 || ENVDBG.includes('noadopt') || ENVDBG.includes('na_' + key)) return mat; const ob = mat.onBeforeCompile;
+  return prep(mat, key, (s) => { ob(s); Object.assign(s.uniforms, FOG0); });
 }
 
 export function texSet(T, name, rep = 1, opts = {}) {
@@ -749,7 +758,7 @@ if (wet > 0.01) {
 
 export function simpleMats(T) {
   // b_envprog: ground materials (sidewalk / sand / lawns / district ground) share one program, branches by uniform (?oldenvmat: off)
-  const GM = OLDENV ? null : envMerger('ground'); const gw = (fn, key) => GM ? GM.wrap(fn, key) : fn;
+  const GM = OLDENV || !OLDENV2 ? null : envMerger('ground'); /* b_envprog2: by default these join the merged 'envu' program */ const gw = (fn, key) => GM ? GM.wrap(fn, key) : fn;
   const side = texSet(T, 'sidewalk', 1); for (const t of [side.map, side.normalMap, side.roughnessMap]) t.repeat.set(1 / 3, 1 / 3);
   M.sidewalk = prep(new THREE.MeshStandardMaterial({ map: side.map, normalMap: side.normalMap, roughnessMap: side.roughnessMap, color: 0xffffff, roughness: 1 }), 'sidewalk', gw((s) => {
     s.uniforms.uWet = U.uWet;
