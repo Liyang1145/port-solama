@@ -266,6 +266,7 @@ function residentialCell(fab, cell, cuts, col, canal) {
   const aBreak = [0, ...cross, La];
   // canal cells: the water runs between back-to-back rows (b mid-way between streets) out to the bay; a=La is the coast side
   const canals = canal ? streets.slice(0, -1).map((b, k) => (b + streets[k + 1]) / 2) : [];
+  const crossBr = new Map(); // a_orphans: canal b -> a of the local streets that bridge it
   // locals (constant b) split at the cross streets, junction patches at crossings
   for (const b of streets) for (let m = 0; m < aBreak.length - 1; m++) {
     const a0 = aBreak[m] + (m === 0 ? 0 : LW), a1 = aBreak[m + 1] - (m === aBreak.length - 2 ? 0 : LW);
@@ -278,7 +279,9 @@ function residentialCell(fab, cell, cuts, col, canal) {
     for (let k = 0; k < bl.length - 1; k++) { const first = k === 0, last = k === bl.length - 2;
       const b0 = bl[k] + (first ? 0 : LW), b1 = bl[k + 1] - (last ? 0 : LW);
       if (canal && canals.some((c) => c > b0 && c < b1)) { // bridge over the canal: road continues (deck), side walls
-        const c = canals.find((q) => q > b0 && q < b1); for (const sgn of [-1, 1]) addBody(fab, ...F.P(a + sgn * (LW + 0.25), c), 0, 0.5, 26, 1.0, fang(F, a, c) + Math.PI / 2, [0.82, 0.8, 0.76], 7, col, false); }
+        const c = canals.find((q) => q > b0 && q < b1); // a_orphans: was fang + PI/2, which laid both 26 m parapets ACROSS the street (two 1 m walls over the carriageway); now along its kerbs
+        for (const sgn of [-1, 1]) addBody(fab, ...F.P(a + sgn * (LW + 0.25), c), 0, 0.5, 26, 1.0, fang(F, a, c), [0.82, 0.8, 0.76], 7, col, false);
+        { const l = crossBr.get(c) || []; l.push(a); crossBr.set(c, l); for (const sgn of [-1, 1]) parapet(fab, ...F.P(a + sgn * (LW + 0.25), c), 0.5, 26, 1.0, fang(F, a, c)); } }
       fStreetB(fab, F, cell, cuts, a, b0, b1, LW, 2, first && bs === 0, last && be === Lb);
       sidesB(fab, F, a, b0, b1); }
   }
@@ -297,10 +300,17 @@ function residentialCell(fab, cell, cuts, col, canal) {
   if (bs === 0) wallRun(fab, F, 0, La, 0.6, col); if (be === Lb) wallRun(fab, F, 0, La, Lb - 0.6, col);
   // canals: water cut is made in the ground (city.js reads fab.canals); seawall copings along both banks + docks/boats
   for (const c of canals) { const A = F.P(26, c), B0 = F.P(La, c), d = norm2(sub(B0, A)); let t = len2(sub(B0, A)); for (let k = 0; k < 4; k++) { const x = A[0] + d[0] * t, z = A[1] + d[1] * t; t += (shoreX(z) + 6 - x) / (d[0] || 1); }
-    const B = [A[0] + d[0] * t, A[1] + d[1] * t]; (fab.canals = fab.canals || []).push({ A, B, d, hw: 12 });
+    const B = [A[0] + d[0] * t, A[1] + d[1] * t];
+    // a_orphans: bridge decks across the canal (coastal boulevard between its parapets, local streets between theirs), as
+    // [along-canal distance from A, half width]; inCanalWater() keeps them dry so groundH gives the road, not the canal bed
+    const pj = (Q) => (Q[0] - A[0]) * d[0] + (Q[1] - A[1]) * d[1]; const br = [[pj(F.P(La + AIN, c)), AW + 0.4]]; for (const a of crossBr.get(c) || []) br.push([pj(F.P(a, c)), LW + 0.25]);
+    (fab.canals = fab.canals || []).push({ A, B, d, hw: 12, br });
     // the coastal boulevard crosses on a short bridge: parapets either side of the canal
-    const P = F.P(La + AIN, c); const n = [-d[1], d[0]]; for (const o of [-(AW + 0.4), AW + 0.4]) addBody(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0]), [0.86, 0.84, 0.8], 7, null, false); void n; }
+    const P = F.P(La + AIN, c); const n = [-d[1], d[0]]; for (const o of [-(AW + 0.4), AW + 0.4]) { addBody(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0]), [0.86, 0.84, 0.8], 7, null, false); parapet(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0])); } void n; }
 }
+// a_orphans: canal-bridge parapets are drawn without colliders (addBody collide=false); colfix adds these boxes after every layer
+// is placed (same OBB as addBody would make), so the fabric layout and every later layer's free-space checks stay unchanged
+function parapet(fab, cx, cz, w, d, h, ang) { (fab.parapets = fab.parapets || []).push([cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, h]); }
 function wallRun(fab, F, a0, a1, b, col) { const ang = fang(F, (a0 + a1) / 2, b); for (let a = a0 + 2; a < a1 - 2; a += 40) { const ae = Math.min(a1 - 2, a + 40); const p = F.P((a + ae) / 2, b); addBody(fab, p[0], p[1], 0, ae - a, 0.35, 2.1, ang, [0.86, 0.82, 0.74], 7, col); } }
 function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   const R = fab.R, rr = fab.rr; const fw = a1 - a0, depth = Math.abs(f1 - f0); if (depth < 18) return;
@@ -680,4 +690,6 @@ export function updateFabric(fab, cam) {
     for (const m of ms.night) { m.visible = U.uNight.value > 0.03 && d < 3200; m.receiveShadow = false; } }
 }
 // ground under the canals: notch polygons for city.js / region.js (water shows through), and a land query
+// a_orphans: inCanal() minus the bridge decks (region groundH only; inCanal itself is unchanged so the tree pass keeps its RNG order)
+export function inCanalWater(fab, x, z) { if (!fab.canals) return false; for (const c of fab.canals) { const d = sub(c.B, c.A), L = len2(d); const t = ((x - c.A[0]) * d[0] + (z - c.A[1]) * d[1]) / L; if (t < 0 || t > L) continue; const o = Math.abs((x - c.A[0]) * -d[1] + (z - c.A[1]) * d[0]) / L; if (o < c.hw && !(c.br && c.br.some(([tb, w]) => Math.abs(t - tb) < w))) return true; } return false; }
 export function inCanal(fab, x, z) { if (!fab.canals) return false; for (const c of fab.canals) { const d = sub(c.B, c.A), L = len2(d); const t = ((x - c.A[0]) * d[0] + (z - c.A[1]) * d[1]) / L; if (t < 0 || t > L) continue; const o = Math.abs((x - c.A[0]) * -d[1] + (z - c.A[1]) * d[0]) / L; if (o < c.hw) return true; } return false; }

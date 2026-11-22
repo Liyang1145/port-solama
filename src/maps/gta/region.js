@@ -124,10 +124,13 @@ export function buildRegion(ctx, H) {
     }
   }
   // canal banks: bulkhead walls + coping on both sides and across the head; short seawall stubs to the mouths
+  // a_orphans: the bank boxes (0.8 m high, 0.6 m wide, the whole ~400 m bank from the inland head to the seawall) stand over a
+  // 0.12 m coping with no railing, and run straight across the coastal boulevard / canal bridges -> invisible walls on the road
+  // and a swimmer trap; registered as before (layout unchanged), removed by colfix (fit = [])
   { const cw = W.b('concrete', -900, 2000);
     for (const q of ccut) { const mc = [(q.hi.w[0] + q.lo.w[0] + q.hi.s[0] + q.lo.s[0]) / 4, (q.hi.w[1] + q.lo.w[1] + q.hi.s[1] + q.lo.s[1]) / 4];
       for (const e of [q.hi, q.lo]) { const dx = e.s[0] - e.w[0], dz = e.s[1] - e.w[1]; const l = Math.hypot(dx, dz); const c = [(e.w[0] + e.s[0]) / 2, (e.w[1] + e.s[1]) / 2];
-        wallQ(cw, e.w, e.s, -3.2, 0.12, -3.2, 0.12, mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail'); }
+        wallQ(cw, e.w, e.s, -3.2, 0.12, -3.2, 0.12, mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail').fit = []; }
       wallQ(cw, q.hi.w, q.lo.w, -3.2, 0.12, -3.2, 0.12, 1, 0); } }
   // ------------------------------------------------------------------ causeway: berm, rock revetment, guard rails, bridge ----
   {
@@ -217,7 +220,10 @@ export function buildRegion(ctx, H) {
     for (let i = 0; i < 40; i++) { const a = rand(0, 6.28), r = rand(6, 38); shrubs.push({ x: pearl.cx + Math.cos(a) * r, z: pearl.cz + Math.sin(a) * r, s: rand(0.8, 1.5) }); }
     const fv = W.b('vcol', pearl.cx, pearl.cz); const ring = new THREE.CylinderGeometry(5, 5.3, 0.6, 28, 1, true); H.gput(fv, ring, pearl.cx, DY + 0.3, pearl.cz, [0.86, 0.84, 0.8]);
     const pool = W.b('pool', pearl.cx, pearl.cz); const disc = new THREE.CircleGeometry(4.9, 28); disc.rotateX(-Math.PI / 2); H.gput(pool, disc, pearl.cx, DY + 0.45, pearl.cz, null);
-    col.add(pearl.cx - 4, pearl.cz - 4, pearl.cx + 4, pearl.cz + 4, DY + 0.6, 'fountain');
+    // a_orphans: the 8 x 8 m box sat inside the r 5.0-5.3 basin wall (player walked through the rim into the pool on the axes,
+    // stopped 0.7 m short of it on the diagonals); colfix swaps it for 12 thin boxes on the rim
+    col.add(pearl.cx - 4, pearl.cz - 4, pearl.cx + 4, pearl.cz + 4, DY + 0.6, 'fountain').fit = Array.from({ length: 12 }, (_, i) => { const a = (i + 0.5) * Math.PI / 6;
+      return { obb: [pearl.cx + Math.cos(a) * 5.15, pearl.cz + Math.sin(a) * 5.15, -Math.sin(a), Math.cos(a), 5.3 * Math.tan(Math.PI / 12) + 0.05, 0.16], h: DY + 0.6 }; });
   }
   // ------------------------------------------------------------------ island natural ends (dunes N, mangroves S) ----
   {
@@ -302,7 +308,7 @@ export function buildRegion(ctx, H) {
       return undefined;
     }
     if (x <= shoreX(z) - 1) { // mainland
-      if (H.inCanal && Math.abs(z) > 1000 && H.inCanal(H.fab, x, z)) return undefined; // r6.3 finger canals
+      if (H.inCanal && Math.abs(z) > 1000 && (H.inCanalWater || H.inCanal)(H.fab, x, z)) return undefined; // r6.3 finger canals (a_orphans: bridge decks stay dry)
       if (Math.abs(z) > 520 || x < -1420) return 0;
       nearestRoad(x, z, nr); const r = nr.road; if (r) { const ad = nr.dist - r.hw; const h = r.h(nr.s, x); if (ad < 0) return h; if (ad < SW) return h + 0.15; }
       const sh = D.byId.shore; if (x > -975) { sh.path.nearest(x, z, nq); if (nq.dist > sh.hw + SW && x > sh.path.at(nq.s).x && Math.abs(z - 16) > 14) return 0.15; } // bay park

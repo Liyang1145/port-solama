@@ -236,10 +236,12 @@ export function buildPromenade(scene, city) {
         for (let t = 0; t < 8 && !done; t++) { const z0 = s.a0 + 18 + r() * (L - 36 - len); const zc = z0 + len / 2;
           const b = place(c, sd, zc, 7.45, 8.85, len / 2 + 0.2, 1.1, 'bikeshare'); if (!b) continue; done = true; stat.docks++;
           const ox = 8.1; push('kiosk', c + sd * ox, 0.15, z0 + 0.25, ryFace(sd) + Math.PI);
+          let zEnd = z0 + 0.45 + n * 0.9 + 0.2; // a_orphans: last dock (+0.2); the box used to run 0.65 m past it
           for (let i = 0; i < n; i++) { const zz = z0 + 0.9 + 0.45 + i * 0.9; push('dockRail', c + sd * 8.5, 0.15, zz, Math.PI / 2); push('dock', c + sd * 8.6, 0.15, zz, ryFace(sd));
             if (r() < 0.72) { // bike angled into the dock, rear wheel toward the road (fits 7.45-8.85)
               const yaw = sd > 0 ? 0 : Math.PI; /* front wheel into the dock (away from the road) */ const m = new THREE.Matrix4().compose(V3(c + sd * 8.15, 0.15, zz), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw + 0.62 * sd, 0)), V3(0.82, 0.82, 0.82));
-              kinds.get('bike').items.push({ x: c + sd * 8.15, z: zz, m, c: shareCol }); stat.bikes++; } } }
+              kinds.get('bike').items.push({ x: c + sd * 8.15, z: zz, m, c: shareCol }); stat.bikes++; zEnd = Math.max(zEnd, zz + 0.45); } }
+          if (b.maxZ - zEnd > 0.1) b.fit = [[b.minX, b.minZ, b.maxX, zEnd, b.h]]; }
       }
       // --- traffic-signal controller cabinet near the downstream corner (kerb zone), meter pedestal beside it
       { const z = s.a1 - 4.6; const b = place(c, sd, z, 7.5, 8.75, 0.85, 1.75, 'sigcab'); if (b) { push('sigcab', c + sd * 8.12, 0.15, z, ryFace(sd) + Math.PI); stat.cab++;

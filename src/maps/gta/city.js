@@ -6,7 +6,7 @@ import { ColliderGrid, rng, rand, randi, pick, clamp, withSeed } from '../../uti
 import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
-import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
+import { planFabric, attachFabric, updateFabric, inCanal, inCanalWater } from './fabric.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -165,7 +165,7 @@ export function buildCity(scene, mats, T) {
   marina(bld); landmarks(bld);
   fab.populate(col); // own RNG stream: the shared rng sequence (island / district layout) is unchanged
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
-  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal });
+  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal, inCanalWater });
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
