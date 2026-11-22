@@ -59,6 +59,8 @@ const TYPE_BY_ID = Object.fromEntries(TYPES.map((t) => [t[0], t]));
 const NOAVOID = typeof location !== 'undefined' && /[?&]shopnoavoid/.test(location.search); // test switch: b_storefront placement (no sidewalk avoidance)
 // b_coreflow test switch: ?nocoreflow builds the same geometry without this lane's collider changes (before/after in one build)
 const COREFLOW_OFF = typeof location !== 'undefined' && /[?&]nocoreflow/.test(location.search);
+// b_overlayfit test switch: ?nooverlayfit builds the shops exactly as before this lane (no fit pass, old colliders)
+const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
 function pickType() { let r = rng() * TW; for (const t of TYPES) { r -= t[2]; if (r <= 0) return t; } return TYPES[0]; }
 
 // ------------------------------------------------------------------ unit geometries ----
@@ -172,6 +174,12 @@ const _bv = new THREE.Vector3();
 function bayBox(k, mat) { const g = geos()[KINDS[k][0]]; if (!g.boundingBox) g.computeBoundingBox(); const bb = g.boundingBox; let x0 = 1e9, x1 = -1e9, z1 = -1e9, yb = 1e9;
   for (let c = 0; c < 8; c++) { _bv.set(c & 1 ? bb.max.x : bb.min.x, c & 2 ? bb.max.y : bb.min.y, c & 4 ? bb.max.z : bb.min.z).applyMatrix4(mat); x0 = Math.min(x0, _bv.x); x1 = Math.max(x1, _bv.x); z1 = Math.max(z1, _bv.z); yb = Math.min(yb, _bv.y); }
   return [x0, x1, 0, z1, yb]; }
+// b_overlayfit: full bay-frame bounds of one piece [x0, x1, y0, y1, z0, z1]
+function bayBox3(k, mat) { const g = geos()[KINDS[k][0]]; if (!g.boundingBox) g.computeBoundingBox(); const bb = g.boundingBox; const o = [1e9, -1e9, 1e9, -1e9, 1e9, -1e9];
+  for (let c = 0; c < 8; c++) { _bv.set(c & 1 ? bb.max.x : bb.min.x, c & 2 ? bb.max.y : bb.min.y, c & 4 ? bb.max.z : bb.min.z).applyMatrix4(mat); o[0] = Math.min(o[0], _bv.x); o[1] = Math.max(o[1], _bv.x); o[2] = Math.min(o[2], _bv.y); o[3] = Math.max(o[3], _bv.y); o[4] = Math.min(o[4], _bv.z); o[5] = Math.max(o[5], _bv.z); }
+  return o; }
+const ovl = (a, b, m = 0.005) => a[0] < b[1] - m && a[1] > b[0] + m && a[2] < b[3] - m && a[3] > b[2] + m && a[4] < b[5] - m && a[5] > b[4] + m;
+const _t = new THREE.Matrix4();
 const BAYB = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)); // bay frame (x along the facade, z out) -> parcel frame
 
 export class StorefrontLayer {
@@ -183,6 +191,7 @@ export class StorefrontLayer {
     for (const t of TYPES) this.stats.types[t[0]] = 0;
     this.stats.bySrc = { front: { shops: 0, types: {} }, side: { rows: 0, bays: 0, shops: 0, types: {} }, core: { edges: 0, street: 0, bays: 0, shops: 0, types: {}, swItems: 0 } };
     this.coreDone = false; this.sideCache = new WeakMap();
+    this.stats.of = { off: OF_OFF, lb: { hit: 0, moved: 0, shrunk: 0, dropped: 0 }, shutTrunc: 0, asm: {}, grp: { hit: 0, by: {}, moved: 0, pulled: 0, slid: 0, dropped: 0, droppedPieces: 0 } }; this._pk = null; // b_overlayfit
     this.stats.recess = { shops: 0, tris: 0 }; this.stats.duct = { bbq: 0, awn: 0, sign: 0, rerouted: 0, hoodLow: 0, coreClamp: 0, hitOld: 0, hitNew: 0, hoodOld: 0, hoodNew: 0, signOld: 0, signNew: 0 };
     SHOP_LOG.length = 0; // nothing from before the layer existed belongs to a streamed parcel we will see again
     if (this.stream) { const prev = this.stream.onParcel; this.stream.onParcel = (c, p, m) => { this.onParcel(c, p, m); if (prev) prev(c, p, m); }; }
@@ -193,7 +202,7 @@ export class StorefrontLayer {
     let ch = this.chunks.get(c.key); if (ch && ch.parcels.has(p)) return; // planned before (chunk reloaded): keep the cached shops
     let shops = this.cache.get(p);
     if (!shops) { shops = []; this.stats.parcels++;
-      recs.forEach((r, i) => { this.stats.bays++; const s = withSeed(((p.seed ^ 0x5f0f7e11) + i * 7919) >>> 0, () => this.plan(r, m)); if (s) shops.push(s); });
+      this._pk = p; recs.forEach((r, i) => { this.stats.bays++; const s = withSeed(((p.seed ^ 0x5f0f7e11) + i * 7919) >>> 0, () => this.plan(r, m)); if (s) shops.push(s); }); this._pk = null;
       this.cache.set(p, shops); }
     if (!ch) this.chunks.set(c.key, ch = { key: c.key, parcels: new Set(), shops: [] });
     ch.parcels.add(p); for (const s of shops) ch.shops.push(s); this.dirty = true;
@@ -203,7 +212,7 @@ export class StorefrontLayer {
     let ch = this.chunks.get(key); if (ch && ch.parcels.has(it)) return;
     let shops = this.sideCache.get(it);
     if (!shops) { shops = []; const bs = this.stats.bySrc.side; bs.rows++;
-      bays.forEach((r, i) => { this.stats.bays++; bs.bays++; const s = withSeed(((it.p.seed ^ (it.sd > 0 ? 0x2c0e51 : 0x6b1d07)) + i * 7919) >>> 0, () => this.plan(r, m, 'side')); if (s) shops.push(s); });
+      this._pk = it; bays.forEach((r, i) => { this.stats.bays++; bs.bays++; const s = withSeed(((it.p.seed ^ (it.sd > 0 ? 0x2c0e51 : 0x6b1d07)) + i * 7919) >>> 0, () => this.plan(r, m, 'side')); if (s) shops.push(s); }); this._pk = null;
       this.sideCache.set(it, shops); }
     if (!ch) this.chunks.set(key, ch = { key, parcels: new Set(), shops: [] });
     ch.parcels.add(it); for (const s of shops) ch.shops.push(s); this.dirty = true;
@@ -244,8 +253,11 @@ export class StorefrontLayer {
     const synced = r.sg === 1 && r.sk >= 0 && r.sk < SIGN_TYPE.length; const T = synced ? TYPE_BY_ID[SIGN_TYPE[r.sk]] : pickType(); const type = T[0]; this.stats.types[type]++; this.stats.shops++;
     const bs = this.stats.bySrc[src]; bs.shops++; bs.types[type] = (bs.types[type] || 0) + 1;
     if (synced) this.stats.signSync++; else if (r.sg === 1) this.stats.signOther++;
-    const shop = { type, src, inst: {}, tris: 0, cost: 0, uniq: [] }; const hw = w / 2; const gz = r.core ? 0.14 : 0.236; // glass plane (core: the facade shader wall, no storefront kit)
-    const SL = []; const push = (k, mat) => { if (mat.elements[14] > 0.3) SL.push(bayBox(k, mat)); _w.multiplyMatrices(BM, mat); (shop.inst[k] || (shop.inst[k] = [])).push(..._w.elements); shop.tris += this.triOf[k]; shop.cost += this.triOf[k] * (KC[k].b ? 3 : 2); };
+    const shop = { type, src, inst: {}, tris: 0, cost: 0, uniq: [], of: 0 }; const hw = w / 2; const gz = r.core ? 0.14 : 0.236; // glass plane (core: the facade shader wall, no storefront kit)
+    // b_overlayfit: every piece is recorded first (bay-frame matrix, the assembly / outside group it belongs to) and baked into
+    // shop.inst after the fit pass below has moved or dropped what clashes (same push order -> identical instances when nothing moved)
+    const FIT = !OF_OFF; const PL = []; let asm = null, gS = 0; const OF = this.stats.of;
+    const SL = []; const push = (k, mat) => { if (mat.elements[14] > 0.3) SL.push(bayBox(k, mat)); PL.push({ k, m: mat.clone(), asm, g: -1, drop: false, dx: 0, dy: 0, dz: 0 }); };
     const P0 = (k, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0) => { _e.set(0, ry, rz, 'YXZ'); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, z); push(k, _m.compose(_p, _q, _s)); };
     // b_recess: in the core the glazing plane (door, window cards, screens, stickers: z 0.075–0.2) moves 6.5 cm back to the wall,
     // so it sits at the back of the new 0.34 m deep surround
@@ -262,6 +274,19 @@ export class StorefrontLayer {
     // reaches into the outside-clutter strip (d ≤ 1.4 m) of this bay: their x spans become busy, so the outside group moves or is dropped
     const sw = []; if (r.sw) for (const it of r.sw) { const x0 = it.a0 - ac, x1 = it.a1 - ac; if (x1 < -hw - 0.1 || x0 > hw + 0.1 || it.d0 > (r.core ? 2.4 : 1.4) || it.d1 < 0.3) continue; /* b_corner: core palms / poles stand 1.6–2.2 m out -> keep the gap walkable */ sw.push([x0 - 0.1, x1 + 0.1, it.d0, it.d1]); }
     if (!NOAVOID) for (const b of sw) busy.push([b[0], b[1]]);
+    const busy0 = busy.slice(); // b_overlayfit: the frontage's own dressing spans (before any outside group claimed its x span)
+    // b_overlayfit: the generator's pieces of this bay that ours can run into, bay frame [x0, x1, y0, y1, z0, z1]: roll-shutter
+    // housing + guide rails (kit.js rollShutter, d 0.24), awning slab / valance / braces (kit.js awning), signboard (street2.js
+    // cnSignboard / kit.js signboard; bottom at y0 + 0.8·ground + 0.18, up to 0.95 tall)
+    const gen = []; const ySg = y0 + 0.8 * (r.ground || 0) + 0.18;
+    if (!r.core) {
+      if (r.kind === 'shut' || r.kind === 'up') { gen.push([-hw - 0.1, hw + 0.1, yt, yt + 0.44, 0.15, 0.57, 'housing']); for (const s of [-1, 1]) gen.push([s * hw - 0.045, s * hw + 0.045, y0, yt, 0.195, 0.285, 'rail']); }
+      if (r.aw) { const aw = r.aw, yl = aw.y - 0.45 * aw.out, ya = (z) => aw.y - (z - 0.2) / (aw.out - 0.2) * 0.45 * aw.out;
+        for (let i = 0; i < 12; i++) { const za = 0.2 + (aw.out - 0.2) * i / 12, zb = 0.2 + (aw.out - 0.2) * (i + 1) / 12; gen.push([-hw, hw, ya(zb) - 0.025, ya(za), za, zb, 'awning']); }
+        gen.push([-hw, hw, yl - 0.32, yl, aw.out - 0.01, aw.out + 0.01, 'awning']);
+        for (const bx of [-hw + 0.1, hw - 0.1]) for (let i = 0; i < 8; i++) { const za = 0.2 + (aw.out - 0.25) * i / 8, zb = 0.2 + (aw.out - 0.25) * (i + 1) / 8; gen.push([bx - 0.015, bx + 0.015, yl - 0.315 + 0.3 * i / 8, yl - 0.285 + 0.3 * (i + 1) / 8, za, zb, 'brace']); } }
+      if (r.sg > 0) gen.push([-hw + 0.1, hw - 0.1, ySg, ySg + 0.95, 0.18, 0.52, 'sign']); }
+    shop.gen = gen;
     const groups = [];
     // ---- shutter: existing (from the log) or one of ours on bare bays
     let yb = yt; let rails = false, railsF = false, poleX = null; // lowest point of a curtain over the opening (yt = none); b_coreflow: core shutter rails out at z 0.455
@@ -270,8 +295,11 @@ export class StorefrontLayer {
       const k = rng() < 0.3 ? 'shutterR' : 'shutter';
       if (r.core) { const yo = yt - 0.24, zs = 0.42; rails = true; if (yb > yo - 0.05) yb = Math.min(yb, yo - 0.05); // b_recess: surface-mounted on the surround (box under the ledge, rails outside the casings)
         if (yo - yb > 0.1) P0(k, 0, yb, zs, w + 0.3, yo - yb, 1); P0('steel', 0, yt - 0.02, zs + 0.13, w + 0.36, 0.44, 0.3); for (const s of [-1, 1]) P0('steel', s * (hw + 0.17), (y0 + yo) / 2, zs, 0.07, yo - y0, 0.07); }
-      else { if (yt - yb > 0.1) P(k, 0, yb, 0.31, w, yt - yb, 1);
-        P('steel', 0, yt + 0.22, 0.36, w + 0.2, 0.44, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); railsF = true; } }
+      else { asm = 'shut'; if (yt - yb > 0.1) P(k, 0, yb, 0.31, w, yt - yb, 1); asm = null;
+        // b_overlayfit: the housing (0.44 m over the opening, d 0.15–0.57) ran up into the signboard above (bottom 0.25–0.28 m over
+        // the opening): cut it down under the board
+        let hh = 0.44; if (FIT && r.sg > 0 && ySg - 0.02 - yt < hh) { hh = Math.max(0.2, ySg - 0.02 - yt); OF.shutTrunc++; shop.of |= 1; }
+        asm = 'shut'; P('steel', 0, yt + hh / 2, 0.36, w + 0.2, hh, 0.42); for (const s of [-1, 1]) P('steel', s * hw, (y0 + yt) / 2, 0.31, 0.08, yt - y0, 0.08); asm = null; railsF = true; } }
     const vTop = Math.min(ytr - 0.05, yb - 0.05); const open = vTop > ys + 0.6; // window still visible below the curtain
     // b_corner: core bays have only the shader glass + piers -> door frame, glass leaf and push bar of our own
     if (r.core) { const yd = Math.min(ytr, yb); for (const x of [dx0, dx1]) P('frame', x, (y0 + yd) / 2, 0.1, 0.08, yd - y0, 0.1); P('frame', dcx, yd, 0.1, dx1 - dx0 + 0.08, 0.08, 0.1);
@@ -300,10 +328,22 @@ export class StorefrontLayer {
           for (const sg of [-1, 1]) { const c = new THREE.Vector3(sg * (hw + 0.065), 0, zd / 2).applyMatrix4(BM);
             this.city.col.addOBB(c.x, c.z, u.x, u.z, 0.135, zd / 2, yo, 'trim'); this.stats.trimCols = (this.stats.trimCols || 0) + 1; } } } }
     // ---- 门头 light box in the transom: dark case + lit shop-name face (cnFace, merged World)
-    { const wl = Math.min(w - 0.3, 3.4), hl = 0.55; let yl = Math.max(ytr + 0.3, Math.min(yh - 0.3, ytr + 0.32)); const lz = r.core ? 0.26 : 0.44; // b_recess: core box sits in the recess, under the soffit
-      if (r.core) yl = Math.min(yl, yt - 0.25 - hl / 2); P0('lbBody', 0, yl, lz, wl, hl, 0.18);
+    { let wl = Math.min(w - 0.3, 3.4), hl = 0.55; let yl = Math.max(ytr + 0.3, Math.min(yh - 0.3, ytr + 0.32)); const lz = r.core ? 0.26 : 0.44; // b_recess: core box sits in the recess, under the soffit
+      if (r.core) yl = Math.min(yl, yt - 0.25 - hl / 2);
+      // b_overlayfit: the box (d 0.35–0.53) hung 0.55 m tall from just over the transom bar, so on low ground floors it ran up into
+      // the shutter housing over the opening, the awning slab or the signboard; in the core recess it could hang down to 1.56 m in
+      // the doorway. Clamp it between the head clearance (2.12 m over the floor, and over the transom bar) and the first thing above,
+      // shrink it when the gap is short, drop it (the name stays on the board above) when less than 0.28 m is left.
+      let lbDrop = false;
+      if (FIT) { let top = r.core ? yt - 0.25 : 1e9; const zf = lz + 0.09;
+        if (!r.core) { if (r.kind === 'shut' || r.kind === 'up' || railsF) top = Math.min(top, yt - 0.02); if (r.aw) top = Math.min(top, r.aw.y - (zf - 0.2) / (r.aw.out - 0.2) * 0.45 * r.aw.out - 0.04); if (r.sg > 0) top = Math.min(top, ySg - 0.02); }
+        const bot = Math.max(r.core ? -1e9 : ytr + 0.02, y0 + 2.12);
+        if (yl + hl / 2 > top + 1e-6 || yl - hl / 2 < bot - 1e-6) { OF.lb.hit++; shop.of |= 2; const room = top - bot;
+          if (room >= hl) { yl = Math.min(Math.max(yl, bot + hl / 2), top - hl / 2); OF.lb.moved++; } else if (room >= 0.28) { hl = room; yl = bot + hl / 2; OF.lb.shrunk++; } else { lbDrop = true; OF.lb.dropped++; } }
+        if (type === 'pharm' && r.aw) wl = Math.min(wl, Math.max(0.6, w - 0.9)); } // room beside it for the pharmacy cross, clear of the awning brace
+      asm = 'lb'; if (!lbDrop) P0('lbBody', 0, yl, lz, wl, hl, 0.18); asm = null;
       const c = new THREE.Vector3(0, yl, lz + 0.096).applyMatrix4(BM); const n = new THREE.Vector3(0, 0, 1).transformDirection(BM);
-      const nk = synced ? r.sk : pick(T[1]); shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
+      const nk = synced ? r.sk : pick(T[1]); if (!lbDrop) shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
     // ---- window display card (lit panel + dark strokes) in front of the parallax room, behind the glass
     const card = (k, x0, x1, ya, yb2) => { if (yb2 - ya < 0.15 || x1 - x0 < 0.2) return false; P(k, (x0 + x1) / 2, (ya + yb2) / 2, 0.12, x1 - x0, yb2 - ya, 0.02); return true; };
     const ink = (x, y, sx, sy) => P('ink', x, y, 0.135, sx, sy, 0.006);
@@ -314,8 +354,8 @@ export class StorefrontLayer {
     const out = { x0: 1e9, x1: -1e9, z: 0 }; let sl0 = 0; const claim = (x0, x1, z) => { out.x0 = Math.min(out.x0, x0); out.x1 = Math.max(out.x1, x1); out.z = Math.max(out.z, z); busy.push([x0, x1]);
       // b_coreflow: the group's standing pieces (pushed since the last claim, out past z 0.45, starting below 1 m) give its tight box
       let t = null; for (let i = sl0; i < SL.length; i++) { const b = SL[i]; if (b[3] < 0.45 || b[4] > y0 + 1.0) continue; t = t ? [Math.min(t[0], b[0]), Math.max(t[1], b[1]), Math.max(t[2], b[3])] : [b[0], b[1], b[3]]; } sl0 = SL.length;
-      groups.push([x0, x1, z, t]); };
-    const spot = (wd) => { for (let i = 0; i < 6; i++) { const x = rand(-hw + wd / 2, hw - wd / 2); if (free(x - wd / 2, x + wd / 2)) return x; } return null; };
+      groups.push([x0, x1, z, t]); for (let i = gS; i < PL.length; i++) if (PL[i].g < 0 && !PL[i].asm) PL[i].g = groups.length - 1; gS = PL.length; };
+    const spot = (wd) => { for (let i = 0; i < 6; i++) { const x = rand(-hw + wd / 2, hw - wd / 2); if (free(x - wd / 2, x + wd / 2)) { gS = PL.length; return x; } } return null; };
     const stoolK = () => pick(['stoolR', 'stoolR', 'stoolB', 'stoolG']);
     const noren = (k) => { if (yb < ytr) return; P(k, dcx, ytr - 0.02, 0.33, dx1 - dx0 + 0.04, rand(0.55, 0.8), 1); };
     const strip = () => { if (yb < ytr) return; P('strip', dcx, ytr - 0.02, 0.34, dx1 - dx0 + 0.06, ytr - y0 - 0.06, 1); };
@@ -325,7 +365,7 @@ export class StorefrontLayer {
       if (open) { const ya = Math.max(ys + 0.35, vTop - 1.0); if (card(type === 'ramen' ? 'litW' : 'litY', wx0 + 0.05, wx1 - 0.05, ya, vTop)) { const rows = Math.max(2, Math.floor((vTop - ya) / 0.2));
         for (let i = 0; i < rows; i++) { const y = ya + (i + 0.6) * (vTop - ya) / (rows + 0.4); ink(wcx - ww * 0.12, y, ww * 0.5, 0.035); ink(wx1 - 0.25, y, 0.18, 0.035); } // dish lines + prices
         if (type === 'ramen') for (let i = 0; i < Math.min(3, Math.floor(ww / 0.6)); i++) ink(wx0 + 0.35 + i * 0.55, ya + 0.12, 0.34, 0.14); } } // bowl pictograms
-      if (type === 'ramen') for (const s of [-1, 1]) { const x = s * (Math.min(w - 0.3, 3.4) / 2 + 0.22); if (Math.abs(x) > hw + 0.1) continue; P('lantern', x, ytr + 0.12, 0.55, 0.3, 0.36, 0.3); P('lcap', x, ytr + 0.34, 0.55, 0.5, 0.5, 0.5); P('lcap', x, ytr - 0.1, 0.55, 0.45, 0.45, 0.45); }
+      if (type === 'ramen') for (const s of [-1, 1]) { const x = s * (Math.min(w - 0.3, 3.4) / 2 + 0.22); if (Math.abs(x) > hw + 0.1) continue; asm = 'lan' + s; P('lantern', x, ytr + 0.12, 0.55, 0.3, 0.36, 0.3); P('lcap', x, ytr + 0.34, 0.55, 0.5, 0.5, 0.5); P('lcap', x, ytr - 0.1, 0.55, 0.45, 0.45, 0.45); asm = null; }
       const x = spot(1.5); if (x !== null) { seats(x, 0.85, randi(2, 4)); claim(x - 0.8, x + 0.8, 1.3); }
       else { const x2 = spot(0.4); if (x2 !== null) { const n = randi(2, 5); for (let i = 0; i < n; i++) P(stoolK(), x2, y0 + i * 0.075, 0.55, 1, 1, 1, rand(0, 6.28)); claim(x2 - 0.2, x2 + 0.2, 0.75); } } // stacked stools
       stickers(randi(0, 2));
@@ -348,7 +388,7 @@ export class StorefrontLayer {
       strip();
       if (open && card('litW', wx0, wx1, ys + 0.05, vTop)) for (let y = ys + 0.3; y < vTop - 0.1; y += 0.3) { ink(wcx, y, ww, 0.02); for (let x = wx0 + 0.08; x < wx1 - 0.08; x += rand(0.1, 0.22)) if (rng() < 0.6) P(rng() < 0.5 ? 'stkR' : 'board', x, y + 0.09, 0.13, 0.07, rand(0.08, 0.16), 0.03); }
       stickers(randi(2, 5));
-      { const xe = left ? hw - 0.1 : -hw + 0.1; const yc = ytr - 0.15; P('steel', xe, yc + 0.48, 0.5, 0.05, 0.05, 0.6); P('lbBody', xe, yc, 0.82, 0.12, 0.72, 0.72); for (const s of [-1, 1]) P('crossG', xe + s * 0.065, yc, 0.82, 0.6, 0.6, 0.02, Math.PI / 2); }
+      { const xe = left ? hw - 0.1 : -hw + 0.1; const yc = ytr - 0.15; asm = 'cross'; P('steel', xe, yc + 0.48, 0.5, 0.05, 0.05, 0.6); P('lbBody', xe, yc, 0.82, 0.12, 0.72, 0.72); for (const s of [-1, 1]) P('crossG', xe + s * 0.065, yc, 0.82, 0.6, 0.6, 0.02, Math.PI / 2); asm = null; }
     } else if (type === 'hard') {
       strip();
       if (open && card('litW', wx0, wx1, Math.max(ys, vTop - 1.0), vTop)) { for (let i = 0; i < 6; i++) ink(rand(wx0 + 0.1, wx1 - 0.1), rand(vTop - 0.9, vTop - 0.15), rand(0.03, 0.06), rand(0.2, 0.45)); } // hung tools
@@ -363,8 +403,8 @@ export class StorefrontLayer {
       const x = spot(0.9); if (x !== null) { P(stoolK(), x - 0.22, y0, 0.6); P(stoolK(), x + 0.24, y0, 0.62, 1, 1, 1, 1.1); P('bucketB', x + 0.24, y0 + 0.6, 0.62, 0.42, 0.28, 0.32); claim(x - 0.45, x + 0.45, 0.8); }
     } else if (type === 'barber') {
       if (open && card('litW', wx0, wx1, ys + 0.05, vTop)) { const n = Math.max(1, Math.floor(ww / 0.8)); for (let i = 0; i < n; i++) { const x = wx0 + (i + 0.5) * ww / n; ink(x, ys + 1.2, 0.5, 0.65); ink(x, ys + 0.45, 0.3, 0.5); ink(x, ys + 0.75, 0.55, 0.12); } } // mirrors + chairs
-      const xp = left ? dx1 + 0.2 : dx0 - 0.2; if (Math.abs(xp) < hw - 0.05) { const yc = y0 + 2.0; poleX = xp; P('pole', xp, yc, 0.42, 0.16, 0.7, 0.16); for (let i = 0; i < 3; i++) { P('bandR', xp, yc - 0.27 + i * 0.22, 0.42, 0.17, 0.6, 0.17); P('bandB', xp, yc - 0.16 + i * 0.22, 0.42, 0.17, 0.6, 0.17); }
-        for (const s of [-1, 1]) P('steel', xp, yc + s * 0.38, 0.42, 0.2, 0.06, 0.2); P('steel', xp, yc, 0.3, 0.05, 0.05, 0.22); }
+      const xp = left ? dx1 + 0.2 : dx0 - 0.2; if (Math.abs(xp) < hw - 0.05) { const yc = y0 + 2.0; poleX = xp; asm = 'pole'; P('pole', xp, yc, 0.42, 0.16, 0.7, 0.16); for (let i = 0; i < 3; i++) { P('bandR', xp, yc - 0.27 + i * 0.22, 0.42, 0.17, 0.6, 0.17); P('bandB', xp, yc - 0.16 + i * 0.22, 0.42, 0.17, 0.6, 0.17); }
+        for (const s of [-1, 1]) P('steel', xp, yc + s * 0.38, 0.42, 0.2, 0.06, 0.2); P('steel', xp, yc, 0.3, 0.05, 0.05, 0.22); asm = null; }
       stickers(randi(0, 2));
     } else if (type === 'bbq') { // 烧烤: grill trough with coals + skewers under a stainless hood (duct up the wall), skewer rack
       if (rng() < 0.5) noren('norenR'); else strip();
@@ -374,7 +414,7 @@ export class StorefrontLayer {
         // b_recess: the duct used to go straight up from the hood (and into the wall) — through the awning of 'awn' bays and through
         // the signboard over the bay. Now, under an awning or a signboard, it runs sideways under the awning braces to the gap
         // between bays and rises there; in the core it stops under the ground-floor canopy. The hood drops if the awning is low.
-        const hz = 0.66; let yh0 = y0 + 2.0; const yd0 = Math.min(yt + 1.4, yh0 + 2.6); const D = this.stats.duct; D.bbq++;
+        const hz = FIT && (r.kind === 'shut' || r.kind === 'up' || railsF) ? 0.69 : 0.66; if (hz !== 0.66) shop.of |= 4; let yh0 = y0 + 2.0; /* b_overlayfit: riser clear of the shutter housing (d ≤ 0.57) */ const yd0 = Math.min(yt + 1.4, yh0 + 2.6); const D = this.stats.duct; D.bbq++;
         const oldR = [[x - 0.11, x + 0.11, yh0 + 0.42, yd0, hz - 0.11, hz + 0.11], [x - 0.11, x + 0.11, yd0 - 0.11, yd0 + 0.11, 0.23, 0.67]], oldH = [x - 0.675, x + 0.675, yh0, yh0 + 0.42, 0.25, 1.07];
         const obs = [], obsS = []; const aw = r.core ? null : r.aw; // awning parts + signboard, as boxes in bay frame [x0, x1, y0, y1, z0, z1]
         if (aw) { const yl = aw.y - 0.45 * aw.out, ya = (z) => aw.y - (z - 0.2) / (aw.out - 0.2) * 0.45 * aw.out; D.awn++;
@@ -403,8 +443,8 @@ export class StorefrontLayer {
       if (open) { const ya = Math.max(ys + 0.35, vTop - 1.1); if (card('litY', wx0 + 0.05, wx1 - 0.05, ya, vTop)) { const rows = Math.max(2, Math.floor((vTop - ya) / 0.22));
         for (let i = 0; i < rows; i++) { const y = ya + (i + 0.6) * (vTop - ya) / (rows + 0.4); ink(wcx - ww * 0.1, y, ww * 0.55, 0.04); ink(wx1 - 0.22, y, 0.16, 0.04); } } }
       if (yb >= ytr) P('pstrip', 0, ytr - 0.02, 0.36, w - 0.15, ytr - y0 - 0.08, 1);
-      { const yw = ytr + 0.5, zl = 0.78, xa = -hw + 0.2, xb = hw - 0.2; seg('steel', [xa, yw, zl], [xb, yw, zl], 0.012); for (const xx of [xa, xb]) seg('steel', [xx, yw, 0.25], [xx, yw, zl], 0.03);
-        const n = Math.max(2, Math.floor((xb - xa) / 0.85)); for (let i = 0; i < n; i++) { const xx = xa + (i + 0.5) * (xb - xa) / n, yy = yw - 0.3 - (i % 2) * 0.05; P('lantern', xx, yy, zl, 0.28, 0.32, 0.28); P('lcap', xx, yy + 0.2, zl, 0.45, 0.45, 0.45); P('lcap', xx, yy - 0.2, zl, 0.4, 0.4, 0.4); } }
+      { const yw = ytr + 0.5, zl = 0.78, xa = -hw + 0.2, xb = hw - 0.2; asm = 'str'; seg('steel', [xa, yw, zl], [xb, yw, zl], 0.012); for (const xx of [xa, xb]) seg('steel', [xx, yw, 0.25], [xx, yw, zl], 0.03);
+        const n = Math.max(2, Math.floor((xb - xa) / 0.85)); for (let i = 0; i < n; i++) { const xx = xa + (i + 0.5) * (xb - xa) / n, yy = yw - 0.3 - (i % 2) * 0.05; P('lantern', xx, yy, zl, 0.28, 0.32, 0.28); P('lcap', xx, yy + 0.2, zl, 0.45, 0.45, 0.45); P('lcap', xx, yy - 0.2, zl, 0.4, 0.4, 0.4); } asm = null; }
       let tabs = 0; for (let t = 0; t < 2; t++) { const x = spot(1.5); if (x === null) break; P('rtable', x, y0, 0.85); const n = randi(3, 4);
         for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2 + rand(-0.3, 0.3); const sx = x + Math.cos(a) * 0.62, sz = Math.min(1.25, Math.max(0.5, 0.85 + Math.sin(a) * 0.45)); P(rng() < 0.6 ? 'dstoolR' : 'dstoolB', sx, y0, sz); }
         claim(x - 0.8, x + 0.8, 1.32); tabs++; }
@@ -427,6 +467,9 @@ export class StorefrontLayer {
         seg('ink', [x, ys + 0.3, 0.135], [x + 0.08, ys + 1.0, 0.135], 0.05, 0.006); seg('ink', [x + 0.08, ys + 1.0, 0.135], [x - 0.04, ys + 1.5, 0.135], 0.05, 0.006); for (let y = ys + 0.35; y < ys + 1.45; y += 0.18) ink(x + 0.02, y, 0.16, 0.02); } } }
       if (rng() < 0.5) strip(); stickers(randi(0, 2));
     }
+    if (FIT) { const fa = this.fitPass(r, BM, PL, groups, busy0, { hw, y0, yt, dx0, dx1, ytr }, gen); if (poleX !== null && fa.pole) poleX = fa.pole.drop ? null : poleX + fa.pole.dx; if (fa.shut) railsF = false; }
+    // bake: the recorded pieces (moved / dropped by the fit pass) -> world instances, in push order
+    for (const e of PL) { if (e.drop || e.dx || e.dy || e.dz) shop.of |= 8; if (e.drop) continue; if (e.dx || e.dy || e.dz) e.m.premultiply(_t.makeTranslation(e.dx, e.dy, e.dz)); _w.multiplyMatrices(BM, e.m); (shop.inst[e.k] || (shop.inst[e.k] = [])).push(..._w.elements); shop.tris += this.triOf[e.k]; shop.cost += this.triOf[e.k] * (KC[e.k].b ? 3 : 2); }
     // b_signsync: outside groups still overlapping existing sidewalk items (0 unless ?shopnoavoid)
     this.stats.swItems += sw.length; this.stats.outGroups += groups.length;
     for (const gp of groups) if (sw.some((b) => gp[1] > b[0] + 0.1 && gp[0] < b[1] - 0.1 && gp[2] > b[2] && 0.3 < b[3])) this.stats.outOverlap++;
@@ -435,23 +478,115 @@ export class StorefrontLayer {
     // spanned the door (groups sit on both sides of it) and the empty sidewalk between them: blocked, nothing there. Plus the small
     // pieces that stood at walking height with no box: the barber pole (bottom bracket at 1.6 m, 0.5 m out) and the rails of the
     // roll shutters this layer adds on streamed bays (z 0.27–0.35).
+    // b_overlayfit: one tight box per outside group from the pieces as finally placed (moved groups carry their box, dropped groups
+    // lose it): the standing pieces' full extent (b_coreflow clipped the depth to the claimed span, so stools set around a table out
+    // to 1.41 m stood 0.1–0.16 m past their box) plus a bbq hood that hangs under 2.1 m over the grill
+    if (FIT) { out.x0 = 1e9; out.x1 = -1e9; out.z = 0; for (let gi = 0; gi < groups.length; gi++) { const q = groups[gi]; let t = null;
+        for (const e of PL) { if (e.g !== gi || e.drop) continue; const b = bayBox3(e.k, e.m); // (the bake above already moved e.m)
+          const stand = b[5] >= 0.45 && b[2] <= y0 + 1.0, hood = (e.k === 'hood' || e.k === 'soot') && b[2] < y0 + 2.1; if (!stand && !hood) continue; t = t ? [Math.min(t[0], b[0]), Math.max(t[1], b[1]), Math.max(t[2], b[5])] : [b[0], b[1], b[5]]; }
+        if (q.drop || !t) { q.fin = null; continue; } q.fin = [t[0], t[1], t[2] + 0.02]; out.x0 = Math.min(out.x0, t[0]); out.x1 = Math.max(out.x1, t[1]); out.z = Math.max(out.z, t[2] + 0.02); } }
     if (out.x1 > out.x0 && this.city.col && this.city.col.addOBB) { const u = new THREE.Vector3(1, 0, 0).transformDirection(BM); const C = this.city.col;
-      const box = (x0, x1, z0, z1, h, tag) => { const c = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(BM); C.addOBB(c.x, c.z, u.x, u.z, (x1 - x0) / 2, (z1 - z0) / 2, h, tag); this.stats.colliders++; };
+      const box = (x0, x1, z0, z1, h, tag) => { const c = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(BM); C.addOBB(c.x, c.z, u.x, u.z, (x1 - x0) / 2, (z1 - z0) / 2, h, tag).pk = this._pk; this.stats.colliders++; };
       if (COREFLOW_OFF) box(out.x0, out.x1, 0.3, out.z, y0 + 1.0, 'shop');
-      else { const gs = groups.map((q) => (q[3] ? [Math.max(q[0], q[3][0]), Math.min(q[1], q[3][1]), Math.min(q[2], q[3][2] + 0.02)] : q.slice(0, 3))).filter((q) => q[1] > q[0]).sort((a, b) => a[0] - b[0]); const mg = [];
+      else { const gs = FIT ? groups.filter((q) => q.fin).map((q) => q.fin.slice()).sort((a, b) => a[0] - b[0]) : groups.map((q) => (q[3] ? [Math.max(q[0], q[3][0]), Math.min(q[1], q[3][1]), Math.min(q[2], q[3][2] + 0.02)] : q.slice(0, 3))).filter((q) => q[1] > q[0]).sort((a, b) => a[0] - b[0]); const mg = [];
         for (const q of gs) mg.push(q); // not merged: two overlapping groups of different depth would leave an empty corner blocked
         for (const q of mg) box(q[0], q[1], 0.3, q[2], y0 + 1.0, 'shop'); this.stats.outBoxes = (this.stats.outBoxes || 0) + mg.length; }
       const zc = (0.3 + out.z) / 2; const c = new THREE.Vector3((out.x0 + out.x1) / 2, 0, zc).applyMatrix4(BM); shop.col = { x: c.x, z: c.z, hl: (out.x1 - out.x0) / 2, hw: (out.z - 0.3) / 2 }; }
     if (!COREFLOW_OFF && this.city.col && this.city.col.addOBB) { const u = new THREE.Vector3(1, 0, 0).transformDirection(BM); const C = this.city.col;
-      const box = (x0, x1, z0, z1, h) => { const c = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(BM); C.addOBB(c.x, c.z, u.x, u.z, (x1 - x0) / 2, (z1 - z0) / 2, h, 'trim'); this.stats.smallCols = (this.stats.smallCols || 0) + 1; };
+      const box = (x0, x1, z0, z1, h) => { const c = new THREE.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(BM); C.addOBB(c.x, c.z, u.x, u.z, (x1 - x0) / 2, (z1 - z0) / 2, h, 'trim').pk = this._pk; this.stats.smallCols = (this.stats.smallCols || 0) + 1; };
       if (poleX !== null) box(poleX - 0.11, poleX + 0.11, 0.2, 0.53, y0 + 2.45);
       if (railsF) for (const sg of [-1, 1]) box(sg * hw - 0.05, sg * hw + 0.05, 0.2, 0.36, yt);
       // a half-pulled shutter whose bottom bar hangs below head height (1.75 m) closes the opening to walking (core: surface-mounted
       // at z 0.42 between the casings; streamed: z 0.31 across the bay)
-      if ((rails || railsF) && yb < y0 + 1.75) { if (rails) box(-hw + 0.05, hw - 0.05, 0.2, 0.46, yt); else box(-hw, hw, 0.2, 0.36, yt); this.stats.shutCols = (this.stats.shutCols || 0) + 1; } }
+      if ((rails || railsF) && yb < y0 + (FIT ? 2.1 : 1.75)) { // b_overlayfit: up to 2.1 m (the bottom bar at 1.75–2.1 m was a head clash with no box)
+        if (rails) box(-hw + 0.05, hw - 0.05, 0.2, 0.46, yt); else box(-hw, hw, 0.2, 0.36, yt); this.stats.shutCols = (this.stats.shutCols || 0) + 1; } }
     const c0 = new THREE.Vector3(0, 0, 0).applyMatrix4(BM); shop.cx = c0.x; shop.cz = c0.z; shop.y0 = y0; shop.hw = hw;
     const fwd = new THREE.Vector3(0, 0, 1).transformDirection(BM), al = new THREE.Vector3(1, 0, 0).transformDirection(BM); shop.n = [fwd.x, fwd.z]; shop.u = [al.x, al.z]; shop.w = w; shop.shut = yb < yt - 0.1;
     return shop;
+  }
+  // ---------------------------------------------------------------- b_overlayfit: fit pass ----
+  // (1) overhead assemblies (pharmacy cross, ramen lanterns, 大排档 lantern string, barber pole) against the generator's housing /
+  //     awning / braces / signboard and against the light box + shutter housing already placed: the smallest move (down / up up to
+  //     0.3 m, inward along the facade up to 0.6 m) that clears everything and keeps 2.12 m head room over the sidewalk; else dropped.
+  // (2) outside groups (stools + tables, crates + ice chest, racks + ladder, grill + hood, counters, A-boards …) against the kerb
+  //     (road edge + 0.25 m), kerb furniture (palms, poles, lamps, barriers …), the slot heaps / closures (parcelgap 'gap' boxes),
+  //     alley clutter and this frontage's own sidewalk clutter colliders (clutter.js, same parcel only -> load order never matters):
+  //     the cheapest pull toward the facade / slide along it inside the bay (clear of the door, the frontage's dressing and the other
+  //     groups) that clears them; else the group is dropped. No rng use: the plan above drew exactly what it drew before.
+  fitPass(r, BM, PL, groups, busy0, B, gen) {
+    const OF = this.stats.of; const { hw, y0, dx0, dx1 } = B; const res = {};
+    for (const e of PL) e.bb = bayBox3(e.k, e.m);
+    const sh = (b, dx, dy, dz) => [b[0] + dx, b[1] + dx, b[2] + dy, b[3] + dy, b[4] + dz, b[5] + dz];
+    const C = this.city.col, G = this.city.graph, RD = this.city.roads || []; const el = BM.elements; const core = !!r.core;
+    const W = (x, z) => [el[0] * x + el[8] * z + el[12], el[2] * x + el[10] * z + el[14]];
+    const dIn = (b, x, z) => { if (b.o) { const o = b.o; const rx = x - o.cx, rz = z - o.cz; const la = rx * o.ux + rz * o.uz, lw = -rx * o.uz + rz * o.ux; return Math.min(o.hl - Math.abs(la), o.hw - Math.abs(lw)); } return Math.min(x - b.minX, b.maxX - x, z - b.minZ, b.maxZ - z); };
+    const colTop = (b) => (b.ck === 'cond' ? y0 + 0.62 : b.h); // a condenser's box reaches 1.9 m only for its copper lines at the wall
+    const relBoxes = (x, z, rad) => (C ? C.query(x, z, rad, []).filter((b) => b.h > y0 + 0.1 && b.tag !== 'bld' && b.tag !== 'shop' && b.tag !== 'trim' && b.tag !== 'b' && (b.tag !== 'clut' || b.pk === this._pk)) : []);
+    // a bay-frame box (shifted) against world colliders, only where the piece is below the collider's top
+    const hitCol = (b, boxes) => { if (!boxes.length) return false; const nx = Math.max(1, Math.ceil((b[1] - b[0]) / 0.1)), nz = Math.max(1, Math.ceil((b[5] - b[4]) / 0.1));
+      for (const bx of boxes) { if (b[2] >= colTop(bx) - 0.02) continue; for (let i = 0; i <= nx; i++) for (let j = 0; j <= nz; j++) { const [x, z] = W(b[0] + (b[1] - b[0]) * i / nx, b[4] + (b[5] - b[4]) * j / nz); if (dIn(bx, x, z) > 0.02) return true; } } return false; };
+    const [bcx, bcz] = W(0, 0.8); const bayBoxes = relBoxes(bcx, bcz, hw + 3);
+    // ---- (0) the roll shutter this layer adds on a bare streamed bay: rails / curtain standing in a vending machine, bin, stall …
+    //      of the frontage (or a slot's mouth box) -> left off (the bay keeps its plain storefront; the plan above is unchanged)
+    { const E = PL.filter((e) => e.asm === 'shut' && !e.drop); if (E.length) { OF.shut = OF.shut || { n: 0, dropped: 0 }; OF.shut.n++;
+        if (E.some((e) => hitCol(e.bb, bayBoxes))) { for (const e of E) e.drop = true; OF.shut.dropped++; res.shut = { drop: true }; } } }
+    // ---- (1) assemblies
+    const O = gen.slice(); for (const e of PL) if (!e.drop && (e.asm === 'lb' || e.asm === 'shut')) O.push(e.bb);
+    const DY = [0]; for (let i = 1; i <= 15; i++) DY.push(0.02 * i); for (let i = 1; i <= 40; i++) DY.push(-0.02 * i);
+    for (const name of ['cross', 'lan-1', 'lan1', 'str', 'pole']) {
+      const E = PL.filter((e) => e.asm === name && !e.drop); if (!E.length) continue; const head = name !== 'pole'; // the pole has its own collider (b_coreflow)
+      let cx = 0; for (const e of E) cx += (e.bb[0] + e.bb[1]) / 2; cx /= E.length; const inw = cx > 0 ? -1 : 1; const ybot = Math.min(...E.map((e) => e.bb[2]));
+      const bad = (dx, dy) => (head && ybot + dy < y0 + 2.12 - 1e-6) || E.some((e) => { const b = sh(e.bb, dx, dy, 0); return O.some((o) => ovl(b, o)) || (b[2] < y0 + 2.6 && hitCol(b, bayBoxes)); });
+      const st = OF.asm[name.replace(/-?1$/, '')] || (OF.asm[name.replace(/-?1$/, '')] = { n: 0, hit: 0, moved: 0, dropped: 0 }); st.n++;
+      if (!bad(0, 0)) { for (const e of E) O.push(e.bb); continue; }
+      st.hit++; const CA = []; for (let i = 0; i <= 12; i++) for (const sg of name === 'pole' && i ? [1, -1] : [inw]) for (const dy of DY) CA.push([sg * 0.05 * i, dy, 0.05 * i * 1.5 + Math.abs(dy)]); CA.sort((a, b) => a[2] - b[2]);
+      const ok = CA.find((c) => !bad(c[0], c[1]) && (name !== 'pole' || Math.abs(cx + c[0]) < hw - 0.05));
+      if (ok) { for (const e of E) { e.dx += ok[0]; e.dy += ok[1]; O.push(sh(e.bb, ok[0], ok[1], 0)); } st.moved++; res[name] = { dx: ok[0], dy: ok[1] }; }
+      else { for (const e of E) e.drop = true; st.dropped++; res[name] = { drop: true }; } }
+    // ---- (2) outside groups
+    if (!groups.length) return res;
+    const kerbOver = (x, z) => { if (core) { let d = 1e9; for (const q of RD) { const al = q.axis === 'z' ? z : x, ac = q.axis === 'z' ? x : z; if (al < q.a0 - 7 || al > q.a1 + 7) continue; d = Math.min(d, Math.abs(ac - q.c)); } return 7.25 - d; }
+      const n = G && G.index.near(x, z); return n ? n.e.hw + 0.25 - n.d : -1; };
+    const span = (q) => [q[0] + (q.dx || 0), q[1] + (q.dx || 0)];
+    const DET = new Set(['stoolR', 'stoolB', 'stoolG', 'dstoolR', 'dstoolB', 'crateR', 'crateB', 'bucketO', 'bucketB']); // pieces a group can lose
+    for (let gi = 0; gi < groups.length; gi++) { const q = groups[gi]; const E = PL.filter((e) => e.g === gi && !e.drop); if (!E.length) continue;
+      const WE = E.filter((e) => e.bb[2] < y0 + 1.9); if (!WE.length) continue; // walking-height pieces: their own footprints are tested
+      const hood = E.some((e) => e.k === 'hood'), rerouted = E.filter((e) => e.k === 'inox').length > 2; // b_recess duct run to the bay gap: no slide
+      let R = [1e9, -1e9, 1e9, -1e9]; for (const e of WE) { R[0] = Math.min(R[0], e.bb[0]); R[1] = Math.max(R[1], e.bb[1]); R[2] = Math.min(R[2], e.bb[4]); R[3] = Math.max(R[3], e.bb[5]); }
+      const [ccx, ccz] = W((R[0] + R[1]) / 2, (R[2] + R[3]) / 2); const rad = Math.hypot(R[1] - R[0], R[3] - R[2]) / 2 + 2.5;
+      const boxes = relBoxes(ccx, ccz, rad);
+      const genW = gen.filter((o) => o[2] < y0 + 2.6);
+      // one piece at offset (dx, dz): its footprint sampled every ≤ 0.1 m against the kerb + colliders, its box against the bay's generator pieces
+      const confE = (e, dx, dz, why) => { const b = e.bb; const nx = Math.max(1, Math.ceil((b[1] - b[0]) / 0.1)), nz = Math.max(1, Math.ceil((b[5] - b[4]) / 0.1)); let hit = false;
+        if (genW.some((o) => ovl(sh(b, dx, 0, dz), o))) { if (!why) return true; why.gen = 1; hit = true; }
+        if (b[2] >= y0 + 1.9) return hit;
+        for (let i = 0; i <= nx; i++) for (let j = 0; j <= nz; j++) { const [x, z] = W(b[0] + dx + (b[1] - b[0]) * i / nx, b[4] + dz + (b[5] - b[4]) * j / nz);
+          if (kerbOver(x, z) > 0.0) { if (!why) return true; why.kerb = 1; hit = true; }
+          for (const bx of boxes) { const di = dIn(bx, x, z); if (di > 0.02) { if (!why) return true; why[bx.tag === 'clut' || bx.tag === 'gap' || bx.tag === 'alley' ? bx.tag : 'furn'] = 1; why.d = Math.max(why.d || 0, di); why.ck = bx.ck || bx.tag; hit = true; } } }
+        return hit; };
+      const conf = (L, dx, dz, why) => { let hit = false; for (const e of L) if (confE(e, dx, dz, why)) { hit = true; if (!why) return true; } return hit; };
+      const why = {}; conf(E, 0, 0, why); const dmax = why.d || 0, wck = why.ck; delete why.d; delete why.ck; if (!Object.keys(why).length) continue;
+      OF.grp.hit++; for (const k in why) OF.grp.by[k] = (OF.grp.by[k] || 0) + 1;
+      const okSpan = (dx) => { const s0 = q[0] + dx, s1 = q[1] + dx; if (dx === 0) return true; if (s0 < -hw - 0.05 || s1 > hw + 0.05) return false; if (s1 > dx0 - 0.1 && s0 < dx1 + 0.1) return false;
+        if (busy0.some((b) => s1 > b[0] && s0 < b[1])) return false; return groups.every((o, oi) => { if (oi === gi || o.drop) return true; const sp = span(o); return !(s1 > sp[0] && s0 < sp[1]); }); };
+      const move = (dx, dz, L = E) => { for (const e of L) { e.dx += dx; e.dz += dz; e.bb = sh(e.bb, dx, 0, dz); } q.dx = (q.dx || 0) + dx; };
+      // A: pull toward the facade (never into the 0.3 m glass / door band) and / or slide along it
+      const maxPull = hood ? Math.min(0.15, Math.max(0, R[2] - 0.3)) : Math.max(0, R[2] - 0.3); const DZ = [0]; for (let d = 0.05; d <= maxPull + 1e-6; d += 0.05) DZ.push(-d);
+      const DX = [0]; if (!rerouted) for (let d = 0.1; d <= 2 * hw + 1e-6; d += 0.1) DX.push(d, -d);
+      const cand = []; for (const dx of DX) for (const dz of DZ) cand.push([dx, dz, Math.abs(dx) + Math.abs(dz)]); cand.sort((a, b) => a[2] - b[2]);
+      let ok = cand.find((c) => okSpan(c[0]) && !conf(E, c[0], c[1]));
+      if (ok) { move(ok[0], ok[1]); OF.grp.moved++; if (ok[1]) OF.grp.pulled++; if (ok[0]) OF.grp.slid++; continue; }
+      // B: lose the loose pieces that clash (a stool behind the table, the crate column against a wall condenser) and what stands on them
+      { const bad = E.filter((e) => confE(e, 0, 0)); const lose = new Set(bad);
+        for (let k = 0; k < 3; k++) for (const e of E) if (!lose.has(e)) for (const l of lose) { const b = e.bb, c = l.bb; const ox = Math.min(b[1], c[1]) - Math.max(b[0], c[0]), oz = Math.min(b[5], c[5]) - Math.max(b[4], c[4]); if (ox > 0.5 * (b[1] - b[0]) && oz > 0.5 * (b[5] - b[4]) && b[2] >= c[3] - 0.08) { lose.add(e); break; } }
+        const rest = E.filter((e) => !lose.has(e));
+        if (bad.length && [...lose].every((e) => DET.has(e.k)) && rest.some((e) => !DET.has(e.k) || rest.length >= 2) && !conf(rest, 0, 0)) { for (const e of lose) e.drop = true; OF.grp.partial = (OF.grp.partial || 0) + 1; OF.grp.droppedPieces += lose.size; continue; } }
+      // C: step out toward the kerb (up to 0.3 m, the group staying within 1.75 m of the facade) when nothing else clears it
+      { const cand2 = []; for (const dx of DX) { if (Math.abs(dx) > 0.5) continue; for (let d = 0.05; d <= 0.3 + 1e-6; d += 0.05) if (R[3] + d <= 1.75) cand2.push([dx, d, Math.abs(dx) + 2 * d]); } cand2.sort((a, b) => a[2] - b[2]);
+        ok = cand2.find((c) => okSpan(c[0]) && !conf(E, c[0], c[1]));
+        if (ok) { move(ok[0], ok[1]); OF.grp.moved++; OF.grp.out = (OF.grp.out || 0) + 1; if (ok[0]) OF.grp.slid++; continue; } }
+      for (const e of E) e.drop = true; q.drop = true; OF.grp.dropped++; OF.grp.droppedPieces += E.length; if ((OF.grp.ex || (OF.grp.ex = [])).length < 40) OF.grp.ex.push([+ccx.toFixed(1), +ccz.toFixed(1), Object.keys(why).join('+'), +dmax.toFixed(2), wck, E[0].k, +R[2].toFixed(2), +R[3].toFixed(2), +(R[1] - R[0]).toFixed(2), +hw.toFixed(2)]); }
+    return res;
   }
   // ---------------------------------------------------------------- packing ----
   // one shop -> baked world-space triangles per bucket (positions, normals, colours), made when the shop is first packed

@@ -41,7 +41,7 @@ export class ClutterCols {
       const x = e[0] * r.x + e[8] * r.z + e[12], z = e[2] * r.x + e[10] * r.z + e[14]; const ux = e[0] * r.ux + e[8] * r.uz, uz = e[2] * r.ux + e[10] * r.uz;
       const w = { k: r.k, x, z, ux, uz, hl: r.hl, hw: r.hw, h: r.h, dmin: r.dmin, dmax: r.dmax, box: null };
       if (r.tris) { const t = r.tris, o = new Float32Array(t.length); for (let i = 0; i < t.length; i += 2) { o[i] = e[0] * t[i] + e[8] * t[i + 1] + e[12]; o[i + 1] = e[2] * t[i] + e[10] * t[i + 1] + e[14]; } w.tris = o; }
-      if (!OFF && CLUT_BOX.has(r.k) && col && col.addOBB) { w.box = col.addOBB(x, z, ux, uz, r.hl, r.hw, r.h, 'clut'); w.box.ck = r.k; own.push(w.box); k.box++; this.stats.boxes++; }
+      if (!OFF && CLUT_BOX.has(r.k) && col && col.addOBB) { w.box = col.addOBB(x, z, ux, uz, r.hl, r.hw, r.h, 'clut'); w.box.ck = r.k; w.box.pk = key; /* b_overlayfit: owner (parcel / side row) */ own.push(w.box); k.box++; this.stats.boxes++; }
       if (this.keep || r.tris) this.recs.push(w);
     }
     if (own.length) (this.city._clutNew || (this.city._clutNew = [])).push(...own); // pedlane.js: re-plan lanes solved before these existed
