@@ -13,7 +13,7 @@ void main(){ vUvR = textureMatrix * vec4(position, 1.0); vec4 wp = modelMatrix *
 const fs = `
 uniform sampler2D tDiffuse; uniform sampler2D tNormal; uniform float uTime; uniform vec3 uSunDir; uniform vec3 uSunCol;
 uniform vec3 fogColor; uniform float fogDensity; uniform vec3 uFogSunCol; uniform float uFogFalloff; uniform float uNight; uniform vec3 uSkyCol;
-uniform float beachX0, beachX1; uniform sampler2D tShore; uniform vec4 uShoreBox; uniform sampler2D tBed; uniform vec4 uBedBox; uniform float uBedOn;
+uniform vec4 uWN; uniform vec4 uWS; uniform float beachX0, beachX1; uniform sampler2D tShore; uniform vec4 uShoreBox; uniform sampler2D tBed; uniform vec4 uBedBox; uniform float uBedOn;
 varying vec4 vUvR; varying vec3 vWP;
 float bOff(float z){ float a = abs(z); float t = clamp((a - 380.0) / 160.0, 0.0, 1.0); t = t * t * (3.0 - 2.0 * t); return t * (18.0 * sin(z * 0.0047) + 10.0 * sin(z * 0.013 + 1.3) - 6.0); }
 float bedH(vec2 p){
@@ -36,15 +36,30 @@ void main(){
   float depth = -1.0 - bedH(p);
   float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
   vec2 dist2 = n.xz * 0.035 * fade;
-  vec3 refl = texture2D(tDiffuse, vUvR.xy / vUvR.w + dist2).rgb;
+  // a_waternight (map A, uWS.z = 0 -> old): wave slope along the view smears the mirror vertically on screen, so lamps and lit
+  // windows stretch into streaks instead of mirrored blobs; across-view slope keeps the old sideways wobble
+  float al = 0.0;
+  if (uWS.z > 0.0) { vec2 vd = -V.xz; float vl = length(vd); vd = vl > 1e-4 ? vd / vl : vec2(0.0, 1.0); al = dot(n.xz, vd); float ac = vd.x * n.z - vd.y * n.x;
+    dist2 = mix(dist2, vec2(ac * uWS.x, al * uWS.y) * fade, uWS.z); }
+  vec2 uvR = vUvR.xy / vUvR.w + dist2;
+  vec3 refl = texture2D(tDiffuse, uvR).rgb;
+  // night: bright sources (lamps, lit windows, the lighthouse lantern) also reach the eye from wave facets above / below their
+  // mirror point -> vertical glitter streak. Only texels brighter than the night scene take part, so sky / walls are not dilated.
+  if (uWS.z > 0.0 && uNight > 0.01) { float sv = uWS.w * 0.0045 * (0.6 + 2.5 * abs(al)) * fade; vec3 sm = vec3(0.0);
+    for (int k = 1; k <= 3; k++) { float o = sv * float(k); vec3 a = max(texture2D(tDiffuse, uvR + vec2(0.0, o)).rgb, texture2D(tDiffuse, uvR - vec2(0.0, o)).rgb);
+      a *= smoothstep(0.12, 0.5, dot(a, vec3(0.3333))) * (1.0 - float(k) * 0.22); sm = max(sm, a); }
+    refl = max(refl, sm * uNight); }
   // body colour: turquoise shallows -> deep teal blue
   vec3 shallow = vec3(0.10, 0.48, 0.44), mid = vec3(0.03, 0.20, 0.24), deep = vec3(0.012, 0.06, 0.09);
   vec3 body = mix(shallow, mid, smoothstep(0.2, 2.2, depth)); body = mix(body, deep, smoothstep(2.0, 7.0, depth));
   float skyL = dot(uSkyCol, vec3(0.3333));
-  body *= (0.35 + 0.65 * clamp(dot(uSunCol, vec3(0.33)) * 0.25 + 0.1, 0.0, 1.2)) * (1.0 - uNight * 0.85);
+  body *= (0.35 + 0.65 * clamp(dot(uSunCol, vec3(0.33)) * 0.25 + 0.1, 0.0, 1.2)) * (1.0 - uNight * uWN.x);
+  // a_waternight (map A; old: uWN = 0.85, 0.85, 0, 1): no sunlight goes into the water at night -> the lit teal body fades and the
+  // surface takes the night haze colour (what the sky / street glow scatters back) instead of glowing turquoise
+  body = mix(body, fogColor * uWN.z, uNight * step(0.001, uWN.z) * 0.5);
   // sand visible through very shallow water
-  body = mix(vec3(0.62, 0.56, 0.44) * (1.0 - uNight * 0.85) * clamp(dot(uSunCol, vec3(0.33)) * 0.3 + 0.2, 0.0, 1.0), body, smoothstep(0.0, 0.7, depth));
-  vec3 col = mix(body, refl, clamp(fres, 0.0, 1.0));
+  body = mix(vec3(0.62, 0.56, 0.44) * (1.0 - uNight * uWN.y) * clamp(dot(uSunCol, vec3(0.33)) * 0.3 + 0.2, 0.0, 1.0), body, smoothstep(0.0, 0.7, depth));
+  vec3 col = mix(body, refl * uWN.w, clamp(fres, 0.0, 1.0));
   // sun glitter
   vec3 H = normalize(uSunDir + V);
   float spec = pow(max(dot(n, H), 0.0), 900.0) * 30.0 + pow(max(dot(n, H), 0.0), 120.0) * 0.6;
@@ -71,6 +86,10 @@ void main(){
 // r5.0 shore-distance map: land mask (mainland, island ends, Deco district, pearl island, causeway embankment) on an 8 m grid,
 // two-pass chamfer distance -> 0 at the shore .. 1 at >= 90 m out. Sampled by the water shader as the bay floor depth.
 const SB = [-2000, -1640, 520, 1640];
+// a_waternight: night water on map A (?oldwaternight = old values; map B always old). Uniforms only, one program either way.
+const OLD_WN = { bodyNight: 0.85, sandNight: 0.85, haze: 0, refl: 1, sx: 0.035, sy: 0.035, on: 0, streak: 1 };
+export const WN = (CYBER || new URLSearchParams(location.search).has('oldwaternight')) ? OLD_WN :
+  { bodyNight: 0.96, sandNight: 0.96, haze: 0.7, refl: 1, sx: 0.03, sy: 0.05, on: 1, streak: 3.0 };
 function shoreTexture() {
   const C = 8, nx = Math.round((SB[2] - SB[0]) / C), nz = Math.round((SB[3] - SB[1]) / C); const D = new Float32Array(nx * nz);
   const R = buildRegionData(); const sun = R.byId.sun; const pr = REGION.pearl; const q = {};
@@ -96,7 +115,7 @@ export function buildWater(scene, T, size = 0.5) {
       name: 'Water', uniforms: {
         color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null }, tNormal: { value: tn }, uTime: U.uTime,
         uSunDir: U.uSunDir, uSunCol: U.uSunCol, fogColor: { value: new THREE.Color() }, fogDensity: { value: 0.001 }, uFogSunCol: U.uFogSunCol, uFogFalloff: U.uFogFalloff,
-        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: CYBER ? (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.needsUpdate = true; return t; })() : shoreTexture() }, tBed: { value: null }, uBedBox: { value: new THREE.Vector4() }, uBedOn: { value: 0 }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
+        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, uWN: { value: new THREE.Vector4(WN.bodyNight, WN.sandNight, WN.haze, WN.refl) }, uWS: { value: new THREE.Vector4(WN.sx, WN.sy, WN.on, WN.streak) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: CYBER ? (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.needsUpdate = true; return t; })() : shoreTexture() }, tBed: { value: null }, uBedBox: { value: new THREE.Vector4() }, uBedOn: { value: 0 }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
       }, vertexShader: vs, fragmentShader: fs,
     },
   });
