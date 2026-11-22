@@ -12,7 +12,7 @@ import { buildSignage } from './maps/gta/signage.js';
 import { buildBacklot } from './maps/gta/backlot.js';
 import { applyColliderFits } from './maps/gta/colfix.js';
 import { fixCityProps } from './maps/gta/propfix.js';
-import { fixStreetParking } from './maps/gta/parkfix.js';
+import { fixStreetParking, attachParkedColliders } from './maps/gta/parkfix.js';
 import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
 import { buildPost } from './post.js';
 import { Game } from './game.js';
@@ -92,6 +92,7 @@ async function load() {
   const blot = CYBER ? null : buildBacklot(scene, city); // a_backlot: service lanes / back yards behind the inner-block rows (instanced, streamed)
   if (!CYBER) city.parkFix = fixStreetParking(city); // a_parking: 海潮大道 kerb-lane slots: face the lane's traffic, clear of crosswalks / signals / hydrants / bus stops (after every layer)
   if (!CYBER) applyColliderFits(city); // a_lane8fix: swap oversized / misplaced / orphan colliders for their visible footprint (after every layer is placed)
+  if (!CYBER) city.parkCol = attachParkedColliders(city); // a_parkcol: oriented boxes for the ~23k mainland parked cars (own fine grid, appended to col.query)
   if (CYBER) neon = buildNeon(scene, city);
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
   post.shaftLight = env.sunFar; post.shaft = U.uShaft.value; // light2 volumetric sun shafts (far cascade)
