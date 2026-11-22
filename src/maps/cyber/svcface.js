@@ -5,6 +5,12 @@
 // off the openings. The bay plan is a pure integer rule shared by JS and GLSL (no rng): bay k of an edge with pattern seed ps
 // (0..10) gets v = (7k + ps) mod 11 -> type. Keep this file and the style-6 branch in mats.js in step.
 export const AF_OFF = typeof location !== 'undefined' && /[?&]noalleyface\b/.test(location.search); // test switch: old glass shop band all round
+// b_alleyface2: streamed parcels. stream.js buildNear sets p (the lot being generated, parcel frame) and log (an array) around
+// genParcel; city.js svcEdges then treats the lot's back (local −x) and its two sides (±z) as service faces unless bldglayer.js
+// marked that side as facing a road (p.svcRoad bits: 1 = +z side, 2 = −z side, 4 = back; the same test as the corner side rows).
+// The front (+x, shop street) never changes. svcFront logs every opening of a streamed lot into log (parcel frame); stream.js
+// turns them into world segments on p.svcF for parcelgap.js (wall fixtures in the slots keep off them). No rng use anywhere.
+export const SVC_CTX = { p: null, log: null };
 export const SVC = { BLANK: 0, METER: 1, SHUT: 2, LOUV: 3, HATCH: 4, DOOR: 5 };
 // v -> type: 0,1 blank · 2,3 meter cabinet · 4,5 roller shutter · 6,7 exhaust louvre · 8 delivery hatch · 9,10 steel door
 const TBL = [0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 5];

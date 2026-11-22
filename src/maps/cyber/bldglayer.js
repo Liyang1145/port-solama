@@ -69,8 +69,10 @@ export class BldgLayer {
     // only dress the front, so streets running past building sides were bare (b_night_street)
     this.counts.side = 0;
     for (const p of P) { if (!(p.style === 'mid' || p.style === 'deco' || p.style === 'downtown')) continue; const c = Math.cos(p.ang), sn = Math.sin(p.ang);
+      p.svcRoad = 0; // b_alleyface2: sides / back facing a road keep the glass band (city.js svcEdgesLot); no rng use
       for (const sd of [1, -1]) { const lz = sd * (p.w / 2 + 4.5); const x = p.x - sn * lz, z = p.z + c * lz; const n = city.graph.index.near(x, z);
-        if (n && n.d < n.e.hw + n.e.sw + 0.5 && n.e.sw > 0) { add(keyOf(p.x, p.z), { kind: 'side', p, sd }); this.counts.side++; } } }
+        if (n && n.d < n.e.hw + n.e.sw + 0.5 && n.e.sw > 0) { add(keyOf(p.x, p.z), { kind: 'side', p, sd }); this.counts.side++; p.svcRoad |= sd > 0 ? 1 : 2; } }
+      { const lx = -(p.d / 2 + 4.5); const n = city.graph.index.near(p.x + c * lx, p.z + sn * lx); if (n && n.d < n.e.hw + n.e.sw + 0.5) p.svcRoad |= 4; } }
     // facing pairs across a street
     const front = (p) => { const fx = Math.cos(p.ang), fz = Math.sin(p.ang); return { x: p.x + fx * p.d / 2, z: p.z + fz * p.d / 2, fx, fz }; };
     const cand = P.filter((p) => p.style === 'mid' || p.style === 'downtown' || p.style === 'deco');

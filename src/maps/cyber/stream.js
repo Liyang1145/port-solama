@@ -11,6 +11,7 @@ import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies } from './city.js';
 import { CLUT_CTX } from './clutcap.js'; // b_clutter
+import { SVC_CTX } from './svcface.js'; // b_alleyface2
 import { PY_OFF, yardContainers } from './portyard.js'; // r6.4 b_portyard
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
@@ -162,7 +163,10 @@ export class Stream {
       if (p.far) continue;
       const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [] };
       const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
+      SVC_CTX.p = p; SVC_CTX.log = []; // b_alleyface2: service faces on the lot's back / slot sides (city.js svcEdgesLot)
       withSeed(p.seed, () => genParcel(ctx, p)); CLUT_CTX.m = null;
+      { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
+        p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
       if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
     }

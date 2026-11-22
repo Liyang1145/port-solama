@@ -17,7 +17,7 @@ import { neonGlowMat, neonReflMat } from './neontube.js';
 import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
-import { AF_OFF, svcBays, SVC } from './svcface.js'; // b_alleyface
+import { AF_OFF, svcBays, SVC, SVC_CTX } from './svcface.js'; // b_alleyface
 import { pedLoop, addPropCols, lanePoint, pedPath, pathLanePoint, pedWarm, pedWant } from './pedlane.js';
 const Q_NOPALM = typeof location !== 'undefined' && /[?&]nopalmloop\b/.test(location.search); // test switch: old loops, no prop colliders
 const Q_NOSP = Q_NOPALM || (typeof location !== 'undefined' && /[?&]nostreetpeds\b/.test(location.search)); // test switch (b_streetpeds): old graph paths, loops solved on first use, no bollard colliders
@@ -405,13 +405,28 @@ function relief(ctx, poly, y0, y1, fh, ww, style, wall, lite) {
 // 4 m out from the edge middle still lies inside the block's lot (b.inner, i.e. not on the sidewalk). Edges < 2 m (the rounded
 // Deco corners) stay shopfront. Returns per edge null or { ww, ps, kind (1 alley, 0 back / gap), p, dx, dz, len, y0 }. No rng use.
 function svcEdges(ctx, poly, seed, sw, y0) {
-  if (AF_OFF || streamed(ctx) || !ctx.curBlock || !ctx.curBlock.inner) return null;
+  if (AF_OFF) return null;
+  if (streamed(ctx)) return svcEdgesLot(poly, seed, sw, y0);
+  if (!ctx.curBlock || !ctx.curBlock.inner) return null;
   const [ix0, iz0, ix1, iz1] = ctx.curBlock.inner; let any = false;
   const out = poly.map((p, i) => { const E = edgeFrame(poly, i); if (E.len < 2) return null; const q = E.P(E.len / 2, 4);
     if (!(q[0] > ix0 && q[0] < ix1 && q[1] > iz0 && q[1] < iz1)) return null;
     const kind = (ctx.alleys || []).some((a) => Math.abs(q[1] - a.z) < a.w / 2 + 1.5 && q[0] > a.x0 && q[0] < a.x1) ? 1 : 0;
     const n = Math.max(1, Math.round(E.len / sw)); any = true;
     return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: p, dx: E.dx, dz: E.dz, len: E.len, y0 }; });
+  return any ? out : null;
+}
+// b_alleyface2: the same for a streamed lot (parcel frame, street front at +x): an edge whose outward normal points back (−x) or
+// to a side (±z) is a service face, unless bldglayer.js found a road on that side (p.svcRoad; corner side rows / back streets keep
+// the glass band). Edges < 2 m (rounded Deco corners) and slanted ones stay as they were. kind 1 = back, 0 = side / slot. No rng.
+function svcEdgesLot(poly, seed, sw, y0) {
+  const p = SVC_CTX.p; if (!p || p.svcRoad === undefined) return null; let any = false;
+  const out = poly.map((q, i) => { const E = edgeFrame(poly, i); if (E.len < 2) return null; let kind;
+    if (E.ox < -0.7) { if (p.svcRoad & 4) return null; kind = 1; }
+    else if (Math.abs(E.oz) > 0.7) { if (p.svcRoad & (E.oz > 0 ? 1 : 2)) return null; kind = 0; }
+    else return null;
+    const n = Math.max(1, Math.round(E.len / sw)); any = true;
+    return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: q, dx: E.dx, dz: E.dz, len: E.len, y0 }; });
   return any ? out : null;
 }
 // b_alleyface: the real pieces of a service face (the rest is the style-6 shader): concrete plinth, roller-shutter housings,
@@ -423,7 +438,9 @@ function svcFront(b, E, y0, ground, s) {
   SVC_STAT.edges++; if (s.kind) SVC_STAT.alley++;
   lbox(b, E, 0, E.len, -0.02, 0.06, y0, y0 + 0.3, plinth); // concrete plinth (splash zone)
   const n = Math.max(1, Math.round(E.len / s.ww)); SVC_STAT.bays += n;
+  const lg = SVC_CTX.log; if (lg) SVC_STAT.lot = (SVC_STAT.lot || 0) + 1;
   for (const o of svcBays(E.len, s.ww, s.ps)) { SVC_STAT.open[o.t]++; const a0 = o.c - o.hw, a1 = o.c + o.hw;
+    if (lg) lg.push({ a: E.P(a0, 0), b: E.P(a1, 0), lo: y0 + o.bot, hi: y0 + o.top, t: o.t, floor: !!o.floor }); // b_alleyface2 (parcel frame)
     if (o.t === SVC.SHUT) lbox(b, E, a0 - 0.1, a1 + 0.1, -0.02, 0.3, y0 + 2.55, y0 + 2.86, galv, true); // roll housing (guide rails are painted)
     else if (o.t === SVC.DOOR) { lbox(b, E, a0 - 0.2, a1 + 0.2, -0.02, 0.42, y0 + 2.28, y0 + 2.36, dark, true); // drip hood
     } // (door frame painted)
