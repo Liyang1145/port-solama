@@ -454,7 +454,7 @@ export function buildBacklot(scene, city) {
           if (k === 0) ground((sx0 + sx1) / 2, z, 5.4, 0.1, [0.86, 0.86, 0.82], 0.158); ground((sx0 + sx1) / 2, z + 2.7, 5.4, 0.1, [0.86, 0.86, 0.82], 0.158); k++; stat.stalls++;
           const wx = x0 + s * 5.0; push('wstop', wx, 0.15, zc, Math.PI / 2);
           if (vansHere < 2 && stat.vans < 30 && r() < 0.16) { const vx = x0 + s * 2.95; vanAt(vx, 0.15, zc, s > 0 ? Math.PI / 2 : -Math.PI / 2, VANC[Math.floor(r() * VANC.length)]); addCol(Math.min(x0 + s * 0.4, x0 + s * 5.5), zc - 1.02, Math.max(x0 + s * 0.4, x0 + s * 5.5), zc + 1.02, 2.2); vansHere++; stat.vans++; }
-          else addCol(Math.min(wx - 0.11, wx + 0.11), zc - 0.9, Math.max(wx - 0.11, wx + 0.11), zc + 0.9, 0.12); }
+          else addCol(Math.min(wx - 0.11, wx + 0.11), zc - 0.9, Math.max(wx - 0.11, wx + 0.11), zc + 0.9, 0.27); } // a_bridgewalk: top 0.27 = visible stop (0.15 + 0.12; was 0.12, under the 0.15 yard surface)
       } }
   }
 
