@@ -1,0 +1,25 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0&ao=0&noshaft",
+ "reset": false,
+ "shots": [
+  {
+   "name": "walk",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; const B=__G.neon&&__G.neon.bldg; const L=B&&B.alley; if(!L) 'NOLAYER'; else { const out={stats:L.stats, ends:L.ends(), walk:[]}; for (const e of L.ends()) { if(!e.through && e.idx!==4) continue; g.override=null; if(g.P.car) g.toggleCar(); g.tp(e.x0-1.0, e.z, Math.PI/2); g.override={mx:0,mz:1}; let f=0, maxDz=0; while(f<1100 && g.P.pos.x < e.x1-0.8){ __G.step(25); f+=25; maxDz=Math.max(maxDz, Math.abs(g.P.pos.z-e.z)); } g.override=null; out.walk.push({idx:e.idx, through:e.through, from:+(e.x0-1.0).toFixed(1), target:+(e.x1-0.8).toFixed(1), reached:+g.P.pos.x.toFixed(1), z:+g.P.pos.z.toFixed(2), maxDz:+maxDz.toFixed(2), frames:f, ok: g.P.pos.x >= e.x1-0.8}); } JSON.stringify(out); }"
+  },
+  {
+   "name": "alley_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; g.tp(60,-225,Math.PI/2); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.position.set(66,1.75,-224.2); c.lookAt(100,3.2,-225.6); c.far=160; c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); 0"
+  },
+  {
+   "name": "alley_stat",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; g.tp(60,-225,Math.PI/2); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.position.set(66,1.75,-224.2); c.lookAt(100,3.2,-225.6); c.far=160; c.updateProjectionMatrix(); c.updateMatrixWorld(); const L0=__G.neon.bldg.alley; const act0=L0?[...L0.active]:[]; __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.info.autoReset=false; R.info.reset(); __G.render(); const rc=R.info.render.calls, rt=R.info.render.triangles; R.info.autoReset=true; const B=__G.neon&&__G.neon.bldg; const L=B&&B.alley; JSON.stringify(Object.assign({frameCalls: rc, frameTris: rt, stream: __G.stream.tris()}, {programs: __G.renderer.info.programs.length, alleyTris: L?L.tris():0, alleyCalls: L?L.calls():0, active: L?[...L.active]:[], act0, camp:[c.position.x,c.position.z], dist: L?L.alleys.map(A=>Math.round(Math.hypot(Math.max(A.xs-c.position.x,0,c.position.x-A.xe), A.z-c.position.z))):0}))",
+   "noshot": true
+  },
+  {
+   "name": "prog_census",
+   "noshot": true,
+   "js": "const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; __G.setHour(22.0); const g=__G.game; g.override=null; const c=__G.camera; const R=__G.renderer; g.tp(64,-225,0); __G.step(2); c.position.set(66,1.75,-224.2); c.lookAt(100,3.2,-225.6); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); __G.neon.update(__G.U.uNight.value,0); const t0=performance.now(); R.compile(__G.scene, c); JSON.stringify({ms:Math.round(performance.now()-t0), n:R.info.programs.length, keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey))})"
+  }
+ ]
+}

@@ -14,6 +14,7 @@ import { U } from '../../env.js';
 import { laundryLine } from './dress.js';
 import { shopStreet } from './arch.js';
 import { Viaduct, nearViaduct } from './viaduct.js';
+import { AlleyLayer } from './alley.js';
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -43,6 +44,7 @@ export class BldgLayer {
     this.mats = mats; this.stream = city.stream; if (mats && mats.vcol && !mats.vcolD) mats.vcolD = mats.vcol; /* LOD alias (kit.js) */
     this.lmats = Object.assign(Object.create(mats), { cone: coneMat() }); this.group = new THREE.Group(); this.group.name = 'bldglayer'; scene.add(this.group);
     this.via = city.viaduct ? new Viaduct(scene, this.lmats, city, city.viaduct) : null; // r6.4 b_street2 elevated light-rail
+    this.alley = new AlleyLayer(scene, this.lmats, city); // r6.4 b_alley: Deco-core back-alley clutter (alley.js, own distance LOD)
     this.items = new Map(); this.built = new Map(); this.counts = { port: 0, walk: 0, bridge: 0, cables: 0 };
     const add = (k, it) => { let l = this.items.get(k); if (!l) this.items.set(k, l = []); l.push(it); };
     const P = city.parcels.filter((p) => !p.far);
@@ -107,6 +109,7 @@ export class BldgLayer {
   sync() {
     const st = this.stream; if (!st) return;
     if (this.via) this.via.sync(globalThis.__G && globalThis.__G.camera); // r6.4 light-rail near detail (own distance LOD)
+    if (this.alley) this.alley.sync(globalThis.__G && globalThis.__G.camera);
     // detail LOD: small clutter meshes ('vcolD') only within DETAIL_R of the camera (chunk centre distance)
     const cam = globalThis.__G && globalThis.__G.camera; if (cam) { const p = cam.position; let n = 0;
       for (const c of st.chunks.values()) { if (!c.near) continue; const on = Math.hypot(c.cx - p.x, c.cz - p.z) < DETAIL_R + Math.max(0, p.y - 40) * 0.5;
