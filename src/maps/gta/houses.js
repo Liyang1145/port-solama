@@ -208,7 +208,7 @@ function buildHouse(K, i) {
     const fw = dw < 1.2 ? 1.86 : dw + 0.32; bx(tF, td, 0.03, 0.18, fw, 2.38, 0.06, trim, 7); bx(tF, td, 0.06, 0.2, dw, 2.15, 0.08, dc, 13);
     if (dw < 1.2) { near(true); for (const sg of [-1, 1]) bx(tF, td + sg * (dw / 2 + 0.235), 0.05, 0.3, 0.37, 1.95, 0.07, [0.10, 0.12, 0.14], 7); near(false); } // sidelights
     const plC = look === 3 ? [0.9, 0.9, 0.88] : [0.08, 0.08, 0.09]; let plaque = false; let porchT = null; // placed above the door unless a canopy takes it
-    { const tl = Math.abs(td + sgd * 1.62) < Lf - 0.15 ? td + sgd * 1.62 : Math.abs(td - sgd * 1.62) < Lf - 0.15 && (tg === null || Math.abs(td - sgd * 1.62 - tg) > gw / 2 + 0.3) ? td - sgd * 1.62 : null; // lantern on the wall gap past the cell
+    { const tl = porchSpot(seed, P, N, T, Lf, td, tg, gw, sgd, fw, ghalfOf(look, sub)); // lantern on the wall gap past the cell (a_porchlamp: snapped onto a painted gap when the door could not be)
       if (tl !== null) { if (PORCH_OFF || !porchLit(K, i)) { near(true); bx(tF, tl, 0.12, 1.78, 0.18, 0.34, 0.16, [0.12, 0.11, 0.10], 7); near(false); }
         else { porchT = tl; bx(tF, tl, 0.015, 1.75, 0.13, 0.34, 0.03, LMET, 7); bx(tF, tl, 0.11, 1.79, 0.15, 0.25, 0.14, LGLASS, 16); bx(tF, tl, 0.11, 2.04, 0.19, 0.045, 0.17, LMET, 7); } } } // a_porchlamp: lit = plate + self-lit lens (kind 16) + cap, far tier (to RAD)
     let pd = look === 2 ? 2.0 : look === 0 ? 1.7 : 1.4; let Rp = null;
@@ -354,14 +354,14 @@ export function updateHouses(K, cam) { if (!K || !K.mesh) return; const p = cam 
   // drop far visual caches (colliders stay filed)
   if (K.built.size > 600) for (const [i, b] of K.built) { const H = K.H[i].LT.house; if (Math.hypot(H[0] - p.x, H[2] - p.z) > 260) { K.built.delete(i); K.keptCols = K.keptCols || new Map(); K.keptCols.set(i, b.cols); } } }
 // &houseaudit: build every house now and count what was placed / refused, and check every kit box against the paving / buildings
-export function auditHouses(K) { if (!K) return null; const T0 = performance.now(); const R = { houses: K.H.length, looks: K.stats.looks, items: {}, refused: {}, boxesS: 0, boxesF: 0, maxBoxes: 0, colOnWalk: 0, colOnPave: 0, colOnBody: 0, colOnTrunk: 0, colOutLot: 0 };
+export function auditHouses(K) { if (!K) return null; const T0 = performance.now(); PSPOT.onWindow = PSPOT.moved = 0; const R = { houses: K.H.length, looks: K.stats.looks, items: {}, refused: {}, boxesS: 0, boxesF: 0, maxBoxes: 0, colOnWalk: 0, colOnPave: 0, colOnBody: 0, colOnTrunk: 0, colOutLot: 0 };
   for (let i = 0; i < K.H.length; i++) { const b = buildHouse(K, i); const n = (b.S.length + b.S1.length + b.F.length + b.F1.length + b.FS.length) / NF; R.boxesS += (b.S.length + b.S1.length) / NF; R.boxesF += (b.F.length + b.F1.length + b.FS.length) / NF; R.boxesFar = (R.boxesFar || 0) + (b.S.length + b.F.length + b.FS.length) / NF; if (n > R.maxBoxes) R.maxBoxes = n;
     for (const k in b.why) R.refused[k] = (R.refused[k] || 0) + b.why[k]; if (b.porch) R.porchLit = (R.porchLit || 0) + 1;
     const own = K.H[i].LT.house, quad = K.H[i].LT.quad;
     for (const c of b.cols) { R.items[c.k] = (R.items[c.k] || 0) + 1; const Rc = { x: c.x, z: c.z, a: c.a, hl: c.hl, hw: c.hw }; if (rectOnWalk(K, { ...Rc, hl: Rc.hl - 0.1, hw: Math.max(0.01, Rc.hw - 0.1) })) R.colOnWalk++;
       if (K.pave.near(...ext(Rc), (P) => obbOverlap(Rc, P, 0))) R.colOnPave++; if (K.bodies.near(...ext(Rc, 0.5), (B) => B.rec !== own && obbOverlap(Rc, B, -0.01))) R.colOnBody++;
       if (K.trunks.near(...ext(Rc, 0.5), (t) => circRect(t.x, t.z, t.r, Rc))) R.colOnTrunk++; if (c.k !== 'mailbox') for (const [x, z] of corners(Rc)) if (!inPoly(quad, x, z)) { R.colOutLot++; break; } } }
-  R.lights = prepLights(K) && K.lightStats; R.avgBoxes = +((R.boxesS + R.boxesF) / K.H.length).toFixed(1); R.avgFar = +(R.boxesFar / K.H.length).toFixed(1); R.ms = Math.round(performance.now() - T0); return R; }
+  R.porchSpot = { onWindow: PSPOT.onWindow, moved: PSPOT.moved }; R.lights = prepLights(K) && K.lightStats; R.avgBoxes = +((R.boxesS + R.boxesF) / K.H.length).toFixed(1); R.avgFar = +(R.boxesFar / K.H.length).toFixed(1); R.ms = Math.round(performance.now() - T0); return R; }
 
 // ---------------------------------------------------------------- a_nightfix: house night lights ----
 // Garage-side wall lantern on the front face of every house that has a garage door (same spot rule as buildHouse: driveway end
@@ -406,12 +406,25 @@ function gapSnap(seed, Pw, Nw, Tw, t0, ok) { const ft = [-Nw[1], Nw[0]], tf = Tw
 // inside the wall end (downspout), clear of the garage trim, and clear of every spot the entry door can take in buildHouse (its
 // unsnapped spot and each snap candidate, since the porch test that picks between them needs the full lot index): door frame,
 // both possible entry-lantern spots (+0.5 m), and a low canopy (cap under 2.2 m).
+// half-width of the painted window gap (around fu = 0 mod 3.4) a 0.19 m lantern centre may use, by look: louvred shutters (海岸,
+// 牧场 sub 1) leave 0.25 m of wall, accordion shutters (牧场 sub 0) 0.67 m, plain frames + sills 0.75-0.82 m
+function ghalfOf(look, sub) { return look === 2 || (look === 1 && sub === 1) ? 0.125 : look === 1 && sub === 0 ? 0.55 : 0.6; }
+// the entry lantern's spot (a_housepolish rule: 1.62 m past the door centre, the side away from the garage unless the wall ends);
+// a_porchlamp: when that lands on a painted window (the door could not be snapped onto a cell, ~200 houses) slide it to the nearest
+// painted gap nearest to it within 4 m of the door centre (either side), clear of the door frame and the garage trim; ?oldporch keeps the old spot
+function porchSpot(seed, P, N, T, Lf, td, tg, gw, sgd, fw, ghalf) {
+  const tl = Math.abs(td + sgd * 1.62) < Lf - 0.15 ? td + sgd * 1.62 : Math.abs(td - sgd * 1.62) < Lf - 0.15 && (tg === null || Math.abs(td - sgd * 1.62 - tg) > gw / 2 + 0.3) ? td - sgd * 1.62 : null;
+  if (tl === null || PORCH_OFF) return tl; const ft = [-N[1], N[0]], tf = T[0] * ft[0] + T[1] * ft[1]; if (Math.abs(tf) < 0.5) return tl;
+  const p = P(tl, 0), f = p[0] * ft[0] + p[1] * ft[1] + Math.fround(seed) * 37; if (Math.abs(f - 3.4 * Math.round(f / 3.4)) <= ghalf) return tl; 
+  const t2 = gapSnap(seed, (t) => P(t, 0), N, T, tl, (t) => Math.abs(t - td) <= 4.0 && Math.abs(t - td) >= fw / 2 + 0.25 && Math.abs(t) <= Lf - 0.37 && (tg === null || Math.abs(t - tg) > gw / 2 + 0.3));
+  PSPOT.onWindow++; if (t2 !== null) PSPOT.moved++; return t2 === null ? tl : t2; }
+const PSPOT = { onWindow: 0, moved: 0 }; // counts (only the audit reads them)
 function garageStyles(K, D, H, LT, seed, P, N, T, Lf, tg, gw, s, u1, v2, S, lantern, add) {
   const look = D.look, sub = D.sub || 0, h = H[4], gh = h > 5 ? 2.3 : 2.15; const R0 = LT.roof && !LT.roof.gone ? LT.roof : null, Rb = LT.roof;
   const fa = Math.atan2(-T[1], T[0]); const top = R0 ? R0[1] - 0.22 : h - 0.05;
   const ft = [-N[1], N[0]], tf = T[0] * ft[0] + T[1] * ft[1]; if (Math.abs(tf) < 0.5) return;
   const fu = (t) => { const p = P(t, 0); return p[0] * ft[0] + p[1] * ft[1] + Math.fround(seed) * 37; };
-  const ghalf = look === 2 || (look === 1 && sub === 1) ? 0.125 : look === 1 && sub === 0 ? 0.55 : 0.6;
+  const ghalf = ghalfOf(look, sub);
   const inGap = (t) => { const f = fu(t); return Math.abs(f - 3.4 * Math.round(f / 3.4)) <= ghalf; };
   // entry door spots (buildHouse: sgd, dw, pw, td, snap candidates)
   const sgd = -s, dw = look === 0 && hh(seed, 8) < 0.45 ? 1.65 : 0.95, pw = dw + 1.5, fw = dw < 1.2 ? 1.86 : dw + 0.32; const busy = [];
@@ -419,7 +432,7 @@ function garageStyles(K, D, H, LT, seed, P, N, T, Lf, tg, gw, s, u1, v2, S, lant
   if (td0 !== null) { const TD = [td0]; const f0 = fu(td0), base = td0 + (3.4 * Math.round((f0 - 1.7) / 3.4) + 1.7 - f0) / tf;
     for (const k of [0, 1, -1]) { const t2 = base + k * 3.4 / tf; if (Math.abs(t2) > Lf - pw / 2 - 0.15) continue; if (Math.abs(t2 - tg) < gw / 2 + pw / 2 + 0.3 || Math.sign(t2 - tg) !== sgd) continue; TD.push(t2); }
     const cy = Math.min(2.75, Rb ? Rb[1] - 0.66 : h - 0.35);
-    for (const td of TD) { busy.push([td - fw / 2 - 0.03, td + fw / 2 + 0.03]); const tl = Math.abs(td + sgd * 1.62) < Lf - 0.15 ? td + sgd * 1.62 : Math.abs(td - sgd * 1.62) < Lf - 0.15 && Math.abs(td - sgd * 1.62 - tg) > gw / 2 + 0.3 ? td - sgd * 1.62 : null; if (tl !== null) busy.push([tl - 0.45, tl + 0.45]); if (cy < 2.2) busy.push([td - pw / 2 - 0.2, td + pw / 2 + 0.2]); } }
+    for (const td of TD) { busy.push([td - fw / 2 - 0.03, td + fw / 2 + 0.03]); const tl = porchSpot(seed, P, N, T, Lf, td, tg, gw, sgd, fw, ghalf); if (tl !== null) busy.push([tl - 0.45, tl + 0.45]); if (cy < 2.2) busy.push([td - pw / 2 - 0.2, td + pw / 2 + 0.2]); } }
   const okAt = (t, side) => Math.abs(t) <= Lf - 0.37 && side * (t - tg) >= gw / 2 + 0.27 && inGap(t) && !busy.some(([a, b]) => t + 0.15 > a && t - 0.15 < b);
   // twin: first spot outward from the trim on each side
   const twinAt = (side) => { for (let d = gw / 2 + 0.27; d <= gw / 2 + 0.95 + 1e-6; d += 0.02) { const t = tg + side * d; if (okAt(t, side)) return t; } return null; };
