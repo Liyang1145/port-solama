@@ -126,8 +126,8 @@ export function buildProps(scene, city, T) {
     fragmentShader: 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length(vUv-0.5)*2.0; float a = pow(max(1.0-d,0.0),2.2); gl_FragColor = vec4(uCol * a * uNight * 0.55, 1.0); }',
   });
   // a_nightcheck (map A, ?oldanight = off): the 「海风之眼」 wheel's bulb rings lit nothing below -> two extra instances of this pool
-  // (same draw, same program): an ellipse along the rim plane and a tighter one at the boarding deck (landmarks(): x 384, z 352)
-  const xPools = CYBER || /[?&]oldanight\b/.test(typeof location !== 'undefined' ? location.search : '') ? [] : [[384, 352, 36, 22], [384, 348.6, 12, 10]];
+  // (same draw, same program): an ellipse along the rim plane on each side of the boarding deck, which hides the centre (landmarks(): x 384, z 352)
+  const xPools = CYBER || /[?&]oldanight\b/.test(typeof location !== 'undefined' ? location.search : '') ? [] : [[384, 344.6, 30, 14], [384, 359.4, 30, 14]];
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length + xPools.length); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   const lampM = [];
