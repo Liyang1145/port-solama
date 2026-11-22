@@ -352,6 +352,7 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   // a_curbalign: what curbfix.js needs about this lot (record references; no random draws)
   const LT = { s, ang, canal, front: F.P(ac, f0), dfront: null, house: lastRec(fab, p, 'body'), box: fab._lastBox, roof: null, verge: null, yard: null, car: null, ftree: null, hedge: null, dock: null, boat: null };
   (fab.lots = fab.lots || []).push(LT);
+  LT.quad = [F.P(a0, f0), F.P((a0 + a1) / 2, f0), F.P(a1, f0), F.P(a1, f1), F.P((a0 + a1) / 2, f1), F.P(a0, f1)]; LT.pool = null; LT.deck = null; LT.btree = null; // a_curbbake: lot outline + back-yard records (no random draws)
   const flat = R() < (canal ? 0.3 : 0.07);
   if (!flat) { addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, Math.min(hw, hd) * rr(0.22, 0.3), ang, pickR(fab, ROOFS)); LT.roof = lastRec(fab, p, 'roof'); }
   // driveway (verge part + yard part, skipping the sidewalk) on one side, car on it half the time
@@ -363,8 +364,8 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   // back yard: pool + deck, trees, hedge on the back line
   const back0 = f0 + s * (setback + hd), yd = depth - setback - hd;
   if (yd > 8 && R() < (canal ? 0.75 : 0.42)) { const pb = back0 + s * (yd * 0.5); const pp = F.P(ac + rr(-2, 2), pb); const pw = rr(7, 10), pd = Math.min(yd - 4, rr(3.6, 5));
-    addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); addPool(fab, pp[0], pp[1], pw, pd, ang); }
-  if (R() < 0.6) { const t = F.P(a0 + rr(2, fw - 2), back0 + s * rr(2, yd - 1)); if (R() < 0.3) addPalm(fab, t[0], t[1], rr(7, 11)); else addTree(fab, t[0], t[1], rr(2.6, 4.6), rr(2.5, 4), pickR(fab, LEAF)); }
+    addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); LT.deck = lastRec(fab, pp, 'flat'); addPool(fab, pp[0], pp[1], pw, pd, ang); LT.pool = lastRec(fab, pp, 'pool'); }
+  if (R() < 0.6) { const t = F.P(a0 + rr(2, fw - 2), back0 + s * rr(2, yd - 1)); if (R() < 0.3) { addPalm(fab, t[0], t[1], rr(7, 11)); LT.btree = ['palm', lastRec(fab, t, 'palm')]; } else { addTree(fab, t[0], t[1], rr(2.6, 4.6), rr(2.5, 4), pickR(fab, LEAF)); LT.btree = ['tree', lastRec(fab, t, 'tree')]; } }
   if (R() < 0.35) { const t = F.P(a0 + rr(2, fw - 2), f0 + s * rr(2, setback - 1.5)); if (R() < 0.4) { addPalm(fab, t[0], t[1], rr(6, 10)); LT.ftree = ['palm', lastRec(fab, t, 'palm')]; } else { addTree(fab, t[0], t[1], rr(2, 3.4), rr(2, 3), pickR(fab, LEAF)); LT.ftree = ['tree', lastRec(fab, t, 'tree')]; } }
   if (!canal && R() < 0.5) { const hb = F.P(ac, f0 + s * (depth - 0.4)); addBody(fab, hb[0], hb[1], 0, fw - 0.4, 0.7, rr(1.4, 2.0), ang, [0.22, 0.32, 0.16], 6, null, false); LT.hedge = lastRec(fab, hb, 'body'); }
   if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); addFlat(fab, dk[0], dk[1], Math.min(10, fw - 4), 2.4, ang, [0.52, 0.42, 0.30], 0.35); LT.dock = lastRec(fab, dk, 'flat');
