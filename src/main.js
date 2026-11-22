@@ -150,7 +150,7 @@ async function load() {
     if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1);
     veg.update?.(camera.position);
     if (CYBER) { nature.update(camera.position); nature.frame(env, scene); neon.update(env.look.night, U.uTime.value); scene.fog.density = env.look.fogD * nature.fogMul(camera.position); }
-    updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night); street.update(env.look.night); shopSigns.update(env.look.night);
+    updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night, false, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
     updateNeonLights(props, city.signs, camera.position, env.look.night);
     renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;

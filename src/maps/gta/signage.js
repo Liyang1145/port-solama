@@ -9,16 +9,15 @@
 // Materials: every mesh is prep(MeshStandardMaterial({vertexColors:true}), 'fabCar') — the instanced vertex-colour +
 // instance-colour MeshStandard program the fabric cars and a_promenade already compile (roughness / metalness / emissive /
 // polygonOffset are uniforms or render state) -> no new shader program. The road program only gains A-only wear code.
-// All street names are original (NS names match the HUD / mapapi.js NS_NAME; EW names are new, mapapi calls them 横街).
+// All street names come from ./streetnames.js (one table shared with street.js blades, mapapi.js and the HUD's area names).
 import * as THREE from 'three';
 import { mulberry } from '../../util.js';
 import { prep } from '../../mats.js';
+import { BLADE_LOG } from '../../street.js'; // a_streetnames: mast-arm blade texts (same table) for streetNames()
 
 const RH = 7;
-export const NS_NAME = { 50: '椰影大道', 170: '珊瑚大街', 290: '海潮大道' };
-export const NS_PY = { 50: 'YEYING DADAO', 170: 'SHANHU DAJIE', 290: 'HAICHAO DADAO' };
-export const EW_NAME = { '-300': '鹈鹕街', '-150': '海葡萄路', 0: '日光大街', 150: '贝壳路', 300: '灯塔路' };
-export const EW_PY = { '-300': 'TIHU JIE', '-150': 'HAIPUTAO LU', 0: 'RIGUANG DAJIE', 150: 'BEIKE LU', 300: 'DENGTA LU' };
+import { NS_NAME, NS_PY, EW_NAME, EW_PY } from './streetnames.js'; // a_streetnames: single street-name table
+export { NS_NAME, NS_PY, EW_NAME, EW_PY };
 const EW = [-300, -150, 0, 150, 300];
 // original stop names per street, by block (z < -300, -300..-150, -150..0, 0..150, 150..300, > 300)
 const STOP_NAMES = {
@@ -323,7 +322,7 @@ export function buildSignage(scene, city) {
       for (const s of [1, -1]) { const n = nrm.clone().multiplyScalar(s); const oo = o.clone().addScaledVector(nrm, s * 0.006); plate(oo, UP, n, 0.96, 0.27, lin(BLUE), 'rect', s > 0); print(ras, oo, UP, n, 0.96, 0.27, 'txtS', 0.006); }
     }
     push('clamp', x, z, MX(x, gh + 2.6, z));
-    nameposts.push([+x.toFixed(2), +z.toFixed(2)]); stat.nameposts++;
+    nameposts.push([+x.toFixed(2), +z.toFixed(2), it.x, it.z, nsN, ewN]); stat.nameposts++;
   }
 
   // ------------------------------------------------------------------ guide-sign gantries (路口预告) on the approaches
@@ -370,7 +369,7 @@ export function buildSignage(scene, city) {
     // round speed-limit sign hung near the pole (30 on 海潮大道 / beach zone, 40 elsewhere)
     const lO = V3(pos.x, gh + 6.0, pos.z).addScaledVector(armDir, 1.35).addScaledVector(n, 0.12);
     const lim = (s.axis === 'z' && s.c === 290) ? lim30 : lim40; plate(lO, UP, n, 0.8, 0.8, lin(WH), 'disc'); print(lim, lO, UP, n, 0.8, 0.8, 'txtL', 0.006);
-    gantries.push([+pos.x.toFixed(1), +pos.z.toFixed(1), s.axis === 'z' ? 'ns' + s.c : 'ew' + s.c, d]); stat.gantries++;
+    gantries.push([+pos.x.toFixed(1), +pos.z.toFixed(1), s.axis === 'z' ? 'ns' + s.c : 'ew' + s.c, d, it.x, it.z, st ? thisN : null, lf || rt ? crossN : null, !st && !lf && !rt ? thisN : null]); stat.gantries++;
   }
 
   // ------------------------------------------------------------------ 禁止机动车驶入 + 步行街 plates at the pedestrian alley mouths
@@ -389,6 +388,121 @@ export function buildSignage(scene, city) {
   // parked cars must not sit in a bus bay (Tideline west kerb lane, city.parking from props.js)
   for (const p of city.parking || []) for (const st of stops) if (st.c === 290 && Math.abs(p.x - (290 - 5.25)) < 1.5 && p.z > st.z - 18 && p.z < st.z + 18) { if (p.fill) stat.parkingCleared++; p.fill = false; }
 
+  // ------------------------------------------------------------------ a_streetnames: signal-pole dressing ----
+  // Found through the 'pole' colliders props.js (a_props) registers: mast arms at (it.x + sx 8.2, it.z + sz 8.2) for
+  // (sx, sz) = (1, 1) / (-1, -1) (h 6) and pedestrian poles at (it.x + sx 8.0, it.z + sz 8.0) for (1, -1) / (-1, 1) (h 3.4).
+  // Each assembly is built in the (sx = 1) local frame and turned by pi for the mirrored corner (same as signalMastA).
+  // Adds: lit pedestrian pictograms (raised hand / walking figure, driven by the traffic phase), dark glyph backs,
+  // "按键过街" legend plates on the push buttons + an accessible speaker / LED module above each button, an amber
+  // middle lens and rear backplate straps on every vehicle head, a video-detection camera under every mast arm, a PTZ
+  // dome camera + "电子监控" plate on every other mast, and stickers / rust streaks / tape on all signal poles.
+  {
+    const pedRas = (walk) => raster(24, 26, PAL('#000000', walk ? '#ffffff' : '#ff8a1a'), (g) => {
+      g.fillStyle = walk ? '#ffffff' : '#ff8a1a';
+      if (walk) { // walking figure, side view, original drawing
+        g.beginPath(); g.arc(13, 3.6, 2.8, 0, 7); g.fill(); g.lineCap = 'round'; g.strokeStyle = '#ffffff';
+        g.lineWidth = 3.4; g.beginPath(); g.moveTo(12.5, 8); g.lineTo(11, 15.5); g.stroke();
+        g.lineWidth = 2.4; g.beginPath(); g.moveTo(12.4, 9); g.lineTo(16.5, 13.5); g.moveTo(12.0, 9.5); g.lineTo(8, 13); g.stroke();
+        g.lineWidth = 2.8; g.beginPath(); g.moveTo(11, 15.5); g.lineTo(15.5, 20); g.lineTo(17, 24.5); g.moveTo(11, 15.5); g.lineTo(8.5, 20.5); g.lineTo(5.5, 23.5); g.stroke();
+      } else { // raised open hand
+        g.beginPath(); g.roundRect(6.5, 11, 11.5, 12, 3); g.fill();
+        for (const [x, y0] of [[7, 5], [10, 3], [13, 3.5], [16, 6]]) { g.beginPath(); g.roundRect(x, y0, 2.6, 12 - y0 + 3, 1.3); g.fill(); }
+        g.beginPath(); g.moveTo(18, 15); g.lineTo(21.5, 10.5); g.lineTo(22.5, 12); g.lineTo(19, 19); g.closePath(); g.fill();
+      }
+    });
+    const rasWalk = pedRas(true), rasHand = pedRas(false);
+    const rasBtn = raster(32, 48, PAL(WH, BLK), (g) => { T(g, '按键', 16, 8, 10, BLK); T(g, '过街', 16, 20, 10, BLK);
+      g.fillStyle = BLK; g.fillRect(5, 33, 16, 4); g.beginPath(); g.moveTo(20, 28); g.lineTo(28, 35); g.lineTo(20, 42); g.closePath(); g.fill(); });
+    const rasCam = raster(64, 44, PAL(WH, BLUE, BLK), (g) => { g.fillStyle = BLUE; g.fillRect(0, 0, 64, 44);
+      g.fillStyle = WH; g.fillRect(8, 6, 22, 13); g.beginPath(); g.moveTo(30, 10); g.lineTo(38, 6); g.lineTo(38, 19); g.lineTo(30, 15); g.closePath(); g.fill(); g.fillRect(16, 19, 4, 5); g.fillRect(12, 23, 12, 2);
+      T(g, '电子', 51, 9, 10, WH); T(g, '监控', 51, 20, 10, WH); T(g, '路口违法抓拍', 32, 36, 9, WH); });
+    // part geometries (local frame: +z = face / outward normal, +y up)
+    const apsMod = () => { const o = [[BX(0.11, 0.15, 0.05, 0, 0, 0.025), [0.82, 0.64, 0.1]], [BX(0.09, 0.012, 0.03, 0, 0.082, 0.03), [0.7, 0.54, 0.08]]];
+      for (let k = 0; k < 5; k++) o.push([BX(0.07, 0.006, 0.004, 0, -0.045 + k * 0.014, 0.0515), [0.05, 0.05, 0.05]]); // speaker grille
+      o.push([CY(0.009, 0.009, 0.006, 8, 0, 0.045, 0.052, Math.PI / 2), [0.7, 0.05, 0.03]]); // "request registered" LED
+      return o; };
+    const vcam = () => { const o = [[CY(0.018, 0.018, 0.2, 6, 0, -0.1, 0), [0.5, 0.5, 0.49]], [BX(0.07, 0.04, 0.09, 0, -0.2, 0), [0.45, 0.45, 0.44]]]; // hanger + swivel
+      const tilt = MX(0, -0.29, 0.02, 0.26); const add = (g, c) => { g.applyMatrix4(tilt); o.push([g, c]); };
+      add(BX(0.11, 0.1, 0.3, 0, 0, 0), [0.86, 0.86, 0.84]); add(BX(0.15, 0.012, 0.38, 0, 0.062, 0.03), [0.9, 0.9, 0.88]); // body + sun shield
+      add(CY(0.04, 0.04, 0.02, 10, 0, 0, 0.16, Math.PI / 2), [0.03, 0.03, 0.035]); add(CY(0.03, 0.03, 0.004, 10, 0, 0, 0.172, Math.PI / 2), [0.1, 0.12, 0.16]); // lens bezel + glass
+      add(CY(0.012, 0.012, 0.06, 5, 0, -0.03, -0.17, Math.PI / 2), [0.05, 0.05, 0.05]); // cable gland
+      return o; };
+    const dome = () => { const o = [[BX(0.1, 0.18, 0.03, 0, 0, 0.015), [0.8, 0.8, 0.79]], [CY(0.028, 0.028, 0.52, 8, 0, 0, 0.28, Math.PI / 2), [0.82, 0.82, 0.8]], // wall clamp + arm
+        [CY(0.035, 0.035, 0.08, 8, 0, -0.04, 0.52), [0.82, 0.82, 0.8]], [CY(0.105, 0.11, 0.1, 14, 0, -0.12, 0.52), [0.9, 0.9, 0.89]], [CY(0.112, 0.112, 0.012, 14, 0, -0.17, 0.52), [0.6, 0.6, 0.6]]]; // pendant + housing + trim ring
+      o.push([P(new THREE.SphereGeometry(0.098, 14, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), MX(0, -0.172, 0.52)), [0.05, 0.055, 0.06]]); // smoked bubble
+      return o; };
+    const strap = () => [[BX(0.05, 1.2, 0.02, -0.18, 0, 0), [0.1, 0.1, 0.1]], [BX(0.05, 1.2, 0.02, 0.18, 0, 0), [0.1, 0.1, 0.1]], [BX(0.5, 0.05, 0.02, 0, 0.42, -0.005), [0.1, 0.1, 0.1]], [BX(0.5, 0.05, 0.02, 0, -0.42, -0.005), [0.1, 0.1, 0.1]],
+      ...[[-0.18, 0.42], [0.18, 0.42], [-0.18, -0.42], [0.18, -0.42]].map(([x, y]) => [CY(0.012, 0.012, 0.03, 6, x, y, -0.02, Math.PI / 2), [0.55, 0.55, 0.53]])]; // channel straps + bolts (behind the backplate)
+    K('aps', apsMod(), null, 45);
+    K('vcam', vcam(), null, 140);
+    K('dome', dome(), null, 140);
+    K('hstrap', strap(), null, 80, 0, { cast: false });
+    K('lens', unitDisc(), null, 150, 0, { mat: 'glass', cast: false });
+    K('pbk', unitQuad(), null, 120, 0, { mat: 'sign', cast: false });
+    K('pdec', unitQuad(), null, 45, 0, { mat: 'paint', cast: false });
+    for (const g of ['pwX', 'phX', 'pwZ', 'phZ']) K(g, unitQuad(), null, 130, 0, { mat: g, cast: false });
+    stat.sigMasts = 0; stat.sigPedPoles = 0; stat.pedHeads = 0; stat.vcams = 0; stat.domes = 0; stat.buttons = 0; stat.vehHeads = 0; stat.decals = 0;
+    const sr = mulberry(4417);
+    const RY = (ry, v) => V3(v.x * Math.cos(ry) + v.z * Math.sin(ry), v.y, -v.x * Math.sin(ry) + v.z * Math.cos(ry));
+    const basisAt = (o, right, up, n, w, h, d = 1) => { const m = new THREE.Matrix4().makeBasis(right.clone().multiplyScalar(w), up.clone().multiplyScalar(h), n.clone().multiplyScalar(d)); m.setPosition(o); return m; };
+    const DIM_W = [0.32, 0.33, 0.34], DIM_H = [0.42, 0.2, 0.06]; // unlit LED pixel tints (diffuse); the lit state is the material's emissive
+    const pedHead = (base, ry, lp, ln) => { // lp: head centre (local), ln: face normal (local)
+      const c = base.clone().add(RY(ry, lp)), n = RY(ry, ln), right = new THREE.Vector3().crossVectors(UP, n).normalize();
+      const ax = Math.abs(n.x) > 0.5 ? 'X' : 'Z';
+      for (const [dx, ras, kind, dim] of [[-0.08, rasHand, 'ph' + ax, DIM_H], [0.085, rasWalk, 'pw' + ax, DIM_W]]) {
+        const o = c.clone().addScaledVector(right, dx).addScaledVector(UP, 0.03).addScaledVector(n, 0.1215);
+        push('pbk', o.x, o.z, basisAt(o, right, UP, n, 0.16, 0.18), [0.018, 0.018, 0.02]);
+        print(ras, o, UP, n, 0.15, 0.1625, kind, 0.002, () => dim);
+      }
+      stat.pedHeads++;
+    };
+    const button = (base, ry, ln, pr) => { // legend on the instruction plate + speaker / LED module above it
+      const n = RY(ry, ln), right = new THREE.Vector3().crossVectors(UP, n).normalize();
+      const o = base.clone().add(V3(0, 1.08 + 0.25, 0)).addScaledVector(n, pr + 0.0125);
+      plate(o, UP, n, 0.16, 0.24, [0.92, 0.92, 0.9], 'rect', false); print(rasBtn, o, UP, n, 0.16, 0.24, 'txtS', 0.004);
+      const om = base.clone().add(V3(0, 1.08 + 0.48, 0)).addScaledVector(n, pr - 0.004);
+      push('aps', om.x, om.z, basisAt(om, right, UP, n, 1, 1)); stat.buttons++;
+    };
+    const decals = (base, rOf, y0, y1, nSt, rusty) => { // stickers / rust / tape on a round pole; rOf(y) = pole radius at height y (local)
+      const add = (a, y, w, h, c) => { const r0 = rOf(y); const n = V3(Math.sin(a), 0, Math.cos(a)); const right = new THREE.Vector3().crossVectors(UP, n);
+        const o = base.clone().add(V3(0, y, 0)).addScaledVector(n, r0 + w * w / (8 * r0) + 0.0025); push('pdec', o.x, o.z, basisAt(o, right, UP, n, w, h), c); stat.decals++; };
+      const STK = [[0.92, 0.92, 0.9], [0.95, 0.8, 0.12], [0.75, 0.1, 0.1], [0.12, 0.3, 0.7], [0.08, 0.08, 0.08], [0.2, 0.6, 0.35], [0.95, 0.5, 0.65]];
+      for (let k = 0; k < nSt; k++) { const a = sr() * 6.283, y = y0 + sr() * (y1 - y0), w = Math.min(0.075, 0.035 + sr() * 0.05), h = 0.03 + sr() * 0.07; const c = STK[Math.floor(sr() * STK.length)];
+        add(a, y, w, h, c.map((v) => v * (0.75 + sr() * 0.2))); // faded sticker
+        if (sr() < 0.6) add(a, y + (sr() - 0.5) * h * 0.4, w * 0.7, h * 0.18, c[0] + c[1] + c[2] > 1.5 ? [0.1, 0.1, 0.1] : [0.9, 0.9, 0.88]); // printed line
+        if (sr() < 0.3) add(a + 0.05, y - h * 0.5 - 0.01, w * 0.85, 0.012, [0.7, 0.68, 0.62]); } // torn residue
+      if (rusty) for (let k = 0; k < 4; k++) { const a = sr() * 6.283, h = 0.25 + sr() * 0.45; add(a, 0.32 + h / 2, 0.022 + sr() * 0.02, h, [0.3 + sr() * 0.08, 0.14 + sr() * 0.04, 0.06]); } // rust runs above the base skirt
+      { const a = sr() * 6.283; add(a, 0.33, 0.05, 0.03, [0.28, 0.13, 0.05]); add(a + 1.6, 0.34, 0.04, 0.025, [0.34, 0.16, 0.06]); } // pitting at the skirt seam
+    };
+    for (const it of city.inters) {
+      if (!isl(it.z) || it.x < -30 || it.x > 300) continue;
+      for (const [sx, sz] of [[1, 1], [-1, -1]]) { const px = it.x + sx * 8.2, pz = it.z + sz * 8.2;
+        if (!col.query(px, pz, 0.5, box).some((b) => b.tag === 'pole' && b.h === 6 && Math.abs((b.minX + b.maxX) / 2 - px) < 0.05 && Math.abs((b.minZ + b.maxZ) / 2 - pz) < 0.05)) continue;
+        const ry = sx > 0 ? 0 : Math.PI, base = V3(px, 0.15, pz); stat.sigMasts++;
+        pedHead(base, ry, V3(-0.36, 3.0, 0), V3(-1, 0, 0)); pedHead(base, ry, V3(0, 3.0, -0.36), V3(0, 0, -1));
+        button(base, ry, V3(-1, 0, 0), 0.14); button(base, ry, V3(0, 0, -1), 0.14);
+        for (const d of [3, 6.5]) { const hc = base.clone().add(RY(ry, V3(-d, 5.7, 0))), n = RY(ry, V3(0, 0, 1)), right = new THREE.Vector3().crossVectors(UP, n);
+          const lo = hc.clone().addScaledVector(n, 0.1595); push('lens', lo.x, lo.z, basisAt(lo, right, UP, n, 0.236, 0.236), [0.3, 0.15, 0.02]); // amber lens (unlit)
+          const so = hc.clone().addScaledVector(n, -0.165); push('hstrap', so.x, so.z, basisAt(so, right, UP, n, 1, 1)); stat.vehHeads++; }
+        { const o = base.clone().add(RY(ry, V3(-1.55, 6.3 - 0.06, 0))), n = RY(ry, V3(0, 0, 1)), right = new THREE.Vector3().crossVectors(UP, n); // video detection camera under the arm, aimed at the approach
+          push('vcam', o.x, o.z, basisAt(o, right, UP, n, 1, 1)); stat.vcams++; }
+        if ((Math.round(it.x / 10) + Math.round(it.z / 150) + (sx > 0 ? 0 : 1)) % 2 === 0) { // PTZ dome on every other mast, on the intersection side, + plate
+          const n = RY(ry, V3(-Math.SQRT1_2, 0, -Math.SQRT1_2)), right = new THREE.Vector3().crossVectors(UP, n); const rr = 0.155 - 0.045 * (5.6 / 6.6);
+          const o = base.clone().add(V3(0, 5.6, 0)).addScaledVector(n, rr); push('dome', o.x, o.z, basisAt(o, right, UP, n, 1, 1)); stat.domes++;
+          const pn = RY(ry, V3(0, 0, 1)), po = base.clone().add(V3(0, 2.45, 0)).addScaledVector(pn, 0.15 + 0.01);
+          plate(po, UP, pn, 0.44, 0.3, lin(BLUE)); print(rasCam, po, UP, pn, 0.44, 0.3, 'txtS', 0.005); }
+        decals(base, (y) => 0.155 - 0.045 * Math.min(1, y / 6.6), 1.2, 2.3, 3 + Math.floor(sr() * 3), true);
+      }
+      for (const [sx, sz] of [[1, -1], [-1, 1]]) { const px = it.x + sx * 8.0, pz = it.z + sz * 8.0;
+        if (!col.query(px, pz, 0.5, box).some((b) => b.tag === 'pole' && b.h === 3.4 && Math.abs((b.minX + b.maxX) / 2 - px) < 0.05 && Math.abs((b.minZ + b.maxZ) / 2 - pz) < 0.05)) continue;
+        const ry = sx > 0 ? 0 : Math.PI, base = V3(px, 0.15, pz); stat.sigPedPoles++;
+        pedHead(base, ry, V3(-0.3, 2.85, 0), V3(-1, 0, 0)); pedHead(base, ry, V3(0, 2.85, 0.3), V3(0, 0, 1));
+        button(base, ry, V3(-1, 0, 0), 0.07); button(base, ry, V3(0, 0, 1), 0.07);
+        decals(base, (y) => 0.075 - 0.01 * Math.min(1, y / 3.4), 1.25, 2.2, 2 + Math.floor(sr() * 3), sr() < 0.5);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ meshes + streaming ----
   const mats = {
     m: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0.45 }), 'fabCar'),
@@ -396,6 +510,11 @@ export function buildSignage(scene, city) {
     lit: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.35, metalness: 0.0, emissive: 0xfff4e2, emissiveIntensity: 0.0 }), 'fabCar'),
     sign: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.05 }), 'fabCar'),
     paint: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.62, metalness: 0.0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), 'fabCar'),
+    // a_streetnames: pedestrian-signal LED pictograms; lit state = emissive (uniform), phase-driven in update()
+    pwX: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.4, metalness: 0.0, emissive: 0xe9f3ff, emissiveIntensity: 0.0 }), 'fabCar'),
+    pwZ: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.4, metalness: 0.0, emissive: 0xe9f3ff, emissiveIntensity: 0.0 }), 'fabCar'),
+    phX: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.4, metalness: 0.0, emissive: 0xff6a10, emissiveIntensity: 0.0 }), 'fabCar'),
+    phZ: prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.4, metalness: 0.0, emissive: 0xff6a10, emissiveIntensity: 0.0 }), 'fabCar'),
   };
   const CELL = 40; const out = { kinds: [], stat, stops, gantries, nameposts, last: new THREE.Vector3(1e9, 0, 1e9) };
   for (const k of kinds.values()) {
@@ -407,8 +526,10 @@ export function buildSignage(scene, city) {
     out.kinds.push(k);
   }
   const _c = new THREE.Color(); const _sph = new THREE.Sphere();
-  out.update = (cam, night = 0, force = false) => {
+  out.update = (cam, night = 0, force = false, phase = 0) => {
     mats.lit.emissiveIntensity = 0.04 + night * 0.85;
+    { const on = 1.1 + night * 0.9; // traffic phase 0 = NS green (crossing along z walks), 1 = EW green (crossing along x walks), 2 = all red
+      mats.pwX.emissiveIntensity = phase === 1 ? on : 0; mats.phX.emissiveIntensity = phase === 1 ? 0 : on; mats.pwZ.emissiveIntensity = phase === 0 ? on : 0; mats.phZ.emissiveIntensity = phase === 0 ? 0 : on; }
     if (!force && Math.abs(cam.x - out.last.x) < 8 && Math.abs(cam.z - out.last.z) < 8) return; out.last.set(cam.x, 0, cam.z);
     for (const k of out.kinds) {
       let nN = 0, nF = 0; const R = k.rF, rr = k.rN * k.rN, RR = R * R;
@@ -426,6 +547,10 @@ export function buildSignage(scene, city) {
   };
   out.info = () => { let dc = 0, t = 0, inst = 0; const per = {}; for (const k of out.kinds) for (const im of [k.nearIM, k.farIM]) { if (!im || !im.count) continue; dc++; const tt = im.count * tris(im.geometry); t += tt; inst += im.count; per[k.name + (im === k.farIM ? '_far' : '')] = [im.count, Math.round(tt)]; } return { drawCalls: dc, tris: Math.round(t), instances: inst, per }; };
   out.totals = () => { const o = {}; for (const k of out.kinds) o[k.name] = [k.items.length, tris(k.near), k.far ? tris(k.far) : 0]; return o; };
+  // a_streetnames: every printed street name on map A, for tests (blades from street.js, posts + gantries + bus routes from here)
+  out.streetNames = () => ({ blades: BLADE_LOG.map((b) => ({ ...b })), posts: nameposts.map(([x, z, ix, iz, ns, ew]) => ({ x, z, ix, iz, ns, ew })),
+    gantries: gantries.map(([x, z, road, d, ix, iz, straight, cross, only]) => ({ x, z, road, d, ix, iz, straight, cross, only })),
+    routes: Object.fromEntries([50, 170, 290].map((c) => [c, c === 290 ? '海潮环线' : NS_NAME[c] + '线'])) });
   out.buildMs = Math.round(performance.now() - t0); city.signage = out;
   return out;
 }

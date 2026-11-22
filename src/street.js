@@ -9,12 +9,20 @@ import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
+import { NS_NAME, NS_PY, EW_NAME, EW_PY } from './maps/gta/streetnames.js';
 import { furnMat, PB, parkingMeter, litterBin, bollard, coverAtlas, coverQuad } from './streetkit.js';
 
 const RH = LAYOUT.roadHW;
 const STREETS_Z = ['北滨路', '珊瑚街', '鹈鹕路', '海葡萄街', '第五大道', '棕榈巷', '日落街', '灯塔路', '贝壳街']; // EW roads by index
+export const BLADE_NAMES = [], BLADE_LOG = []; // a_streetnames: map A atlas blade texts by cell (read back by tests through city.signage.streetNames())
 const STREETS_X = ['湾景路', '红树林大道', '火烈鸟街', '海潮大道', '金融大道', '港湾路', '运河街', '商业街', '中央大道'];
 
+// a_streetnames: map A blade cells read the shared table (EW roads at cells 0..4 by LAYOUT.islandEW index, NS at 9..11 by
+// LAYOUT.islandNS index — the same indices buildStreet's zIdx / xIdx pick). Fills names in place, returns cell -> pinyin.
+function bladeNamesA(names) {
+  const py = new Map(); LAYOUT.islandEW.forEach((z, i) => { if (EW_NAME[z]) { names[i] = EW_NAME[z]; py.set(i, EW_PY[z]); } }); LAYOUT.islandNS.forEach((x, i) => { if (NS_NAME[x]) { names[9 + i] = NS_NAME[x]; py.set(9 + i, NS_PY[x]); } });
+  BLADE_NAMES.length = 0; BLADE_NAMES.push(...names); return py;
+}
 function signAtlas() {
   // 8x4 cells of 128px: generic road signs (original drawings)
   const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const g = c.getContext('2d');
@@ -43,7 +51,12 @@ function signAtlas() {
   ads.forEach(([t, bg, fg], k) => cell(8 + k, () => { const gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, bg); gr.addColorStop(1, '#000'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); g.fillStyle = fg; g.globalAlpha = 0.25; g.beginPath(); g.arc(90, 40, 34, 0, 7); g.fill(); g.globalAlpha = 1; txt(t, 64, 84, t.length > 6 ? 15 : 20, fg); }));
   // 16..31 street-name blades: 2 per row-cell pair (256x64 each, green)
   const names = [...STREETS_Z, ...STREETS_X].slice(0, 16);
-  names.forEach((n, k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; g.fillStyle = '#16703f'; g.fillRect(x, y, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, 248, 56); g.fillStyle = '#fff'; g.font = 'bold 34px "Noto Sans CJK SC","PingFang SC",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, x + 128, y + 33); });
+  if (!CYBER) { // a_streetnames: map A blades read the shared table (cell = layout index: EW k 0..4, NS k 9..11), pinyin under the name
+    const py = bladeNamesA(names);
+    names.forEach((n, k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; g.fillStyle = '#16703f'; g.fillRect(x, y, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, 248, 56); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const p = py.get(k); g.font = `bold ${p ? 30 : 34}px "WenQuanYi Zen Hei","Noto Sans CJK SC","PingFang SC",sans-serif`; const w = g.measureText(n).width; if (w > 232) g.font = `bold ${Math.floor((p ? 30 : 34) * 232 / w)}px "WenQuanYi Zen Hei","Noto Sans CJK SC","PingFang SC",sans-serif`; g.fillText(n, x + 128, y + (p ? 26 : 33));
+      if (p) { g.font = 'bold 12px "DejaVu Sans", Arial, sans-serif'; g.fillText(p, x + 128, y + 50); } });
+  } else names.forEach((n, k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; g.fillStyle = '#16703f'; g.fillRect(x, y, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, 248, 56); g.fillStyle = '#fff'; g.font = 'bold 34px "Noto Sans CJK SC","PingFang SC",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, x + 128, y + 33); });
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.generateMipmaps = true;
   return t;
 }
@@ -140,6 +153,7 @@ export function buildStreet(scene, city) {
   }
 
   // ---------------- signs: street-name blades at signal poles, speed / crossing / parking signs along segments
+  if (!CYBER) bladeNamesA([...STREETS_Z, ...STREETS_X].slice(0, 16)); BLADE_LOG.length = 0;
   const zIdx = (z) => Math.max(0, LAYOUT.islandEW.indexOf(z) >= 0 ? LAYOUT.islandEW.indexOf(z) : LAYOUT.mainEW.indexOf(z)) % 9;
   const xIdx = (x) => { const i = LAYOUT.islandNS.indexOf(x); return i >= 0 ? i : 4 + Math.max(0, LAYOUT.mainNS.indexOf(x)); };
   const bladeUV = (k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; return [x / 1024, 1 - (y + 64) / 512, (x + 256) / 1024, 1 - y / 512]; };
@@ -147,6 +161,7 @@ export function buildStreet(scene, city) {
     for (const [sx, sz] of [[1, 1], [-1, -1]]) {
       const px = it.x + sx * (RH + 1.2), pz = it.z + sz * (RH + 1.2);
       const kz = Math.min(15, zIdx(it.z)), kx = Math.min(15, 9 + (xIdx(it.x) % 7));
+      if (!CYBER) BLADE_LOG.push({ x: +px.toFixed(2), z: +pz.toFixed(2), ix: it.x, iz: it.z, ew: BLADE_NAMES[kz], ns: BLADE_NAMES[kx] }); // a_streetnames: read back by tests
       let [u0, v0, u1, v1] = bladeUV(kz); signFace(u0, v0, u1, v1, px - sx * 0.9, 4.7, pz, 0, 1.6, 0.4); signFace(u0, v0, u1, v1, px - sx * 0.9, 4.7, pz, Math.PI, 1.6, 0.4);
       [u0, v0, u1, v1] = bladeUV(kx); signFace(u0, v0, u1, v1, px, 5.15, pz - sz * 0.9, Math.PI / 2, 1.6, 0.4); signFace(u0, v0, u1, v1, px, 5.15, pz - sz * 0.9, -Math.PI / 2, 1.6, 0.4);
     }
