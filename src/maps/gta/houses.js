@@ -150,7 +150,7 @@ function buildHouse(K, i) {
   const D = K.H[i]; const LT = D.LT; ensureIdx(K, LT.house[0], LT.house[2]); const H = LT.house, look = D.look; const S = [], F = [], S1 = [], F1 = [], FS = [], cols = [], why = {}; let tS = S, tF = F; const near = (on) => { tS = on ? S1 : S; tF = on ? F1 : F; }; const seed = H[11]; const r = (k) => hh(seed, k); // lod 1 (near(true)): only within NEAR m
   const C = [H[0], H[2]], w = H[3], h = H[4], d = H[5], ang = H[6]; const [U, V] = axes(ang); const wall = [H[7], H[8], H[9]]; const sub = D.sub || 0;
   const trim = look === 1 && sub === 1 ? TRIM[2] : look === 1 && sub === 2 ? [0.20, 0.17, 0.15] : TRIM[look]; // a_housepolish: 牧场 sub 1 white trim, sub 2 dark bronze
-  const own = H; const quad = LT.quad; const mine = [];
+  const own = H; const quad = LT.quad; const mine = []; let porch = null;
   const refuse = (k) => { why[k] = (why[k] || 0) + 1; return null; };
   const tryPlace = (R, opt = {}, tag = '') => { const b = blocked(K, R, { own, quad, mine, ...opt }); if (b) return refuse(tag + ':' + b); mine.push(R); return R; };
   // front face: the one the driveway leads to (outward normal closest to the street)
@@ -207,9 +207,10 @@ function buildHouse(K, i) {
   if (td !== null) { const dc = DOORS[Math.floor(r(9) * DOORS.length)];
     const fw = dw < 1.2 ? 1.86 : dw + 0.32; bx(tF, td, 0.03, 0.18, fw, 2.38, 0.06, trim, 7); bx(tF, td, 0.06, 0.2, dw, 2.15, 0.08, dc, 13);
     if (dw < 1.2) { near(true); for (const sg of [-1, 1]) bx(tF, td + sg * (dw / 2 + 0.235), 0.05, 0.3, 0.37, 1.95, 0.07, [0.10, 0.12, 0.14], 7); near(false); } // sidelights
-    const plC = look === 3 ? [0.9, 0.9, 0.88] : [0.08, 0.08, 0.09]; let plaque = false; // placed above the door unless a canopy takes it
+    const plC = look === 3 ? [0.9, 0.9, 0.88] : [0.08, 0.08, 0.09]; let plaque = false; let porchT = null; // placed above the door unless a canopy takes it
     { const tl = Math.abs(td + sgd * 1.62) < Lf - 0.15 ? td + sgd * 1.62 : Math.abs(td - sgd * 1.62) < Lf - 0.15 && (tg === null || Math.abs(td - sgd * 1.62 - tg) > gw / 2 + 0.3) ? td - sgd * 1.62 : null; // lantern on the wall gap past the cell
-      if (tl !== null) { near(true); bx(tF, tl, 0.12, 1.78, 0.18, 0.34, 0.16, [0.12, 0.11, 0.10], 7); near(false); } }
+      if (tl !== null) { if (PORCH_OFF || !porchLit(K, i)) { near(true); bx(tF, tl, 0.12, 1.78, 0.18, 0.34, 0.16, [0.12, 0.11, 0.10], 7); near(false); }
+        else { porchT = tl; bx(tF, tl, 0.015, 1.75, 0.13, 0.34, 0.03, LMET, 7); bx(tF, tl, 0.11, 1.79, 0.15, 0.25, 0.14, LGLASS, 16); bx(tF, tl, 0.11, 2.04, 0.19, 0.045, 0.17, LMET, 7); } } } // a_porchlamp: lit = plate + self-lit lens (kind 16) + cap, far tier (to RAD)
     let pd = look === 2 ? 2.0 : look === 0 ? 1.7 : 1.4; let Rp = null;
     for (const dd of [pd, 1.1]) { const R = rect(td, dd / 2 + 0.2, pw, dd + 0.4); if (!blocked(K, R, { own, quad, mine, pave: false })) { Rp = R; pd = dd; break; } }
     if (!Rp) { refuse('porch'); near(true); bx(tF, td, 0.05, 2.62, 0.44, 0.16, 0.04, plC, 11); near(false); } else { mine.push(Rp);
@@ -220,7 +221,9 @@ function buildHouse(K, i) {
         bx(tS, td, (pd + 0.15) / 2, cy, pw + 0.3, 0.2, pd + 0.15, look === 0 ? mul(wall, 0.97) : trim, 7);
         if (R0 && look !== 3) bx(tS, td, (pd + 0.15) / 2, cy + 0.2, pw + 0.4, 0.22, pd + 0.3, [R0[7] * 0.95, R0[8] * 0.95, R0[9] * 0.95], 7);
         near(true); bx(tF, td, pd + 0.17, cy + 0.02, 0.44, 0.16, 0.04, plC, 11); near(false); }
-      if (!plaque) { near(true); bx(tF, td, 0.05, 2.62, 0.44, 0.16, 0.04, plC, 11); near(false); plaque = true; }
+      if (!plaque) { near(true); bx(tF, td, 0.05, 2.62, 0.44, 0.16, 0.04, plC, 11); near(false); plaque = true; } }
+    if (porchT !== null) { const q = P(porchT + Math.sign(td - porchT) * 0.7, 1.15); porch = [q[0], q[1], 4.6, 4.6, fa, Rp ? 0.19 : 0.075]; } // a_porchlamp: pool on the porch slab / walk
+    if (Rp) {
       // front walk: from the step to the driveway edge (L-free: straight along the face)
       if (tg !== null && Y) { const tEdge = tg + sgd * (Y[2] / 2 - 0.05); const tFrom = td - sgd * 0.0; const L = Math.abs(tFrom - tEdge); const o = pd + 0.37 + 0.55;
         if (L > 0.6) { const Rw = rect((tFrom + tEdge) / 2, o, L, 0.9); if (!blocked(K, Rw, { own, quad, mine: [], pave: true, deck: false })) { near(true); bx(tF, (tFrom + tEdge) / 2, o, 0, L, 0.035, 0.9, [0.82, 0.80, 0.76], 7); near(false); } else refuse('walkpath'); } } } }
@@ -286,7 +289,7 @@ function buildHouse(K, i) {
         else { const p = cp(sa * hl, 0); cols.push({ x: p[0], z: p[1], a: da, hl: 0.05, hw, h: ht, k: 'cage' }); } }
       if (doorOnB) { for (const s2 of [-1, 1]) cb(tS, s2 * 0.5, doorS * hw, 0, 0.1, ht, 0.1, CAGE); cb(tS, 0, doorS * hw, 2.1, 1.0, 0.08, 0.08, CAGE); }
       else { for (const s2 of [-1, 1]) cb(tS, doorS * hl, s2 * 0.5, 0, 0.1, ht, 0.1, CAGE); cb(tS, doorS * hl, 0, 2.1, 0.08, 0.08, 1.0, CAGE); } } }
-  return pack(S, S1, F, F1, FS, cols, why);
+  const out = pack(S, S1, F, F1, FS, cols, why); out.porch = porch; return out;
 }
 
 // ---------------------------------------------------------------- colliders (lazy per 32 m house cell) ----
@@ -344,7 +347,7 @@ export function updateHouses(K, cam) { if (!K || !K.mesh) return; const p = cam 
   const n0 = n; for (const [dd, b] of list) { let q = n; if (!put(b.S)) break; seg(q, b, 0); if (dd < NEAR) { q = n; put(b.S1); seg(q, b, 1); } } cnt[0] = n - n0;
   const n1 = n; for (const [dd, b] of list) { let q = n; if (!put(b.F)) break; seg(q, b, 0); if (dd < NEAR) { q = n; put(b.F1); seg(q, b, 1); } } cnt[1] = n - n1;
   const n2 = n; for (const [, b] of list) { const q = n; if (!put(b.FS)) break; seg(q, b, 0); } cnt[2] = n - n2;
-  K.segs = segs; fadeHouses(K, p, true);
+  K.segs = segs; fadeHouses(K, p, true); if (!PORCH_OFF) { K.porchB = []; for (const [, b] of list) if (b.porch) K.porchB.push(b.porch); porchPools(K); } // a_porchlamp
   m.count = n; m.userData.n = cnt; m.instanceMatrix.clearUpdateRanges(); m.instanceMatrix.addUpdateRange(0, n * 16); m.instanceMatrix.needsUpdate = true;
   m.instanceColor.clearUpdateRanges(); m.instanceColor.addUpdateRange(0, n * 3); m.instanceColor.needsUpdate = true; const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(0, n * 2); ga.needsUpdate = true; m.visible = n > 0;
   K.info = { houses: near.length, boxes: n, casters: cnt[0], fine: cnt[1], screens: cnt[2], tris: n * 12, built: K.built.size, ms: +(performance.now() - T0).toFixed(2) };
@@ -353,12 +356,12 @@ export function updateHouses(K, cam) { if (!K || !K.mesh) return; const p = cam 
 // &houseaudit: build every house now and count what was placed / refused, and check every kit box against the paving / buildings
 export function auditHouses(K) { if (!K) return null; const T0 = performance.now(); const R = { houses: K.H.length, looks: K.stats.looks, items: {}, refused: {}, boxesS: 0, boxesF: 0, maxBoxes: 0, colOnWalk: 0, colOnPave: 0, colOnBody: 0, colOnTrunk: 0, colOutLot: 0 };
   for (let i = 0; i < K.H.length; i++) { const b = buildHouse(K, i); const n = (b.S.length + b.S1.length + b.F.length + b.F1.length + b.FS.length) / NF; R.boxesS += (b.S.length + b.S1.length) / NF; R.boxesF += (b.F.length + b.F1.length + b.FS.length) / NF; R.boxesFar = (R.boxesFar || 0) + (b.S.length + b.F.length + b.FS.length) / NF; if (n > R.maxBoxes) R.maxBoxes = n;
-    for (const k in b.why) R.refused[k] = (R.refused[k] || 0) + b.why[k];
+    for (const k in b.why) R.refused[k] = (R.refused[k] || 0) + b.why[k]; if (b.porch) R.porchLit = (R.porchLit || 0) + 1;
     const own = K.H[i].LT.house, quad = K.H[i].LT.quad;
     for (const c of b.cols) { R.items[c.k] = (R.items[c.k] || 0) + 1; const Rc = { x: c.x, z: c.z, a: c.a, hl: c.hl, hw: c.hw }; if (rectOnWalk(K, { ...Rc, hl: Rc.hl - 0.1, hw: Math.max(0.01, Rc.hw - 0.1) })) R.colOnWalk++;
       if (K.pave.near(...ext(Rc), (P) => obbOverlap(Rc, P, 0))) R.colOnPave++; if (K.bodies.near(...ext(Rc, 0.5), (B) => B.rec !== own && obbOverlap(Rc, B, -0.01))) R.colOnBody++;
       if (K.trunks.near(...ext(Rc, 0.5), (t) => circRect(t.x, t.z, t.r, Rc))) R.colOnTrunk++; if (c.k !== 'mailbox') for (const [x, z] of corners(Rc)) if (!inPoly(quad, x, z)) { R.colOutLot++; break; } } }
-  R.avgBoxes = +((R.boxesS + R.boxesF) / K.H.length).toFixed(1); R.avgFar = +(R.boxesFar / K.H.length).toFixed(1); R.ms = Math.round(performance.now() - T0); return R; }
+  R.lights = prepLights(K) && K.lightStats; R.avgBoxes = +((R.boxesS + R.boxesF) / K.H.length).toFixed(1); R.avgFar = +(R.boxesFar / K.H.length).toFixed(1); R.ms = Math.round(performance.now() - T0); return R; }
 
 // ---------------------------------------------------------------- a_nightfix: house night lights ----
 // Garage-side wall lantern on the front face of every house that has a garage door (same spot rule as buildHouse: driveway end
@@ -371,6 +374,14 @@ export function auditHouses(K) { if (!K) return null; const T0 = performance.now
 // within LR at night only -> +2 draw calls near the houses at night, 0 shader programs, no colliders (wall-mounted; dock posts 0.12 m).
 // ?oldanight2 (and ?oldanight): not built.
 const NIGHT2_OFF = Q.has('oldanight2') || Q.has('oldanight');
+// a_porchlamp: entry-door lantern lit at night (kit kind 16 + a small pool) and garage lanterns in three styles. ?oldporch -> a_nightfix.
+const PORCH_OFF = NIGHT2_OFF || Q.has('oldporch');
+// the draws, made once in K.H order: mulberry(7421) three per house exactly as a_nightfix drew them (same values, same order), and a
+// separate stream mulberry(7431) two per house (porch lantern on/off, garage lantern style); no other stream is touched
+function lightDraws(K) { if (K._ld) return K._ld; const n = K.H.length, a = mulberry(7421), b = mulberry(7431); const u = new Float64Array(n * 3), v = new Float64Array(n * 2);
+  for (let k = 0; k < n * 3; k++) u[k] = a(); for (let k = 0; k < n * 2; k++) v[k] = b(); return (K._ld = { u, v }); }
+// same household, same habit: the porch lantern is on for 85 % of the houses whose garage lantern draw is on, 30 % of the others
+function porchLit(K, i) { const { u, v } = lightDraws(K); return u[i * 3] < 0.55 ? v[i * 2] < 0.85 : v[i * 2] < 0.3; }
 const LR = 200, LRD = 60, LCAP = 1600, PCAP = 480, LBX = 8; // per light: 2-3 boxes; record: x, z, lit, nBoxes, box[4][LBX], pool [x, z, sx, sz, a, y]
 const LGLASS = [1.55, 1.24, 0.86], LOFF = [0.30, 0.29, 0.27], LMET = [0.10, 0.09, 0.08];
 function frontFrame(LT) { const H = LT.house, C = [H[0], H[2]], w = H[3], d = H[5]; const [U, V] = axes(H[6]); const Y = LT.yard; let nIn = null, E = null;
@@ -385,9 +396,47 @@ function frontFrame(LT) { const H = LT.house, C = [H[0], H[2]], w = H[3], d = H[
 function gapSnap(seed, Pw, Nw, Tw, t0, ok) { const ft = [-Nw[1], Nw[0]], tf = Tw[0] * ft[0] + Tw[1] * ft[1]; if (Math.abs(tf) < 0.5) return null;
   const fu = (t) => { const p = Pw(t); return p[0] * ft[0] + p[1] * ft[1] + Math.fround(seed) * 37; }; const f0 = fu(t0); const base = t0 + (3.4 * Math.round(f0 / 3.4) - f0) / tf; let best = null;
   for (const k of [0, 1, -1, 2, -2]) { const t = base + k * 3.4 / tf; if (ok(t) && (best === null || Math.abs(t - t0) < Math.abs(best - t0))) best = t; } return best; }
-function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { garage: 0, garageLit: 0, garageOver: 0, rear: 0, rearLit: 0, dock: 0, dockLit: 0 };
+// a_porchlamp: garage lanterns in three styles, picked per house (v2 of mulberry(7431)) among the ones that fit:
+//  over  - over the header band (needs eave room): one centred coach lantern, or (40 % of these, the rest of the same draw)
+//          a pair at +-0.3 door widths                                                                             weight 0.35
+//  twin  - a pair flanking the door, 0.27-0.95 m past the trim on each side                                 weight 0.40
+//  wall  - one lantern on the nearest painted window gap beside the door (away side first, then door side)  weight 0.25
+// a wall-mounted lantern (0.19 m wide, 1.77-2.13 m up) must sit in a painted window gap with room for its width (gap half-width by
+// look: louvred shutters 0.125 m, accordion shutters 0.55 m, plain 0.6 m around fu = 0 mod 3.4, same cells as fabBody), stay 0.37 m
+// inside the wall end (downspout), clear of the garage trim, and clear of every spot the entry door can take in buildHouse (its
+// unsnapped spot and each snap candidate, since the porch test that picks between them needs the full lot index): door frame,
+// both possible entry-lantern spots (+0.5 m), and a low canopy (cap under 2.2 m).
+function garageStyles(K, D, H, LT, seed, P, N, T, Lf, tg, gw, s, u1, v2, S, lantern, add) {
+  const look = D.look, sub = D.sub || 0, h = H[4], gh = h > 5 ? 2.3 : 2.15; const R0 = LT.roof && !LT.roof.gone ? LT.roof : null, Rb = LT.roof;
+  const fa = Math.atan2(-T[1], T[0]); const top = R0 ? R0[1] - 0.22 : h - 0.05;
+  const ft = [-N[1], N[0]], tf = T[0] * ft[0] + T[1] * ft[1]; if (Math.abs(tf) < 0.5) return;
+  const fu = (t) => { const p = P(t, 0); return p[0] * ft[0] + p[1] * ft[1] + Math.fround(seed) * 37; };
+  const ghalf = look === 2 || (look === 1 && sub === 1) ? 0.125 : look === 1 && sub === 0 ? 0.55 : 0.6;
+  const inGap = (t) => { const f = fu(t); return Math.abs(f - 3.4 * Math.round(f / 3.4)) <= ghalf; };
+  // entry door spots (buildHouse: sgd, dw, pw, td, snap candidates)
+  const sgd = -s, dw = look === 0 && hh(seed, 8) < 0.45 ? 1.65 : 0.95, pw = dw + 1.5, fw = dw < 1.2 ? 1.86 : dw + 0.32; const busy = [];
+  let td0 = tg + sgd * (gw / 2 + 0.9 + pw / 2); if (Math.abs(td0) > Lf - pw / 2 - 0.15) td0 = sgd * (Lf - pw / 2 - 0.15); if (Math.abs(td0 - tg) < gw / 2 + pw / 2 + 0.3) td0 = null;
+  if (td0 !== null) { const TD = [td0]; const f0 = fu(td0), base = td0 + (3.4 * Math.round((f0 - 1.7) / 3.4) + 1.7 - f0) / tf;
+    for (const k of [0, 1, -1]) { const t2 = base + k * 3.4 / tf; if (Math.abs(t2) > Lf - pw / 2 - 0.15) continue; if (Math.abs(t2 - tg) < gw / 2 + pw / 2 + 0.3 || Math.sign(t2 - tg) !== sgd) continue; TD.push(t2); }
+    const cy = Math.min(2.75, Rb ? Rb[1] - 0.66 : h - 0.35);
+    for (const td of TD) { busy.push([td - fw / 2 - 0.03, td + fw / 2 + 0.03]); const tl = Math.abs(td + sgd * 1.62) < Lf - 0.15 ? td + sgd * 1.62 : Math.abs(td - sgd * 1.62) < Lf - 0.15 && Math.abs(td - sgd * 1.62 - tg) > gw / 2 + 0.3 ? td - sgd * 1.62 : null; if (tl !== null) busy.push([tl - 0.45, tl + 0.45]); if (cy < 2.2) busy.push([td - pw / 2 - 0.2, td + pw / 2 + 0.2]); } }
+  const okAt = (t, side) => Math.abs(t) <= Lf - 0.37 && side * (t - tg) >= gw / 2 + 0.27 && inGap(t) && !busy.some(([a, b]) => t + 0.15 > a && t - 0.15 < b);
+  // twin: first spot outward from the trim on each side
+  const twinAt = (side) => { for (let d = gw / 2 + 0.27; d <= gw / 2 + 0.95 + 1e-6; d += 0.02) { const t = tg + side * d; if (okAt(t, side)) return t; } return null; };
+  const tA = twinAt(s), tB = twinAt(-s); const twin = tA !== null && tB !== null;
+  // wall: nearest painted-gap centre (as a_nightfix's gapSnap), away side first, door side second
+  let wall = null, wallSide = 0; for (const side of [s, -s]) { const t = gapSnap(seed, (t) => P(t, 0), N, T, tg + side * (gw / 2 + 0.42), (t) => side * (t - tg) <= gw / 2 + 3.2 && okAt(t, side)); if (t !== null) { wall = t; wallSide = side; break; } }
+  const over = top >= gh + 0.52 + 0.33;
+  const opts = []; if (over) opts.push(['over', 0.35]); if (twin) opts.push(['twin', 0.40]); if (wall !== null) opts.push(['wall', 0.25]); if (!opts.length) return;
+  let tw = 0; for (const o of opts) tw += o[1]; let x = v2 * tw, pick = opts[opts.length - 1][0]; let rx = 0.5; for (const o of opts) { if (x < o[1]) { pick = o[0]; rx = x / o[1]; break; } x -= o[1]; }
+  const lit = u1 < 0.55; S.garage++; if (lit) S.garageLit++; if (twin && wall !== null && over) S.garageBoth++;
+  if (pick === 'over' && rx < 0.4) { S.garageOver2++; const p = P(tg, 0), q = P(tg, 1.45), dx = gw * 0.3; add(p[0], p[1], lit, lantern(tg - dx, 0.07, 1, gh + 0.54, lit, fa).concat(lantern(tg + dx, 0.07, 1, gh + 0.54, lit, fa)), lit ? [q[0], q[1], 7.4, 6.6, fa, 0.075] : null); }
+  else if (pick === 'over') { S.garageOver++; const p = P(tg, 0), q = P(tg, 1.45); add(p[0], p[1], lit, lantern(tg, 0.07, 1, gh + 0.54, lit, fa), lit ? [q[0], q[1], 6.4, 6.4, fa, 0.075] : null); }
+  else if (pick === 'twin') { S.garageTwin++; const p = P(tg, 0), q = P(tg, 1.45); add(p[0], p[1], lit, lantern(tA, 0, 1, 1.84, lit, fa).concat(lantern(tB, 0, 1, 1.84, lit, fa)), lit ? [q[0], q[1], 7.4, 6.6, fa, 0.075] : null); }
+  else { S.garageWall++; if (wallSide !== s) S.garageWallDoor++; const p = P(wall, 0), q = P(wall - wallSide * 0.5, 1.45); add(p[0], p[1], lit, lantern(wall, 0, 1, 1.84, lit, fa), lit ? [q[0], q[1], 6.4, 6.4, fa, 0.075] : null); } }
+function prepLights(K) { const { u: UD, v: VD } = lightDraws(K); const L = []; const S = { garage: 0, garageLit: 0, garageOver: 0, garageOver2: 0, garageTwin: 0, garageWall: 0, garageWallDoor: 0, garageBoth: 0, rear: 0, rearLit: 0, dock: 0, dockLit: 0, porchLitDraw: 0 };
   const grid = new Grid(64);
-  for (const D of K.H) { const u1 = rnd(), u2 = rnd(), u3 = rnd(); const LT = D.LT, H = LT.house; if (!H || H.gone) continue; const seed = H[11]; const F = frontFrame(LT); if (!F) continue;
+  for (let hi = 0; hi < K.H.length; hi++) { const D = K.H[hi]; const u1 = UD[hi * 3], u2 = UD[hi * 3 + 1], u3 = UD[hi * 3 + 2], v2 = VD[hi * 2 + 1]; if (!PORCH_OFF && porchLit(K, hi)) S.porchLitDraw++; const LT = D.LT, H = LT.house; if (!H || H.gone) continue; const seed = H[11]; const F = frontFrame(LT); if (!F) continue;
     const { C, N, T, Df, Lf, fa, E } = F; const P = (t, o) => [C[0] + T[0] * t + N[0] * (Df + o), C[1] + T[1] * t + N[1] * (Df + o)];
     // lantern on a wall: o = outward offset of the wall plane from the front plane (0 front, -2 Df back), og = +1 front / -1 back
     const lantern = (t, ow, og, y, lit, yaw) => { const B = []; const bx = (o, y0, st, sy, so, c, kind) => { const p = P(t, ow + og * o); B.push([p[0], y0, p[1], st, sy, so, yaw, c, kind]); };
@@ -397,10 +446,12 @@ function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { g
     if (E) { const et = (E[0] - C[0]) * T[0] + (E[1] - C[1]) * T[1], eo = (E[0] - C[0]) * N[0] + (E[1] - C[1]) * N[1] - Df; const gw = hh(seed, 5) < 0.3 ? 2.9 : 2.6;
       if (Math.abs(eo) < 1.2 && Math.abs(et) <= Lf - 0.4) { const tg = Math.max(-Lf + gw / 2 + 0.25, Math.min(Lf - gw / 2 - 0.25, et)); const s = Math.sign(tg || 1); const ts = tg + s * (gw / 2 + 0.42);
         const tsn = gapSnap(seed, (t) => P(t, 0), N, T, ts, (t) => Math.abs(t) <= Lf - 0.4 && s * (t - tg) >= gw / 2 + 0.3 && s * (t - tg) <= gw / 2 + 3.2);
+        if (!PORCH_OFF) { garageStyles(K, D, H, LT, seed, P, N, T, Lf, tg, gw, s, u1, v2, S, lantern, add); }
+        else {
         // no free wall gap beside the door (garage close to the corner): a coach lantern centred over the header band if the eave leaves room
         const gh = H[4] > 5 ? 2.3 : 2.15, R0 = LT.roof && !LT.roof.gone ? LT.roof : null, top = R0 ? R0[1] - 0.22 : H[4] - 0.05, over = tsn === null && top >= gh + 0.52 + 0.33;
         if (tsn !== null || over) { const ts = tsn !== null ? tsn : tg; const lit = u1 < 0.55; S.garage++; if (lit) S.garageLit++; if (over) S.garageOver++; const p = P(ts, 0); const q = P(tsn !== null ? ts - s * 0.5 : ts, 1.45);
-          add(p[0], p[1], lit, lantern(ts, over ? 0.07 : 0, 1, over ? gh + 0.54 : 1.84, lit, fa), lit ? [q[0], q[1], 6.4, 6.4, fa, 0.075] : null); } } }
+          add(p[0], p[1], lit, lantern(ts, over ? 0.07 : 0, 1, over ? gh + 0.54 : 1.84, lit, fa), lit ? [q[0], q[1], 6.4, 6.4, fa, 0.075] : null); } } } }
     if (LT.canal) { // back-wall (lanai) lantern facing the canal
       const tr0 = (hh(seed, 63) - 0.5) * Math.max(0, Lf - 0.9) * 1.6; const tr = gapSnap(seed, (t) => P(t, -2 * Df), [-N[0], -N[1]], T, tr0, (t) => Math.abs(t) <= Lf - 0.8);
       if (tr !== null) { const lit = u2 < 0.6; S.rear++; if (lit) S.rearLit++; const p = P(tr, -2 * Df); const q = P(tr, -2 * Df - 1.6);
@@ -429,4 +480,10 @@ function updateLights(K, p) { const NL = K.NL, fm = NL.fm, pm = NL.pm; const nig
     return false; });
   fm.count = n; fm.visible = n > 0; if (n) { fm.instanceMatrix.needsUpdate = true; fm.instanceColor.needsUpdate = true; fm.geometry.attributes.aK.needsUpdate = true; fm.computeBoundingSphere(); }
   pm.count = np; pm.visible = night && np > 0; if (np) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); }
-  NL.info = { lights: nl, boxes: n, pools: np, tris: n * 12 + np * 2 }; }
+  NL.info = { lights: nl, boxes: n, pools: np, tris: n * 12 + np * 2 }; NL.np0 = np; if (!PORCH_OFF) porchPools(K); }
+// a_porchlamp: the lit entry lanterns' pools ride after the a_nightfix pools in the same instanced mesh (same object, same program),
+// for the houses the kit holds (within RAD); rewritten when the kit refills (every 2.5 m) or the a_nightfix pools do
+function porchPools(K) { const NL = K.NL; if (!NL || !NL.pm || NL.np0 === undefined) return; const pm = NL.pm, PM = pm.instanceMatrix.array; const night = U.uNight.value > 0.03; const n0 = NL.np0; let np = n0;
+  if (night && K.porchB) for (const q of K.porchB) { if (np >= PCAP) break; const c = Math.cos(q[4]), s = Math.sin(q[4]), j = np * 16; PM.fill(0, j, j + 16); PM[j] = c * q[2]; PM[j + 2] = -s * q[2]; PM[j + 5] = 1; PM[j + 8] = s * q[3]; PM[j + 10] = c * q[3]; PM[j + 12] = q[0]; PM[j + 13] = q[5]; PM[j + 14] = q[1]; PM[j + 15] = 1; np++; }
+  pm.count = np; pm.visible = night && np > 0; if (np > n0) { pm.instanceMatrix.clearUpdateRanges(); pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); }
+  if (NL.info) NL.info.porch = np - n0; }
