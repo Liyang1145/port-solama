@@ -395,8 +395,9 @@ export function attachStrip(K, scene) { if (!K) return null; const { box: G, bod
   // Ferris wheel's bulb rings (static). One instanced mesh on the fabric street-lamp pool material (same fabGlow program, its own
   // instance colour is unused: the material colour * per-instance scale of the unit flat; colour per kind rides in the matrix
   // scale y, which the flat ignores) -> +1 draw call at night, 0 programs. ?oldanight: not created.
-  { const { flat: GF, glow: GM } = fabKit(); if (!OLD_ANIGHT && GF && GM) { K.wheelY = K.wheelY || 0; const PC = 1024; const pm = new THREE.InstancedMesh(GF, GM, PC); pm.renderOrder = 2; pm.frustumCulled = false; pm.castShadow = false; pm.receiveShadow = false;
-      pm.count = 0; pm.visible = false; pm.userData.n = -1; scene.add(pm); K.pm = pm; } }
+  { const { flat: GF, glow: GM } = fabKit(); if (!OLD_ANIGHT && GF && GM) { K.wheelY = K.wheelY || 0;
+      const mk = (cap) => { const m = new THREE.InstancedMesh(GF, GM, cap); m.renderOrder = 2; m.castShadow = false; m.receiveShadow = false; m.count = 0; m.visible = false; scene.add(m); return m; };
+      K.pm = mk(256); K.pm.userData.at = null; K.pw = mk(WHEEL.length); } }
   K.last = null; K.lastT = null; K.info = { units: 0, boxes: 0, tris: 0, rects: 0 }; K.stats.attachMs = Math.round(performance.now() - T0); return K; }
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attributes.aK.array, sg = K.segs; let lo = 1e9, hi = -1; K.lastF = [p.x, p.z];
@@ -406,15 +407,21 @@ function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attri
 // a_nightcheck: lot pools 22 m under each lot pole (both heads); the wheel: an ellipse along its rim plane (bulb rings, ~3 m above the
 // sand at the bottom) plus a tighter pool at the boarding deck. The fabGlow falloff reads the unit flat's position.xz, so the instance
 // scale only sizes / stretches a pool; every pool shares the fabric lamp colour (FAB_GLOW).
-const LOT_D = 22, WHEEL = [[0, 0, 34, 15], [0, -3.4, 12, 9]];
-function nightPools(K) { const pm = K.pm, L = K.lotPools, n = Math.min(L.length / 3 + WHEEL.length, pm.instanceMatrix.count); pm.visible = U.uNight.value > 0.03 && n > 0;
-  if (pm.userData.n === n) return; pm.userData.n = n; const A = pm.instanceMatrix.array; let k = 0;
-  const put = (x, z, a, sx, sz, y = 0.07) => { const c = Math.cos(a), s = Math.sin(a), j = k * 16; A.fill(0, j, j + 16); A[j] = c * sx; A[j + 2] = -s * sx; A[j + 5] = 1; A[j + 8] = s * sz; A[j + 10] = c * sz; A[j + 12] = x; A[j + 13] = y; A[j + 14] = z; A[j + 15] = 1; k++; };
-  const w = POI.wheel; for (const [dx, dz, sx, sz] of WHEEL) put(w.x + dx, w.z + dz, 0, sx, sz, K.wheelY + 0.06);
-  for (let i = 0; i + 2 < L.length && k < n; i += 3) put(L[i], L[i + 1], L[i + 2], LOT_D, LOT_D);
-  pm.count = k; pm.instanceMatrix.needsUpdate = true; }
+const LOT_D = 22, WHEEL = [[0, 0, 36, 22], [0, -3.4, 12, 10]];
+// both meshes keep frustum culling (bounding sphere of what they hold): the lot mesh holds only the pools within LOT_R of the
+// camera (refilled every 25 m moved), so away from the strips it is empty / hidden and no view draws (or compiles) it for nothing.
+const LOT_R = 420;
+function putPool(A, k, x, z, a, sx, sz, y) { const c = Math.cos(a), s = Math.sin(a), j = k * 16; A.fill(0, j, j + 16); A[j] = c * sx; A[j + 2] = -s * sx; A[j + 5] = 1; A[j + 8] = s * sz; A[j + 10] = c * sz; A[j + 12] = x; A[j + 13] = y; A[j + 14] = z; A[j + 15] = 1; }
+function nightPools(K, p) { const night = U.uNight.value > 0.03, pw = K.pw, pm = K.pm;
+  if (pw.count === 0) { const w = POI.wheel; WHEEL.forEach(([dx, dz, sx, sz], k) => putPool(pw.instanceMatrix.array, k, w.x + dx, w.z + dz, 0, sx, sz, K.wheelY + 0.16)); /* clears the sand ripple */
+    pw.count = WHEEL.length; pw.instanceMatrix.needsUpdate = true; pw.computeBoundingSphere(); }
+  pw.visible = night;
+  const L = K.lotPools, at = pm.userData.at; if (!at || at[2] !== L.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length]; let k = 0; const A = pm.instanceMatrix.array;
+    for (let i = 0; i + 2 < L.length && k < 256; i += 3) if (Math.hypot(L[i] - p.x, L[i + 1] - p.z) < LOT_R) putPool(A, k++, L[i], L[i + 1], L[i + 2], LOT_D, LOT_D, 0.07);
+    pm.count = k; if (k) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); } }
+  pm.visible = night && pm.count > 0; }
 export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh, tm = K.tmesh;
-  if (K.pm) nightPools(K);
+  if (K.pm) nightPools(K, p);
   if ((m.userData.warm & 3) !== 3) return;
   if (p.y > 140) { if (m.visible) { m.visible = false; tm.visible = false; K.last = null; K.lastT = null; } return; }
   // text decals: signs inside their own radius; a_stripfix: over the last TFADE m each rect drops out at its own hashed threshold
