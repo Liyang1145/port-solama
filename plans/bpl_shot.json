@@ -1,0 +1,10 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&nowater",
+ "reset": false,
+ "shots": [
+  {
+   "name": "palmloop",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(178,15,0); __G.step(3); g.player.root.visible=false; __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); __G.streamSync(); const PE=g.peds, city=g.city; let b=null,bd=1e9; for(const q of PE.loops){ if(q.area!=='island') continue; const d=Math.hypot((q.x0+q.x1)/2-178,(q.z0+q.z1)/2-15); if(d<bd){bd=d;b=q;} } for(const c of [...PE.list]) PE.remove(c); const sv={paths:PE.paths,reg:city.region}; PE.paths=[]; city.region=null; const P0={x:b.x0+2,z:b.z0+40}; let t=0; while(PE.list.length<40&&t++<900) PE.spawn(P0,3,60); PE.paths=sv.paths; city.region=sv.reg; for(const c of PE.list) c.ai.wait=0; const c=__G.camera; c.far=160; const cam={p:[b.x0+4.0,1.75,b.z0+22],t:[b.x0+1.6,1.3,b.z0+48]}; for(let k=0;k<4;k++){ __G.streamSync(); __G.step(2); g.player.root.visible=false; c.position.set(...cam.p); c.lookAt(...cam.t); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.neon.update(__G.U.uNight.value,0); } 0"
+  }
+ ]
+}

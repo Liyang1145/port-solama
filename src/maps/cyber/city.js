@@ -15,6 +15,8 @@ import { neonGlowMat, neonReflMat } from './neontube.js';
 import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
+import { pedLoop, addPropCols, lanePoint } from './pedlane.js';
+const Q_NOPALM = typeof location !== 'undefined' && /[?&]nopalmloop\b/.test(location.search); // test switch: old loops, no prop colliders
 // r6.2: streamed parcels are built with a stub collider (stream.js nullCol); the hand-built Deco core uses the real grid
 const streamed = (ctx) => !(ctx.col instanceof ColliderGrid);
 
@@ -250,7 +252,10 @@ export function buildCity(scene, mats, T) {
   };
   const bedH = (x, z) => { if (inCore(x, z)) return 0; if (wild.inside(x, z)) return wild.H(x, z); if (onBeach(x, z)) return Math.max(beachH(x, z), -6); return landAt(x, z) ? 0 : L.waterY - 3; }; // water shader bed (bridges ignored)
   const junctions = graph.nodes.filter((n) => n.deg >= 3);
-  return { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild, viaduct };
+  const out = { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild, viaduct };
+  // r6.x b_palmloop: pedestrian lanes of the Deco block loops (off the palm / tree pits) + colliders for uncollided sidewalk props
+  if (!Q_NOPALM) { out.pedLoop = (b) => pedLoop(out, b); out.pedInit = () => addPropCols(out); out.lanePoint = lanePoint; }
+  return out;
 }
 
 function roadQuad(rd, s) {

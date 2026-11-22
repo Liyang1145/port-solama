@@ -395,6 +395,7 @@ const _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _wf = new THREE.Vect
 export class Pedestrians {
   constructor(scene, city) {
     this.scene = scene; this.city = city; this.list = []; this.loops = city.blocks.filter((b) => b.area !== 'promenade' || true);
+    if (city.pedInit) city.pedInit(); // map 霓港 (b_palmloop): loop lanes off the palm / tree pits + colliders for bare sidewalk props
     // r6.0 (from v4.4, map 霓港): sidewalk paths along every road-graph edge (both sides), as polylines in the sidewalk middle
     this.paths = [];
     if (city.graph) for (const e of city.graph.edges) {
@@ -441,12 +442,14 @@ export class Pedestrians {
       // sidewalk loop rectangle (inset from the curb)
       const x0 = b.x0 + sw, x1 = b.x1 - sw, z0 = b.z0 + sw, z1 = b.z1 - sw;
       const per = 2 * (x1 - x0 + z1 - z0); const u = rng() * per;
-      const p = this.loopPoint(x0, z0, x1, z1, u);
+      let p = this.loopPoint(x0, z0, x1, z1, u);
       const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
       if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
+      // 霓港 (b_palmloop): same accept / reject as the old rectangle (keeps the rng stream), then stand on the lane
+      let LN = null; if (this.city.pedLoop) { LN = this.city.pedLoop(b); p = this.city.lanePoint(LN, u * LN.per / per); }
       const c = new Character(this.scene, pick(kinds));
       c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
-      c.ai = { mode: 'walk', loop: [x0, z0, x1, z1, per], u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.3 ? rand(15, 90) : 0 }; // 30 % loiter (idle, chatting, waiting)
+      c.ai = { mode: 'walk', loop: LN ? [LN.x0, LN.z0, LN.x1, LN.z1, LN.per, LN, [x0, z0, x1, z1, per]] : [x0, z0, x1, z1, per], u: LN ? u * LN.per / per : u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.3 ? rand(15, 90) : 0 }; // 30 % loiter (idle, chatting, waiting)
       this.list.push(c); return c;
     }
     return null;
@@ -469,12 +472,15 @@ export class Pedestrians {
         else {
           a.u += a.dir * a.speed * dt; let p, p2;
           if (a.path) { if (a.u > a.path.L - 0.5 || a.u < 0.5) { a.dir *= -1; a.u = Math.max(0.5, Math.min(a.path.L - 0.5, a.u)); } p = this.pathPoint(a.path, a.u); p2 = this.pathPoint(a.path, a.u + a.dir * 0.8); }
+          else if (a.loop[5]) { const LN = a.loop[5]; p = this.city.lanePoint(LN, a.u); p2 = this.city.lanePoint(LN, a.u + a.dir * 0.8); }
           else { const [x0, z0, x1, z1] = a.loop; p = this.loopPoint(x0, z0, x1, z1, a.u); p2 = this.loopPoint(x0, z0, x1, z1, a.u + a.dir * 0.8); }
           const nx = p.x, nz = p.z; const yawT = Math.atan2(p2.x - p.x, p2.z - p.z);
           c.yaw += angWrap(yawT - c.yaw) * (1 - Math.exp(-8 * dt));
           // avoid obstacles: if blocked, pause briefly and turn back
           const r = this.city.col.resolve(nx, nz, 0.35, 0.5);
-          c.pos.x = r.x; c.pos.z = r.z; if (r.hit && rng() < 0.02) a.dir *= -1;
+          c.pos.x = r.x; c.pos.z = r.z; let hit = r.hit;
+          if (!a.path && a.loop[6]) { const o = a.loop[6], q = this.loopPoint(o[0], o[1], o[2], o[3], a.u * o[4] / a.loop[4]); hit = this.city.col.resolve(q.x, q.z, 0.35, 0.5).hit; } // 霓港 lane: draw rng as the old rectangle would (shared stream)
+          if (hit && rng() < 0.02) a.dir *= -1;
           sp = a.speed; if (rng() < 0.0015) a.wait = rand(1, 4);
         }
       } else if (a.mode === 'line') {
@@ -498,7 +504,7 @@ export class Pedestrians {
       c.setLocomotion(sp, dt); c.update(dt);
     }
   }
-  nearestU(loop, p) { const [x0, z0, x1, z1] = loop; let best = 0, bd = 1e9; const per = 2 * (x1 - x0 + z1 - z0); for (let u = 0; u < per; u += 2) { const q = this.loopPoint(x0, z0, x1, z1, u); const d = (q.x - p.x) ** 2 + (q.z - p.z) ** 2; if (d < bd) { bd = d; best = u; } } return best; }
+  nearestU(loop, p) { const [x0, z0, x1, z1] = loop; let best = 0, bd = 1e9; const per = 2 * (x1 - x0 + z1 - z0); for (let u = 0; u < per; u += 2) { const q = loop[5] ? this.city.lanePoint(loop[5], u) : this.loopPoint(x0, z0, x1, z1, u); const d = (q.x - p.x) ** 2 + (q.z - p.z) ** 2; if (d < bd) { bd = d; best = u; } } return best; }
   panic(from, radius = 40) { for (const c of this.list) { if (c.dead) continue; if (c.pos.distanceTo(from) < radius) { c.ai.mode = 'flee'; c.ai.from = from.clone(); c.ai.t = 0; } } }
   remove(c) { const i = this.list.indexOf(c); if (i >= 0) this.list.splice(i, 1); c.dispose(); }
 }
