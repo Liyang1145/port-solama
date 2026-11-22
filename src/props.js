@@ -405,6 +405,7 @@ export function buildFurniture(scene, city, G = {}) {
   const T = (x, y, z, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1));
   const umbCols = [[0.95, 0.95, 0.92], [0.9, 0.35, 0.4], [0.2, 0.55, 0.6], [0.95, 0.75, 0.45], [0.3, 0.3, 0.32]];
   const parking = [];
+  const binQ = []; // a_edgewalls: [x, z, ry] of the litter bins (GLB or cylinder), boxed after every layer (maps/gta/edgewalls.js)
   // café sets in front of the Tideline hotels (x 276..279), skipping intersections
   for (const b of city.blocks) {
     if (b.area !== 'island' || b.x1 < 280 || b.x0 < 170) continue;
@@ -429,13 +430,14 @@ export function buildFurniture(scene, city, G = {}) {
     if (!CYBER) { fb.geom(BG.wood, T(x, 0.15, z), { aPbr: PB.wood }, [0.55, 0.40, 0.28]); fb.geom(BG.iron, T(x, 0.15, z), { aPbr: PB.paint }, [0.06, 0.09, 0.08]); } // r6.3 PBR bench (weathered teak, painted cast iron)
     else { add(BG.wood, T(x, 0.15, z), [0.58, 0.42, 0.29]); add(BG.iron, T(x, 0.15, z), [0.12, 0.13, 0.13]); }
     city.col.add(x - 0.35, z - 0.95, x + 0.35, z + 0.95, 1, 'bench');
+    if (!CYBER) binQ.push([x, z + 3, Math.PI / 2]); // a_edgewalls: promenade bin beside the bench had no box
     if (G.ph_bin) PH.bin.push(TR(x, 0.15, z + 3, Math.PI / 2)); else { const bin = new THREE.CylinderGeometry(0.28, 0.25, 0.95, 10); add(bin, T(x, 0.62, z + 3), [0.15, 0.3, 0.25]); }
   }
   for (const it of city.inters) {
     if (it.x < -160) continue;
     const hx = it.x + 7 + 1.0, hz = it.z + 7 + 2.5; // hydrant on one corner
     const bx = it.x - 7 - 1.0, bz = it.z - 7 - 3.0;
-    if (fA && G.ph_hydrant) { const ry = r() * 6.28; stampLod(fA, hydrantA(), TR(hx, 0.15, hz, ry), 0.15); PH.bin.push(TR(bx, 0.15, bz, r() * 6.28)); // a_props: procedural Florida hydrant (same rng draws)
+    if (fA && G.ph_hydrant) { const ry = r() * 6.28; stampLod(fA, hydrantA(), TR(hx, 0.15, hz, ry), 0.15); { const ry = r() * 6.28; PH.bin.push(TR(bx, 0.15, bz, ry)); binQ.push([bx, bz, ry]); } // a_edgewalls: corner bin box (same draw); a_props: procedural Florida hydrant (same rng draws)
       city.col.add(hx - 0.18, hz - 0.18, hx + 0.18, hz + 0.18, 0.8, 'hyd');
       const rx = it.x + 7 + 1.2, rz = it.z - 7 - 3.2 - 0.85; // recycling bin beside street.js' corner litter bin (same occupancy rule it uses)
       if (it.x > -200 && !occ(rx, rz + 0.85, 1.0) && !occ(rx, rz, 1.0)) { stampLod(fA, recycleBinA(), TR(rx, 0.15, rz, Math.PI / 2), 0.15); city.col.add(rx - 0.25, rz - 0.28, rx + 0.25, rz + 0.28, 1.0, 'rbin'); }
@@ -461,6 +463,9 @@ export function buildFurniture(scene, city, G = {}) {
   }
   const mesh = new THREE.Mesh(g.build(), M.vcolCloth); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
   if (fb.vc) { const fm = new THREE.Mesh(fb.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); }
+  if (!CYBER && binQ.length) { let hx = 0.3, hz = 0.3, hy = 1.1; // a_edgewalls: GLB footprint (as instGLB places it), else the 0.28 m cylinder
+    if (G.ph_bin) { const bb = new THREE.Box3().setFromObject(G.ph_bin.scene); hx = (bb.max.x - bb.min.x) / 2; hz = (bb.max.z - bb.min.z) / 2; hy = bb.max.y - bb.min.y + 0.15; }
+    for (const [x, z, ry] of binQ) (city.clutAdd = city.clutAdd || []).push({ k: 'bin', x, z, ang: ry, hl: hx, hw: hz, h: hy }); }
   instGLB(scene, G.ph_hydrant, PH.hyd, 'hyd'); instGLB(scene, G.ph_bin, PH.bin, 'bin'); instGLB(scene, G.ph_cafe, PH.cafe, 'cafe');
   city.parking = parking;
 }

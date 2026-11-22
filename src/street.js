@@ -9,6 +9,7 @@ import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
+import { EDGE_OFF } from './maps/gta/edgewalls.js'; // a_edgewalls
 import { NS_NAME, NS_PY, EW_NAME, EW_PY } from './maps/gta/streetnames.js';
 import { furnMat, PB, parkingMeter, litterBin, bollard, coverAtlas, coverQuad } from './streetkit.js';
 
@@ -218,7 +219,8 @@ export function buildStreet(scene, city) {
     }
     // bins (green island / black downtown)
     const tx = it.x + (RH + 1.2), tz = it.z - (RH + 3.2);
-    if (!occupied(tx, tz, 1.0)) { if (!CYBER) stamp3(litterBin(island ? [0.10, 0.26, 0.17] : [0.08, 0.085, 0.09]), T(tx, 0.15, tz, r() * 6.28)); else { const bin = new THREE.CylinderGeometry(0.3, 0.27, 0.95, 10); add(bin, T(tx, 0.62, tz), island ? [0.14, 0.32, 0.22] : [0.12, 0.12, 0.13]); const lid = new THREE.CylinderGeometry(0.32, 0.32, 0.06, 10); add(lid, T(tx, 1.12, tz), [0.1, 0.1, 0.1]); } }
+    if (!occupied(tx, tz, 1.0)) { if (!CYBER) { stamp3(litterBin(island ? [0.10, 0.26, 0.17] : [0.08, 0.085, 0.09]), T(tx, 0.15, tz, r() * 6.28)); (city.clutAdd = city.clutAdd || []).push({ k: 'bin', x: tx, z: tz, ang: 0, hl: 0.31, hw: 0.31, h: 1.1 }); } // a_edgewalls: litter bin had no box (applied after every layer, edgewalls.js)
+      else { const bin = new THREE.CylinderGeometry(0.3, 0.27, 0.95, 10); add(bin, T(tx, 0.62, tz), island ? [0.14, 0.32, 0.22] : [0.12, 0.12, 0.13]); const lid = new THREE.CylinderGeometry(0.32, 0.32, 0.06, 10); add(lid, T(tx, 1.12, tz), [0.1, 0.1, 0.1]); } }
     // r6.3 sidewalk utility lids (telecom / water) near the corner
     if (!CYBER && r() < 0.6) { const lx = it.x - (RH + 1.4), lz = it.z - (RH + 2.0 + r() * 3); if (city.groundH(lx, lz) > 0.1) covers(3, 0.62, 0.9, T(lx, 0.152, lz, r() < 0.5 ? 0 : Math.PI / 2)); }
   }
@@ -228,7 +230,9 @@ export function buildStreet(scene, city) {
     for (let z = s.a0 + 13.4; z < s.a1 - 10; z += 6.8) { const x = 282.3; if (occupied(x, z, 0.8)) continue;
       if (!CYBER) { // r6.3 smart meters: twin heads on a yoke every other bay (one per parking space), painted housings, galvanised posts
         if (mk++ % 2 === 1) continue; const body = [[0.10, 0.12, 0.16], [0.13, 0.13, 0.14], [0.08, 0.2, 0.16]][Math.floor(r() * 3)];
-        stamp3(parkingMeter(true, body), T(x, 0.15, z + 3.4, Math.PI / 2)); city.col.add(x - 0.12, z + 3.0, x + 0.12, z + 3.8, 1.5, 'meter'); continue; }
+        let zm = z + 3.4; if (!EDGE_OFF) { // a_edgewalls: the occupancy test above looks at z, the meter stands at z + 3.4: off a lamp / tree / palm there, slide along the kerb (no rng draw)
+          const busy = (q) => occupied(x, q, 0.55); if (busy(zm)) for (const dz of [1.0, -1.0, 1.6, -1.6]) if (!busy(z + 3.4 + dz)) { zm = z + 3.4 + dz; break; } }
+        stamp3(parkingMeter(true, body), T(x, 0.15, zm, Math.PI / 2)); city.col.add(x - 0.12, zm - 0.4, x + 0.12, zm + 0.4, 1.5, 'meter'); continue; }
       const p = new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6); add(p, T(x, 0.15 + 0.55, z), [0.3, 0.3, 0.32]); const hd = new THREE.CylinderGeometry(0.1, 0.1, 0.26, 14); hd.scale(1, 1, 0.75); add(hd, T(x, 0.15 + 1.22, z), [0.25, 0.27, 0.3]);
       const dome = new THREE.SphereGeometry(0.1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2); dome.scale(1, 0.8, 0.75); add(dome, T(x, 0.15 + 1.35, z), [0.25, 0.27, 0.3]);
       const win = new THREE.CylinderGeometry(0.07, 0.07, 0.02, 12); win.rotateZ(Math.PI / 2); add(win, T(x - 0.07, 0.15 + 1.3, z), [0.55, 0.62, 0.62]);
@@ -236,7 +240,7 @@ export function buildStreet(scene, city) {
   }
   // bollards at the promenade crossings
   for (const z of LAYOUT.islandEW) for (let k = -3; k <= 3; k++) { const x = 299.4, zz = z + k * 1.6 ; if (Math.abs(k) < 1) continue;
-    if (!CYBER) { stamp3(bollard(), T(x, city.groundH(x, zz), zz, r() * 6.28)); continue; }
+    if (!CYBER) { stamp3(bollard(), T(x, city.groundH(x, zz), zz, r() * 6.28)); (city.clutAdd = city.clutAdd || []).push({ k: 'bollard', x, z: zz, ang: 0, hl: 0.11, hw: 0.11, h: 1.0 }); continue; } // a_edgewalls: box (edgewalls.js)
     const b = new THREE.CylinderGeometry(0.11, 0.12, 0.9, 8); add(b, T(x, 0.6, zz), [0.92, 0.92, 0.9]); }
   // r6.3 tree grates around the sidewalk street trees
   if (!CYBER) for (const t of city.trees) if (t.street && city.groundH(t.x, t.z) > 0.1) covers(1, 1.3, 1.3, T(t.x, city.groundH(t.x, t.z) + 0.004, t.z));

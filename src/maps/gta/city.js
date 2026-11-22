@@ -10,6 +10,8 @@ import { planFabric, attachFabric, updateFabric, inCanal, inCanalWater } from '.
 import { fixFabricProps } from './propfix.js';
 import { fixFabricCars } from './parkfix.js';
 import { curbPass } from './curbfix.js'; // a_curbalign
+import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } from './edgewalls.js'; // a_edgewalls (after curbfix / propfix / parkfix: their bake inputs are unchanged)
+const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -172,7 +174,7 @@ export function buildCity(scene, mats, T) {
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.fabStats = attachFabric(fab, scene, M); }; // a_canaledge: fabric props off the water before their instances are made
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.fabStats = attachFabric(fab, scene, M); }; // a_canaledge: fabric props off the water before their instances are made
     region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
@@ -231,7 +233,7 @@ export function buildCity(scene, mats, T) {
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
     return blockAt(x, z) ? 0.15 : 0;
   };
-  return { detail: DS, fabric: fab, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
+  return { detail: DS, fabric: fab, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, clutAdd: bld.clutAdd || [] }; // a_edgewalls: clutAdd = boxes queued for kerb clutter (edgewalls.js)
 }
 
 function roadQuad(rd, s) {
@@ -779,7 +781,7 @@ function districtEdges(ctx, deco) {
         _m4.makeRotationFromEuler(new THREE.Euler(rand(0, 6), rand(0, 6), rand(0, 6))).scale(new THREE.Vector3(s2 * 1.2, s2 * 0.7, s2)).setPosition(xw - rand(0.8, 3.2), L.waterY + rand(-0.6, 0.3), z);
         v.geom(rock, _m4, {}, [c, c * 0.97, c * 0.9]); }
       const bol = new THREE.CylinderGeometry(0.16, 0.2, 0.5, 10); const cap = new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-      for (let z = -L.islandZ[1] + 10; z < L.islandZ[1]; z += 16) { if (Math.abs(z) < RH + 4) continue; _m4.makeTranslation(xw + 1.0, 0.4, z); v.geom(bol, _m4, {}, [0.12, 0.13, 0.14]); _m4.makeTranslation(xw + 1.0, 0.65, z); v.geom(cap, _m4, {}, [0.12, 0.13, 0.14]); }
+      for (let z0 = -L.islandZ[1] + 10; z0 < L.islandZ[1]; z0 += 16) { if (Math.abs(z0) < RH + 4) continue; let z = z0; if (!EDGE_OFF) { const c = L.islandEW.find((e) => Math.abs(z0 - e) < RH + 1); if (c !== undefined) z = c + (z0 >= c ? 1 : -1) * (RH + 1.5); } /* a_edgewalls: the row also stood in the cross-street ends at the seawall -> slid onto the sidewalk */ _m4.makeTranslation(xw + 1.0, 0.4, z); v.geom(bol, _m4, {}, [0.12, 0.13, 0.14]); (ctx.clutAdd = ctx.clutAdd || []).push({ k: 'swbol', x: xw + 1.0, z, ang: 0, hl: 0.18, hw: 0.18, h: 0.85 }); /* a_edgewalls: cast-iron seawall bollard had no box */ _m4.makeTranslation(xw + 1.0, 0.65, z); v.geom(cap, _m4, {}, [0.12, 0.13, 0.14]); }
     }
     // jetty: rubble mound of boulders, concrete deck, rails, end lamp
     const zj = zE + sg * 6, x0 = L.beachX[0] + 38, x1 = L.beachX[1] + 45; // r5.0: jetty root starts past the dry sand so the beach walk continues

@@ -12,6 +12,7 @@ import { buildSignage } from './maps/gta/signage.js';
 import { buildBacklot } from './maps/gta/backlot.js';
 import { applyColliderFits } from './maps/gta/colfix.js';
 import { applyCurbColliders } from './maps/gta/curbfix.js';
+import { attachStreetColliders } from './maps/gta/edgewalls.js'; // a_edgewalls
 import { fixCityProps } from './maps/gta/propfix.js';
 import { fixStreetParking, attachParkedColliders } from './maps/gta/parkfix.js';
 import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
@@ -94,6 +95,7 @@ async function load() {
   if (!CYBER) city.parkFix = fixStreetParking(city); // a_parking: 海潮大道 kerb-lane slots: face the lane's traffic, clear of crosswalks / signals / hydrants / bus stops (after every layer)
   if (!CYBER) city.curbCol = applyCurbColliders(city); // a_curbalign: boxes of the houses moved / yard walls cut off the streets (after every layer is placed)
   if (!CYBER) applyColliderFits(city); // a_lane8fix: swap oversized / misplaced / orphan colliders for their visible footprint (after every layer is placed)
+  if (!CYBER) city.edgeCol = attachStreetColliders(city); // a_edgewalls: fabric street-light / street-tree trunks (own fine grid) + fitted boxes for the island kerb clutter that had none (after every layer)
   if (!CYBER) city.parkCol = attachParkedColliders(city); // a_parkcol: oriented boxes for the ~23k mainland parked cars (own fine grid, appended to col.query)
   if (CYBER) neon = buildNeon(scene, city);
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });

@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mulberry } from '../../util.js';
+import { EDGE_OFF } from './edgewalls.js'; // a_edgewalls
 import { prep } from '../../mats.js';
 import { hydrantA, parkingMeter } from '../../streetkit.js';
 import { newsBox, cabinet } from '../../detail.js';
@@ -276,7 +277,7 @@ export function buildPromenade(scene, city) {
   for (const b of col.boxes) { if (b.tag !== 'upole') continue; const x = (b.minX + b.maxX) / 2, z = (b.minZ + b.maxZ) / 2; if (x < -22 || x > 335 || !isl(z)) continue;
     // which road is the pole on: NS (x near 50/170) or EW (z near a cross street); +z local faces away from the road
     const ns = STREETS.find((c) => Math.abs(Math.abs(x - c) - 7.45) < 0.3); if (ns === undefined) continue; const ry = x > ns ? Math.PI / 2 : -Math.PI / 2; // NS avenues only
-    const gx = x + Math.cos(ry) * 3.0, gz = z - Math.sin(ry) * 3.0; const guy = r() < 0.18 && !hit(gx - 0.2, gz - 0.2, gx + 0.2, gz + 0.2) && onWalk(gx, gz) && !occ(gx, gz, 1);
+    const gx = x + Math.cos(ry) * 3.0, gz = z - Math.sin(ry) * 3.0; const guy = r() < 0.18 && !hit(gx - 0.2, gz - 0.2, gx + 0.2, gz + 0.2) && onWalk(gx, gz) && !occ(gx, gz, 1) && (EDGE_OFF || [[-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]].every(([a, b]) => onWalk(gx + a, gz + b))); // a_edgewalls: whole anchor on the sidewalk (two hung over the kerb into the cross street; no extra rng draw)
     push(guy ? 'poleG' : 'poleD', x, city.groundH(x, z), z, ry); if (guy) col.add(gx - 0.12, gz - 0.12, gx + 0.12, gz + 0.12, 2.4, 'guy'); stat.pole++; }
 
   // ------------------------------------------------------------------------------------------------ meshes + streaming ----
