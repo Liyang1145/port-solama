@@ -424,10 +424,9 @@ function svcFront(b, E, y0, ground, s) {
   lbox(b, E, 0, E.len, -0.02, 0.06, y0, y0 + 0.3, plinth); // concrete plinth (splash zone)
   const n = Math.max(1, Math.round(E.len / s.ww)); SVC_STAT.bays += n;
   for (const o of svcBays(E.len, s.ww, s.ps)) { SVC_STAT.open[o.t]++; const a0 = o.c - o.hw, a1 = o.c + o.hw;
-    if (o.t === SVC.SHUT) { lbox(b, E, a0 - 0.1, a1 + 0.1, -0.02, 0.3, y0 + 2.55, y0 + 2.86, galv, true); // roll housing
-      for (const a of [a0 - 0.07, a1 + 0.07]) lbox(b, E, a - 0.035, a + 0.035, -0.02, 0.09, y0 + 0.06, y0 + 2.55, steel); } // guide rails
+    if (o.t === SVC.SHUT) lbox(b, E, a0 - 0.1, a1 + 0.1, -0.02, 0.3, y0 + 2.55, y0 + 2.86, galv, true); // roll housing (guide rails are painted)
     else if (o.t === SVC.DOOR) { lbox(b, E, a0 - 0.2, a1 + 0.2, -0.02, 0.42, y0 + 2.28, y0 + 2.36, dark, true); // drip hood
-      lbox(b, E, a0 - 0.08, a1 + 0.08, -0.02, 0.05, y0 + 2.15, y0 + 2.22, steel); lbox(b, E, a0 - 0.08, a0, -0.02, 0.05, y0, y0 + 2.15, steel); lbox(b, E, a1, a1 + 0.08, -0.02, 0.05, y0, y0 + 2.15, steel); }
+    } // (door frame painted)
     else if (o.t === SVC.HATCH) { lbox(b, E, a0 - 0.12, a1 + 0.12, -0.02, 0.34, y0 + 0.9, y0 + 1.0, steel, true); lbox(b, E, a0 - 0.08, a1 + 0.08, -0.02, 0.22, y0 + 2.05, y0 + 2.26, galv, true); }
     else if (o.t === SVC.LOUV) lbox(b, E, a0 - 0.05, a1 + 0.05, -0.02, 0.09, y0 + 1.84, y0 + 1.9, steel, true); // drip sill
     else if (o.t === SVC.METER) { lbox(b, E, a0, a1, -0.02, 0.2, y0 + 1.1, y0 + 2.22, cab, true); lbox(b, E, a0 - 0.04, a1 + 0.04, -0.02, 0.25, y0 + 2.22, y0 + 2.28, dark, true); } // meter cabinet + rain lid

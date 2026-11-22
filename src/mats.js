@@ -326,6 +326,10 @@ if (style == 6.0) {
   else if (t == 4.0) { hw = min(0.7, ww * 0.5 - 0.5); o0 = 1.0; o1 = 2.05; }
   else if (t == 3.0) { hw = 0.6; o0 = 1.9; o1 = 2.7; }
   float inO = step(abs(lu), hw) * step(o0, yb) * step(yb, o1); float oy = yb - o0;
+  if (t == 2.0 || t == 4.0 || t == 5.0) { // painted steel guide rails / door frame (0.07 m) round the opening
+    float fr = step(hw, abs(lu)) * step(abs(lu), hw + 0.07) * step(o0 - (t == 4.0 ? 0.07 : 0.0), yb) * step(yb, o1 + (t == 2.0 ? 0.0 : 0.07));
+    if (t == 5.0) fr = max(fr, step(abs(lu), hw + 0.07) * step(o1, yb) * step(yb, o1 + 0.07));
+    svcC = mix(svcC, vec3(0.24, 0.25, 0.26) * (0.8 + 0.4 * vnoise(vec2(yb * 3.0, lu))), fr); svcR = mix(svcR, 0.45, fr); svcMet = max(svcMet, 0.5 * fr); svcH += fr * 0.012 * fine; }
   if (t == 3.0 || t == 4.0 || t == 1.0) { float b0 = t == 1.0 ? 1.1 : o0 - 0.08; float hw2 = t == 1.0 ? 0.45 : hw;
     float run = step(abs(lu), hw2) * step(yb, b0) * smoothstep(b0 - 1.6, b0, yb) * smoothstep(0.3, 0.75, vnoise(vec2(lu * 6.0, hs * 9.0)));
     svcC = mix(svcC, svcC * vec3(0.55, 0.42, 0.33), run * 0.7); }
