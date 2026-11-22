@@ -27,17 +27,49 @@ const C = {
   news: [[0.12, 0.30, 0.62], [0.72, 0.13, 0.10], [0.88, 0.78, 0.22], [0.90, 0.90, 0.88], [0.15, 0.45, 0.30]],
 };
 
+// separating-axis test of two oriented rectangles (centre, unit axis u, half extents along u / along the normal)
+function obbHit(ax, az, aux, auz, ahl, ahw, bx, bz, bux, buz, bhl, bhw) {
+  const dx = bx - ax, dz = bz - az; const A = [[aux, auz], [-auz, aux]], B = [[bux, buz], [-buz, bux]]; const ha = [ahl, ahw], hb = [bhl, bhw];
+  for (const [nx, nz] of [A[0], A[1], B[0], B[1]]) { const ra = ha[0] * Math.abs(A[0][0] * nx + A[0][1] * nz) + ha[1] * Math.abs(A[1][0] * nx + A[1][1] * nz);
+    const rb = hb[0] * Math.abs(B[0][0] * nx + B[0][1] * nz) + hb[1] * Math.abs(B[1][0] * nx + B[1][1] * nz); if (Math.abs(dx * nx + dz * nz) >= ra + rb) return false; }
+  return true; }
+
 // record: [x, y0, z, w (local x), h, d (local z), ang, r, g, b, kind, seed, rad]
-export function prepDowntown(fab, col) {
+export function prepDowntown(fab, col, palms) {
   if (OFF || !fab || !fab.dtBlocks || !col) return null; const T0 = performance.now();
   const K = { recs: [], grid: new Map(), stats: { towers: 0, entrances: 0, mid: 0, midDoors: 0, canopies: 0, junctions: 0, corners: 0, items: {}, refused: {}, cols: 0 } };
   const S = K.stats; const it = (k) => { S.items[k] = (S.items[k] || 0) + 1; }; const no = (k) => { S.refused[k] = (S.refused[k] || 0) + 1; };
   const add = (x, y0, z, w, h, d, ang, c, kind, seed = 0, rad = RAD) => K.recs.push([x, y0, z, w, h, d, ang, c[0], c[1], c[2], kind, seed, rad]);
   const addCol = (x, z, w, d, ang, h) => { col.addOBB(x, z, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, h, 'dtown'); S.cols++; };
   // free test: oriented footprint (local w x d at ang, + pad) against every collider taller than 0.25 m (AABB of the footprint vs box)
+  // a_downtown2: oriented boxes are tested exactly (separating axes) instead of by their AABB, so pieces on the slanted faces of the
+  // round / chamfered towers are no longer refused by the bounding box of a 45-degree collider
   const tmp = [];
-  const free = (x, z, w, d, ang, pad = 0.15) => { const c = Math.abs(Math.cos(ang)), s = Math.abs(Math.sin(ang)); const ex = c * w / 2 + s * d / 2 + pad, ez = s * w / 2 + c * d / 2 + pad;
-    const l = col.query(x, z, Math.max(ex, ez) + 1, tmp); for (const b of l) { if (b.h < 0.25) continue; if (b.maxX > x - ex && b.minX < x + ex && b.maxZ > z - ez && b.minZ < z + ez) return false; } return true; };
+  const free = (x, z, w, d, ang, pad = 0.15) => { const ca = Math.cos(ang), sa = Math.sin(ang); const c = Math.abs(ca), s = Math.abs(sa); const hw = w / 2 + pad, hd = d / 2 + pad; const ex = c * hw + s * hd, ez = s * hw + c * hd;
+    const l = col.query(x, z, Math.max(ex, ez) + 1, tmp); for (const b of l) { if (b.h < 0.25) continue; if (!(b.maxX > x - ex && b.minX < x + ex && b.maxZ > z - ez && b.minZ < z + ez)) continue;
+      if (!b.o) { if (Math.abs(ca) > 0.9999 || Math.abs(sa) > 0.9999) return false; if (obbHit(x, z, ca, -sa, hw, hd, (b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2, 1, 0, (b.maxX - b.minX) / 2, (b.maxZ - b.minZ) / 2)) return false; continue; }
+      const o = b.o; if (obbHit(x, z, ca, -sa, hw, hd, o.cx, o.cz, o.ux, o.uz, o.hl, o.hw)) return false; } return true; };
+
+  // ---- 0) fitted colliders for the round (14-gon) and chamfered towers: their single bounding rectangle stood up to 3.5 m proud of
+  // the slanted faces. Swapped here (after every bake-hashed pass ran with the original box). Round: 7 boxes at k*pi/7 inscribed in
+  // the apothem circle (cover >= 0.975 apothem everywhere, never outside the shell); chamfered: two crossing boxes = exact octagon.
+  for (const T of fab.dtTowers || []) { const P = T.poly; if (!T.cb || !P || P.length < 8) continue; const n = P.length;
+    let cx = 0, cz = 0; for (const p of P) { cx += p[0] / n; cz += p[1] / n; }
+    if (n >= 12) { let ap = 1e9; for (let i = 0; i < n; i++) { const A = P[i], B = P[(i + 1) % n]; ap = Math.min(ap, Math.hypot((A[0] + B[0]) / 2 - cx, (A[1] + B[1]) / 2 - cz)); }
+      col.remove(T.cb); const m = 7, ah = Math.PI / (2 * m); for (let k = 0; k < m; k++) { const a = k * Math.PI / m; col.addOBB(cx, cz, Math.cos(a), Math.sin(a), ap * Math.cos(ah), ap * Math.sin(ah), T.h, 'bld'); } S.fitTowers = (S.fitTowers || 0) + 1; }
+    else { const xs = P.map((p) => p[0]), zs = P.map((p) => p[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+      let ch = 0; for (const p of P) if (Math.abs(p[0] - x0) < 0.01) ch = Math.max(ch, Math.min(Math.abs(p[1] - z0), Math.abs(p[1] - z1))); if (ch < 0.3) continue;
+      col.remove(T.cb); col.addOBB(cx, cz, 1, 0, (x1 - x0) / 2, (z1 - z0) / 2 - ch, T.h, 'bld'); col.addOBB(cx, cz, 1, 0, (x1 - x0) / 2 - ch, (z1 - z0) / 2, T.h, 'bld'); S.fitTowers = (S.fitTowers || 0) + 1; } }
+
+  // palm crowns (fabric palms from the trunk table + the city's palms) for the signal mast arms: [x, z, r, y0, y1]
+  const crowns = []; const TR = fab._trunks; if (TR) for (let i = 0; i < TR.length; i += 5) if (TR[i + 4] === 2) { const h = TR[i + 3] / 0.94; crowns.push([TR[i], TR[i + 1], 0.34 * h + 0.08 * h + 0.35, 0.86 * h, 1.02 * h]); }
+  for (const p of palms || []) { const h = p.h * (p.s || 1); crowns.push([p.x, p.z, 0.46 * h + Math.abs(p.lean || 0) * 1.6 * h + 0.4, 0.62 * h, 1.08 * h]); }
+  const cg = new Map(); crowns.forEach((c, i) => { const k = Math.floor(c[0] / 24) * 65536 + Math.floor(c[1] / 24); let l = cg.get(k); if (!l) cg.set(k, l = []); l.push(i); });
+  // does the segment (ax,az)-(bx,bz) at heights y0..y1 pass through a crown?
+  const armHits = (ax, az, bx, bz, y0, y1) => { const x0 = Math.floor((Math.min(ax, bx) - 9) / 24), x1 = Math.floor((Math.max(ax, bx) + 9) / 24), z0 = Math.floor((Math.min(az, bz) - 9) / 24), z1 = Math.floor((Math.max(az, bz) + 9) / 24);
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1e-6;
+    for (let a = x0; a <= x1; a++) for (let k = z0; k <= z1; k++) { const l = cg.get(a * 65536 + k); if (!l) continue; for (const i of l) { const c = crowns[i]; if (c[4] < y0 || c[3] > y1) continue;
+      const t = Math.min(1, Math.max(0, ((c[0] - ax) * dx + (c[1] - az) * dz) / L2)); if (Math.hypot(ax + dx * t - c[0], az + dz * t - c[1]) < c[2] + 0.25) return true; } } return false; };
 
   // ---- 1) tower podiums ----
   const GFT = 5.6;
@@ -90,14 +122,25 @@ export function prepDowntown(fab, col) {
     for (let ci = 0; ci < 4; ci++) { const [sx, sz] = CORN[ci]; if (!corners.some((c) => c[0] === sx && c[1] === sz)) continue; S.corners++;
       const role = (ci + hj) % 4; const kx = x + sx * AW, kz = z + sz * AW;
       if (role === 0 || role === 2) { // mast-arm signal: arm over the N-S street (heads face +sz) and over the E-W street (heads face -sx)
-        const px = kx + sx * 0.8, pz = kz + sz * 0.8; if (!free(px, pz, 0.5, 0.5, 0, 0.1)) { no('signal'); continue; }
+        // a_downtown2: the arms clear the palm crowns. Pole candidates: the kerb corner, or slid 2.5 m back along either kerb (the arms
+        // grow by the slide so the heads stay over the same lanes). Per arm: full (two heads) > short (near head only) > none (the
+        // head drops onto the pole). Best total wins; ties keep the smaller slide.
+        const la = 7.6, lb2 = 6.4; let best = null;
+        for (const [tx, tz] of [[0, 0], [0, 2.5], [2.5, 0], [2.5, 2.5]]) { const px = kx + sx * (0.8 + tx), pz = kz + sz * (0.8 + tz); if (!free(px, pz, 0.5, 0.5, 0, 0.1)) continue;
+          const oa = !armHits(px, pz, px - sx * (la + tx), pz, 4.8, 6.75) ? 2 : !armHits(px, pz, px - sx * (4.2 + tx), pz, 4.8, 6.75) ? 1 : 0;
+          const ob = !armHits(px, pz, px, pz - sz * (lb2 + tz), 4.5, 6.4) ? 2 : !armHits(px, pz, px, pz - sz * (4.0 + tz), 4.5, 6.4) ? 1 : 0;
+          const sc = oa + ob - (tx + tz) * 0.01; if (!best || sc > best.sc) best = { sc, px, pz, tx, tz, oa, ob }; }
+        if (!best) { no('signal'); continue; }
+        const { px, pz, tx, tz, oa, ob } = best; if (tx || tz) it('signalSlid'); it('arm' + oa); it('arm' + ob);
         add(px, 0, pz, 0.62, 0.22, 0.62, 0, C.conc, 8); add(px, 0, pz, 0.26, 7.0, 0.26, 0, C.pole, 8); addCol(px, pz, 0.4, 0.4, 0, 7.0); it('signal');
-        const la = 7.6, lb2 = 6.4;
-        add(px - sx * la / 2, 6.5, pz, la, 0.18, 0.18, 0, C.pole, 8); add(px, 6.15, pz - sz * lb2 / 2, 0.16, 0.16, lb2, 0, C.pole, 8);
         const fA = Math.atan2(sz, 0) / (Math.PI * 2), fB = Math.atan2(0, -sx) / (Math.PI * 2); const nA = ((fA % 1) + 1) % 1, nB = ((fB % 1) + 1) % 1;
         const ltA = nsGreen ? 2 : 0, ltB = nsGreen ? 0 : 2;
-        for (const a of [3.4, 6.6]) { const hx = px - sx * a; add(hx, 5.44, pz, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); add(hx, 5.32, pz - sz * 0.17, 0.62, 1.3, 0.04, 0, C.plate, 8); }
-        for (const a of [3.0, 5.6]) { const hz = pz - sz * a; add(px, 5.08, hz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); add(px + sx * 0.17, 4.96, hz, 0.04, 1.3, 0.62, 0, C.plate, 8); }
+        if (oa) { const L = oa === 2 ? la + tx : 4.2 + tx; add(px - sx * L / 2, 6.5, pz, L, 0.18, 0.18, 0, C.pole, 8);
+          for (const a of oa === 2 ? [3.4, 6.6] : [3.4]) { const hx = px - sx * (a + tx); add(hx, 5.44, pz, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); add(hx, 5.32, pz - sz * 0.17, 0.62, 1.3, 0.04, 0, C.plate, 8); } }
+        else { add(px, 3.5, pz + sz * 0.31, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); add(px, 3.38, pz + sz * 0.14, 0.62, 1.3, 0.04, 0, C.plate, 8); } // pole-mounted head
+        if (ob) { const L = ob === 2 ? lb2 + tz : 4.0 + tz; add(px, 6.15, pz - sz * L / 2, 0.16, 0.16, L, 0, C.pole, 8);
+          for (const a of ob === 2 ? [3.0, 5.6] : [3.0]) { const hz = pz - sz * (a + tz); add(px, 5.08, hz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); add(px + sx * 0.17, 4.96, hz, 0.04, 1.3, 0.62, 0, C.plate, 8); } }
+        else { add(px - sx * 0.31, 3.5, pz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); add(px - sx * 0.14, 3.38, pz, 0.04, 1.3, 0.62, 0, C.plate, 8); }
         add(px - sx * 0.2, 2.6, pz, 0.12, 0.42, 0.3, 0, C.head, 8, 0, NEAR); // pedestrian push-button / signal box
       } else if (role === 1) { // controller cabinet on its pad + hydrant
         let ok = false; for (const t of [3.4, 4.9, 6.4]) { const cx = kx + sx * t, cz = kz + sz * 1.05; if (!free(cx, cz, 1.2, 0.8, 0)) continue;

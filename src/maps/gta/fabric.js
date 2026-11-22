@@ -728,8 +728,21 @@ function mats(M) {
         float gl = (1.0 - pl) * (1.0 - fas) * (1.0 - max(mul * (1.0 - ent), tr)) * (1.0 - dfr) * (1.0 - bar) * (1.0 - pier);
         vec3 lime = vec3(0.74, 0.71, 0.65) * (0.94 + 0.06 * fnoise(vec2(lu, fy) * 3.0)) * (1.0 - 0.3 * step(fract(fy / 0.9), 0.02));
         vec3 room = mix(vec3(0.46, 0.42, 0.36), vec3(0.80, 0.75, 0.66), smoothstep(0.6, GF - 1.0, fy)) * (1.0 + 0.2 * step(GF - 1.35, fy)); // lobby seen through the glass
+        // a_downtown2: lobby depth behind the glass (view-ray parallax on the same program): pendant lights 2.4 m in, stone columns 3.6 m in
+        // (on the 6 m pier rhythm), a reception desk 5 m in on the entrance face, a polished floor and a washed back wall 7.5 m in
+        float iL = 1.0; { vec3 dV = vFW - cameraPosition; float dn = max(-dot(dV, fn), 0.12 * length(dV)); vec2 pr = vec2(dot(dV.xz, ft), dV.y) / dn; vec2 uv0 = vec2(lu, fy);
+          float tF = pr.y < -0.002 ? -fy / pr.y : 99.0; float tB = min(7.5, tF); vec2 bw = uv0 + pr * tB;
+          float wash = 0.62 + 0.5 * smoothstep(1.3, 0.0, abs(fract(bw.x / 3.0) - 0.5) * 3.0) * smoothstep(0.4, GF - 1.0, bw.y);
+          vec3 ic = tF < 7.5 ? mix(vec3(0.50, 0.47, 0.42), vec3(0.66, 0.62, 0.55), abs(step(0.5, fract(bw.x / 1.2)) - step(0.5, fract(tB / 1.2)))) : room * (0.85 + 0.15 * wash); iL = tF < 7.5 ? 0.62 + 0.25 * smoothstep(0.3, 0.0, abs(fract(bw.x / 3.0) - 0.5)) : wash;
+          float dsk = (dtM ? step(0.9, dot(fn.xz, sN)) : step(fh12(vec2(fsd * 7.0, 3.0)), 0.55)) * step(5.0, tF); vec2 d5 = uv0 + pr * 5.0;
+          float dk = dsk * step(abs(d5.x), 2.3) * step(d5.y, 1.08); ic = mix(ic, mix(vec3(0.34, 0.24, 0.17), vec3(0.82, 0.78, 0.70), step(0.98, d5.y)), dk); iL = mix(iL, 0.55 + 0.9 * step(0.98, d5.y), dk);
+          vec2 c3 = uv0 + pr * 3.6; float cl = step(abs(fract((c3.x - 3.0) / 6.0 + 0.5) - 0.5) * 6.0, 0.32) * step(c3.y, GF - 0.9) * step(3.6, tF);
+          ic = mix(ic, vec3(0.70, 0.67, 0.61) * (0.85 + 0.15 * step(0.0, (fract((c3.x - 3.0) / 6.0 + 0.5) - 0.5))), cl); iL = mix(iL, 0.45, cl);
+          vec2 p2 = uv0 + pr * 2.4; float pd = smoothstep(0.30, 0.10, length(vec2((fract(p2.x / 3.0) - 0.5) * 3.0, (p2.y - (GF - 1.75)) * 1.6))) * step(2.4, tF);
+          float cord = step(abs((fract(p2.x / 3.0) - 0.5) * 3.0), 0.012) * step(GF - 1.75, p2.y); ic = mix(ic, vec3(0.2), cord); ic = mix(ic, vec3(1.0, 0.93, 0.78), pd); iL = mix(iL, 2.4, pd);
+          room = ic; }
         vec3 c = mix(mix(frmC, gran, pl * (1.0 - dr)), fasC, fas); c = mix(c, lime, pier * (1.0 - pl)); c = mix(c, vec3(0.78, 0.76, 0.72), bar); c = mix(c, vec3(0.12), dfr); c = mix(c, room, gl);
-        diffuseColor.rgb = c; fGlass = gl * 0.5; fLit = (0.62 + 0.38 * step(GF - 1.35, fy) + 0.25 * dr) * (0.8 + 0.2 * fh12(vec2(floor(lu / 6.0), fsd))) * 1.45; // lighter tint by day so the lit lobby reads through; fLit scaled so the night glow stays
+        diffuseColor.rgb = c; fGlass = gl * 0.5; fLit = (0.62 + 0.38 * step(GF - 1.35, fy) + 0.25 * dr) * (0.8 + 0.2 * fh12(vec2(floor(lu / 6.0), fsd))) * 1.45 * mix(1.0, iL, gl); // lighter tint by day so the lit lobby reads through; fLit scaled so the night glow stays
         dtCov = 0.6 * step(0.55, fy) * step(fy, GF - 0.9); } }
     else if (fk > 18.5 && fk < 19.5) { // signal head: housing = instance colour, three lenses on the face the seed points at (seed = (lit + angle / 2pi) / 4, lit 0 red 1 amber 2 green)
       float lt = floor(fsd * 4.0); float th = fract(fsd * 4.0) * 6.2831853; vec2 dv = vec2(cos(th), sin(th));
