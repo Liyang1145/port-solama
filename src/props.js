@@ -106,6 +106,33 @@ function streetLightGeo2() {
   return mergeG(parts.map((g) => g.index ? g.toNonIndexed() : g));
 }
 
+// a_nightfix: 1.05 m beach bollard (12-sided post, lens gap 0.86..0.97 m, cap) on the street-light material
+function bollardGeo() { const parts = [];
+  const base = new THREE.CylinderGeometry(0.13, 0.135, 0.05, 12); base.translate(0, 0.025, 0); parts.push(base);
+  const post = new THREE.CylinderGeometry(0.1, 0.11, 0.84, 12); post.translate(0, 0.47, 0); parts.push(post);
+  for (const [r, y0, y1] of [[0.112, 0.86, 0.875], [0.112, 0.955, 0.97]]) { const c = new THREE.CylinderGeometry(r, r, y1 - y0, 12); c.translate(0, (y0 + y1) / 2, 0); parts.push(c); }
+  for (let k = 0; k < 4; k++) { const b = new THREE.BoxGeometry(0.02, 0.1, 0.02); b.translate(Math.cos(k * 1.5708) * 0.102, 0.915, Math.sin(k * 1.5708) * 0.102); parts.push(b); }
+  const cap = new THREE.CylinderGeometry(0.09, 0.118, 0.07, 12); cap.translate(0, 1.005, 0); parts.push(cap);
+  return mergeG(parts.map((g) => g.index ? g.toNonIndexed() : g)); }
+// a_nightfix: where the beach lights stand. Bollards: on the promenade side of the low beach wall (x1 - 0.67, 0.17 m from its inner
+// face) every 15 m, not within 4.5 m of a beach-access stair, a lamp or a tree; two at the foot of every access ramp (z +-2.0, the
+// ramp is +-1.2 wide) on the sand. Lifeguard towers: one lamp under the roof edge over the ramp (water side). Pools: wall bollards
+// spill 4-5 m onto the sand, the ramp pair lights the ramp foot, the tower lamp its ramp and the sand around it; the open sand stays
+// dark. One OBB collider per bollard (12-gon r 0.115: half 0.832 r, a_polecol). Fixed positions: no random draws.
+function beachNight(city) { const posts = [], lenses = [], pools = []; const col = city.col; const S = { wall: 0, ramp: 0, towers: 0, skipped: 0 };
+  const gh = (x, z) => Math.max(0, city.groundH(x, z));
+  const clear = (x, z) => { const l = col.query(x, z, 0.6); for (const b of l) if (b.maxX > x - 0.16 && b.minX < x + 0.16 && b.maxZ > z - 0.16 && b.minZ < z + 0.16 && b.h > 0.3) return false;
+    if (city.lamps.some((l) => Math.abs(l.x - x) < 4.5 && Math.abs(l.z - z) < 4.5)) return false;
+    for (const L of [city.palms, city.trees]) if (L && L.some((p) => Math.abs(p.x - x) < 1.2 && Math.abs(p.z - z) < 1.2)) return false; return true; };
+  const post = (x, z) => { const y = gh(x, z); posts.push([x, y, z]); lenses.push([x, y + 0.875, z, 0.19, 0.08]); const h = 0.832 * 0.115; col.addOBB(x, z, 1, 0, h, h, 1.05, 'bollard'); };
+  for (const b of city.blocks || []) { if (b.area !== 'promenade') continue; const zc = (b.z0 + b.z1) / 2 + 22, xw = b.x1 - 0.67;
+    for (let z = b.z0 + 8; z <= b.z1 - 8; z += 15) { if (Math.abs(z - zc) < 4.5) continue; if (!clear(xw, z)) { S.skipped++; continue; } post(xw, z); S.wall++;
+      const yp = Math.max(gh(xw, z), gh(b.x1 + 3, z)) + 0.05; pools.push([b.x1 + 0.2, z, 10.5, 8.5, yp]); }
+    const xr = b.x1 + 6.2; for (const s of [-1, 1]) { const z = zc + s * 2.0; if (!clear(xr, z)) { S.skipped++; continue; } post(xr, z); S.ramp++; }
+    pools.push([b.x1 + 6.6, zc, 9, 10]); }
+  for (const lg of city.deco.lifeguards) { const y0 = city.groundH(lg.x, lg.z); lenses.push([lg.x + 1.05, y0 + 4.36, lg.z, 0.2, 0.12]); pools.push([lg.x + 3.2, lg.z, 13, 11]); S.towers++; }
+  return { posts, lenses, pools, S }; }
+
 export function buildProps(scene, city, T) {
   const out = { lampLights: [] };
   const r = mulberry(99);
@@ -128,6 +155,10 @@ export function buildProps(scene, city, T) {
   // a_nightcheck (map A, ?oldanight = off): the 「海风之眼」 wheel's bulb rings lit nothing below -> two extra instances of this pool
   // (same draw, same program): an ellipse along the rim plane on each side of the boarding deck, which hides the centre (landmarks(): x 384, z 352)
   const xPools = CYBER || /[?&]oldanight\b/.test(typeof location !== 'undefined' ? location.search : '') ? [] : [[384, 344.6, 30, 14], [384, 359.4, 30, 14]];
+  // a_nightfix (map A, ?oldanight2 / ?oldanight = off): low beach bollards (beach wall along the promenade, both sides of every
+  // beach-access ramp foot) and a lamp on each lifeguard tower, each with its pool as more instances of this same pool mesh
+  const BN = CYBER || /[?&]oldanight2?\b/.test(typeof location !== 'undefined' ? location.search : '') ? null : beachNight(city);
+  if (BN) for (const q of BN.pools) xPools.push(q);
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length + xPools.length); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   const lampM = [];
@@ -138,7 +169,7 @@ export function buildProps(scene, city, T) {
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
     m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
-  xPools.forEach(([x, z, sx, sz], k) => { m4.compose(new THREE.Vector3(x, Math.max(0, city.groundH(x, z)) + 0.16, z), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); pools.setMatrixAt(lamps.length + k, m4); }); // + 0.16: clears the sand ripple
+  xPools.forEach(([x, z, sx, sz, py], k) => { m4.compose(new THREE.Vector3(x, py !== undefined ? py : Math.max(0, city.groundH(x, z)) + 0.16, z), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); pools.setMatrixAt(lamps.length + k, m4); }); // + 0.16: clears the sand ripple
   // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
   // the lamp head, fading toward its rim (view-facing ratio) and the ground; warm sodium/LED white on 索拉纳港, the cyan/magenta
   // lamp tints on 霓港 (denser, rain-hazed air). One instanced draw, no depth reads.
@@ -163,6 +194,12 @@ export function buildProps(scene, city, T) {
   const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
   { const cA = new THREE.Color(1.0, 0.66, 0.36), cL = new THREE.Color(1.0, 0.86, 0.68), cC = new THREE.Color(0.45, 0.82, 1.0), cM = new THREE.Color(1.0, 0.35, 0.85);
     lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); }); }
+  if (BN && BN.posts.length) { // a_nightfix: bollard bodies on the street-light material, lenses / tower lamps on the lamp-glow material (same objects -> same programs)
+    const bm = new THREE.InstancedMesh(bollardGeo(), lampMat, BN.posts.length); bm.castShadow = true; bm.receiveShadow = true;
+    BN.posts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y, z); bm.setMatrixAt(i, m4); }); bm.computeBoundingSphere(); scene.add(bm);
+    const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 12, 1, false); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, BN.lenses.length);
+    BN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
+    out.beachNight = { posts: BN.posts.length, pools: BN.pools.length, lenses: BN.lenses.length, tris: bm.geometry.index ? bm.geometry.index.count / 3 * BN.posts.length : 0 }; }
   for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
   if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港

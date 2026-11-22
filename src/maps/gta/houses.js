@@ -22,6 +22,8 @@
 //    reading left-to-right, lantern on the wall gap, canopy cap and pool-cage top kept under the fascia, mailbox at the walk.
 import * as THREE from 'three';
 import { fabKit } from './fabric.js';
+import { U } from '../../env.js';
+import { mulberry } from '../../util.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const HOUSES_OFF = Q.has('nohouses');
 const AUDIT = Q.has('houseaudit');
@@ -318,7 +320,7 @@ export function attachHouses(K, scene) { if (!K) return null; const { box: G, bo
   m.instanceMatrix.array.fill(0, 0, 16); m.count = 1; m.visible = true; m.userData.n = [1, 0, 0]; m.userData.warm = 0; let keep = 0;
   m.onBeforeShadow = function () { keep = this.count; this.count = scene.overrideMaterial ? 0 : this.userData.n[0]; this.userData.warm |= 1; }; m.onAfterShadow = function () { this.count = keep; }; // the shadow maps redrawn inside GTAO's normal pass are thrown away: skip
   m.onBeforeRender = function (r, sc, cam, geo, mat) { keep = this.count; if (mat !== MAT) this.count = this.userData.n[0] + this.userData.n[1]; this.userData.warm |= mat === MAT ? 2 : 4; }; m.onAfterRender = function () { this.count = keep; };
-  K.mesh = m; K.last = null; K.info = { houses: 0, boxes: 0, tris: 0 }; K.stats.attachMs = Math.round(performance.now() - T0); return K; }
+  K.mesh = m; K.last = null; K.info = { houses: 0, boxes: 0, tris: 0 }; attachLights(K, scene); K.stats.attachMs = Math.round(performance.now() - T0); return K; }
 const CAP = 1000, NEAR = 42, FADE = 12, FADE1 = 7; // a_housepolish: dissolve bands [RAD - FADE, RAD] and [NEAR - FADE1, NEAR] (house distance)
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // writes each kit box's dissolve into the fraction of aK.x (kind - 0.45 * fade; fabBody discards by an ordered dither); aK only
@@ -327,6 +329,7 @@ function fadeHouses(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attr
     for (let j = sg[k], e = sg[k] + sg[k + 1]; j < e; j++) { const v = Math.round(A[j * 2]) - 0.45 * f; if (fresh || v !== A[j * 2]) { A[j * 2] = v; if (j < lo) lo = j; if (j > hi) hi = j; } } }
   K.fading = nf; if (hi >= lo && !fresh) { const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(lo * 2, (hi - lo + 1) * 2); ga.needsUpdate = true; } }
 export function updateHouses(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh;
+  if (K.NL) updateLights(K, p); // a_nightfix
   if ((m.userData.warm & 3) !== 3) return; // until the warm-up instance has been drawn in the shadow and main passes
   if (p.y > 140) { if (m.visible) { m.visible = false; K.last = null; } return; }
   const mv = K.last ? Math.hypot(p.x - K.last[0], p.z - K.last[1]) : 1e9;
@@ -356,3 +359,65 @@ export function auditHouses(K) { if (!K) return null; const T0 = performance.now
       if (K.pave.near(...ext(Rc), (P) => obbOverlap(Rc, P, 0))) R.colOnPave++; if (K.bodies.near(...ext(Rc, 0.5), (B) => B.rec !== own && obbOverlap(Rc, B, -0.01))) R.colOnBody++;
       if (K.trunks.near(...ext(Rc, 0.5), (t) => circRect(t.x, t.z, t.r, Rc))) R.colOnTrunk++; if (c.k !== 'mailbox') for (const [x, z] of corners(Rc)) if (!inPoly(quad, x, z)) { R.colOutLot++; break; } } }
   R.avgBoxes = +((R.boxesS + R.boxesF) / K.H.length).toFixed(1); R.avgFar = +(R.boxesFar / K.H.length).toFixed(1); R.ms = Math.round(performance.now() - T0); return R; }
+
+// ---------------------------------------------------------------- a_nightfix: house night lights ----
+// Garage-side wall lantern on the front face of every house that has a garage door (same spot rule as buildHouse: driveway end
+// projected on the front face, the side away from the entry door, so it never meets the door lantern / frame / header band), plus
+// on canal lots a lanai lantern on the back wall and a slim dock-light post on the dock. Each is lit or dark per house from its own
+// stream mulberry(7421) (three draws per house in K.H order; no existing stream is touched): ~55 % of the garage lanterns, 60 % of the
+// back-wall lanterns and 45 % of the dock posts are on. Lit lanterns are kit kind 16 (self-lit lens box on the fabBody program),
+// dark ones kind 7; each lit one gets a small pool on the fabric street-lamp pool material (fabKit().glow: same object, same program).
+// Two instanced meshes refilled around the camera (every 20 m moved / at dusk): fixtures within LR (dark ones within LRD), pools
+// within LR at night only -> +2 draw calls near the houses at night, 0 shader programs, no colliders (wall-mounted; dock posts 0.12 m).
+// ?oldanight2 (and ?oldanight): not built.
+const NIGHT2_OFF = Q.has('oldanight2') || Q.has('oldanight');
+const LR = 200, LRD = 90, LCAP = 1600, PCAP = 480, LBX = 8; // per light: up to 4 boxes; record: x, z, lit, nBoxes, box[4][LBX], pool [x, z, sx, sz, a, y]
+const LGLASS = [1.0, 0.80, 0.55], LOFF = [0.30, 0.29, 0.27], LMET = [0.10, 0.09, 0.08];
+function frontFrame(LT) { const H = LT.house, C = [H[0], H[2]], w = H[3], d = H[5]; const [U, V] = axes(H[6]); const Y = LT.yard; let nIn = null, E = null;
+  if (Y && !Y.gone) { const [, z] = axes(Y[4]); const sg = (C[0] - Y[0]) * z[0] + (C[1] - Y[1]) * z[1] >= 0 ? 1 : -1; nIn = [z[0] * sg, z[1] * sg]; E = [Y[0] + nIn[0] * Y[3] / 2, Y[1] + nIn[1] * Y[3] / 2]; }
+  else if (LT.front) { const dx = C[0] - LT.front[0], dz = C[1] - LT.front[1], l = Math.hypot(dx, dz) || 1; nIn = [dx / l, dz / l]; }
+  if (!nIn) return null;
+  const faces = [[V, U, d / 2, w / 2], [[-V[0], -V[1]], [-U[0], -U[1]], d / 2, w / 2], [U, [-V[0], -V[1]], w / 2, d / 2], [[-U[0], -U[1]], V, w / 2, d / 2]];
+  let fi = 0, best = -2; faces.forEach((f, k) => { const s = -(f[0][0] * nIn[0] + f[0][1] * nIn[1]); if (s > best) { best = s; fi = k; } });
+  const [N, T, Df, Lf] = faces[fi]; return { C, N, T, Df, Lf, fa: Math.atan2(-T[1], T[0]), E }; }
+function prepLights(K) { const rnd = mulberry(7421); const L = []; const S = { garage: 0, garageLit: 0, rear: 0, rearLit: 0, dock: 0, dockLit: 0 };
+  const grid = new Grid(64);
+  for (const D of K.H) { const u1 = rnd(), u2 = rnd(), u3 = rnd(); const LT = D.LT, H = LT.house; if (!H || H.gone) continue; const seed = H[11]; const F = frontFrame(LT); if (!F) continue;
+    const { C, N, T, Df, Lf, fa, E } = F; const P = (t, o) => [C[0] + T[0] * t + N[0] * (Df + o), C[1] + T[1] * t + N[1] * (Df + o)];
+    // lantern on a wall: o = outward offset of the wall plane from the front plane (0 front, -2 Df back), og = +1 front / -1 back
+    const lantern = (t, ow, og, y, lit, yaw) => { const B = []; const bx = (o, y0, st, sy, so, c, kind) => { const p = P(t, ow + og * o); B.push([p[0], y0, p[1], st, sy, so, yaw, c, kind]); };
+      bx(0.015, y - 0.02, 0.14, 0.32, 0.03, LMET, 7); bx(0.095, y, 0.15, 0.24, 0.13, lit ? LGLASS : LOFF, lit ? 16 : 7); bx(0.095, y + 0.24, 0.19, 0.045, 0.17, LMET, 7); bx(0.095, y - 0.03, 0.12, 0.03, 0.1, LMET, 7); return B; };
+    const add = (x, z, lit, B, pool) => { const r = { x, z, lit, B, pool }; L.push(r); grid.add(r, x, z, x, z); };
+    // garage-side lantern (front)
+    if (E) { const et = (E[0] - C[0]) * T[0] + (E[1] - C[1]) * T[1], eo = (E[0] - C[0]) * N[0] + (E[1] - C[1]) * N[1] - Df; const gw = hh(seed, 5) < 0.3 ? 2.9 : 2.6;
+      if (Math.abs(eo) < 1.2 && Math.abs(et) <= Lf - 0.4) { const tg = Math.max(-Lf + gw / 2 + 0.25, Math.min(Lf - gw / 2 - 0.25, et)); const s = Math.sign(tg || 1); const ts = tg + s * (gw / 2 + 0.42);
+        if (Math.abs(ts) <= Lf - 0.4) { const lit = u1 < 0.55; S.garage++; if (lit) S.garageLit++; const p = P(ts, 0); const q = P(ts - s * 0.6, 1.7);
+          add(p[0], p[1], lit, lantern(ts, 0, 1, 1.84, lit, fa), lit ? [q[0], q[1], 7.5, 7.5, fa, 0.075] : null); } } }
+    if (LT.canal) { // back-wall (lanai) lantern facing the canal
+      const tr = (hh(seed, 63) - 0.5) * Math.max(0, Lf - 0.9) * 1.6; const lit = u2 < 0.6; S.rear++; if (lit) S.rearLit++; const p = P(tr, -2 * Df); const q = P(tr, -2 * Df - 2.2);
+      add(p[0], p[1], lit, lantern(tr, -2 * Df, -1, 2.05, lit, fa + Math.PI), lit ? [q[0], q[1], 8.5, 8.5, fa, 0.08] : null);
+      const Dk = LT.dock; if (Dk && !Dk.gone) { const [du, dv] = axes(Dk[4]); const hl = Dk[2] / 2, hwd = Dk[3] / 2, yd = Dk[8] || 0.35;
+        const toH = (C[0] - Dk[0]) * dv[0] + (C[1] - Dk[1]) * dv[1] >= 0 ? 1 : -1; const se = hh(seed, 64) < 0.5 ? -1 : 1; const lit2 = u3 < 0.45; S.dock++; if (lit2) S.dockLit++;
+        const x = Dk[0] + du[0] * se * (hl - 0.35) + dv[0] * toH * (hwd - 0.22), z = Dk[1] + du[1] * se * (hl - 0.35) + dv[1] * toH * (hwd - 0.22); const a = Math.atan2(-du[1], du[0]);
+        const B = [[x, yd, z, 0.12, 0.62, 0.12, a, [0.55, 0.55, 0.53], 7], [x, yd + 0.62, z, 0.11, 0.13, 0.11, a, lit2 ? LGLASS : LOFF, lit2 ? 16 : 7], [x, yd + 0.75, z, 0.15, 0.035, 0.15, a, LMET, 7]];
+        add(x, z, lit2, B, lit2 ? [Dk[0] + du[0] * se * (hl * 0.45), Dk[1] + du[1] * se * (hl * 0.45), Math.min(9, hl * 2 + 1), Dk[3] + 0.6, a, yd + 0.03] : null); } } }
+  K.lightStats = S; return { L, grid }; }
+function attachLights(K, scene) { if (NIGHT2_OFF) return; const { box: G, body: MAT, flat: GF, glow: GM } = fabKit(); if (!G || !MAT || !GF || !GM) return; const T0 = performance.now();
+  const NL = prepLights(K); const g = G.clone(); const ak = new THREE.InstancedBufferAttribute(new Float32Array(LCAP * 2), 2); ak.setUsage(THREE.DynamicDrawUsage); g.setAttribute('aK', ak);
+  const fm = new THREE.InstancedMesh(g, MAT, LCAP); fm.instanceMatrix.setUsage(THREE.DynamicDrawUsage); fm.setColorAt(0, new THREE.Color(1, 1, 1)); fm.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  fm.castShadow = false; fm.receiveShadow = true; fm.count = 0; fm.visible = false; fm.layers.set(KIT_LAYER); scene.add(fm);
+  const pm = new THREE.InstancedMesh(GF, GM, PCAP); pm.renderOrder = 2; pm.castShadow = false; pm.receiveShadow = false; pm.count = 0; pm.visible = false; scene.add(pm);
+  NL.fm = fm; NL.pm = pm; NL.at = null; K.NL = NL; K.lightStats.attachMs = +(performance.now() - T0).toFixed(1); K.lightStats.n = NL.L.length; }
+const _lm = new THREE.Matrix4(), _lq = new THREE.Quaternion(), _lv = new THREE.Vector3(), _ls = new THREE.Vector3();
+function updateLights(K, p) { const NL = K.NL, fm = NL.fm, pm = NL.pm; const night = U.uNight.value > 0.03; const at = NL.at;
+  if (p.y > 140) { fm.visible = pm.visible = false; NL.at = null; return; }
+  if (at && at[2] === night && Math.hypot(p.x - at[0], p.z - at[1]) < 20) return; NL.at = [p.x, p.z, night];
+  const M = fm.instanceMatrix.array, Cc = fm.instanceColor.array, A = fm.geometry.attributes.aK.array, PM = pm.instanceMatrix.array; let n = 0, np = 0, nl = 0;
+  NL.grid.near(p.x - LR, p.z - LR, p.x + LR, p.z + LR, (r) => { const dd = Math.hypot(r.x - p.x, r.z - p.z); if (dd > LR || (!(r.lit && night) && dd > LRD)) return false;
+    if (n + r.B.length > LCAP) return false; nl++;
+    for (const b of r.B) { _lq.setFromAxisAngle(_Y, b[6]); _lm.compose(_lv.set(b[0], b[1], b[2]), _lq, _ls.set(b[3], b[4], b[5])); _lm.toArray(M, n * 16); Cc[n * 3] = b[7][0]; Cc[n * 3 + 1] = b[7][1]; Cc[n * 3 + 2] = b[7][2]; A[n * 2] = b[8]; A[n * 2 + 1] = 0.5; n++; }
+    if (night && r.pool && np < PCAP) { const q = r.pool, c = Math.cos(q[4]), s = Math.sin(q[4]), j = np * 16; PM.fill(0, j, j + 16); PM[j] = c * q[2]; PM[j + 2] = -s * q[2]; PM[j + 5] = 1; PM[j + 8] = s * q[3]; PM[j + 10] = c * q[3]; PM[j + 12] = q[0]; PM[j + 13] = q[5]; PM[j + 14] = q[1]; PM[j + 15] = 1; np++; }
+    return false; });
+  fm.count = n; fm.visible = n > 0; if (n) { fm.instanceMatrix.needsUpdate = true; fm.instanceColor.needsUpdate = true; fm.geometry.attributes.aK.needsUpdate = true; fm.computeBoundingSphere(); }
+  pm.count = np; pm.visible = night && np > 0; if (np) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); }
+  NL.info = { lights: nl, boxes: n, pools: np, tris: n * 12 + np * 2 }; }
