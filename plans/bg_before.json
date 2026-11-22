@@ -1,0 +1,16 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&nowater&noground",
+ "reset": false,
+ "shots": [
+  {
+   "name": "stats",
+   "noshot": true,
+   "keep": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); const B=__G.neon.bldg; const cp=[166.2,518], ct=[160.5,548]; g.tp(cp[0],cp[1],0); __G.step(3); g.player.root.visible=false; __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); __G.streamSync(); const c=__G.camera; for(let k=0;k<4;k++){ __G.streamSync(); __G.step(2); g.player.root.visible=false; c.position.set(cp[0],1.7,cp[1]); c.lookAt(ct[0],0.0,ct[1]); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.neon.update(__G.U.uNight.value,0); } __G.render(); const R=__G.renderer; const ks=R.info.programs.map(p=>p.cacheKey); let h=(s)=>{let x=0; for(const ch of s) x=(x*31+ch.charCodeAt(0))>>>0; return x.toString(36);}; JSON.stringify({programs:R.info.programs.length, keys:ks.map(h).sort(), tris:R.info.render.triangles, calls:R.info.render.calls, ground:B.ground?B.ground.stats:null, loaded:__G.stream.stats.loaded})"
+  },
+  {
+   "name": "night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); const B=__G.neon.bldg; const cp=[166.2,518], ct=[160.5,548]; g.tp(cp[0],cp[1],0); __G.step(3); g.player.root.visible=false; __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); __G.streamSync(); const c=__G.camera; for(let k=0;k<4;k++){ __G.streamSync(); __G.step(2); g.player.root.visible=false; c.position.set(cp[0],1.7,cp[1]); c.lookAt(ct[0],0.0,ct[1]); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.neon.update(__G.U.uNight.value,0); } 0"
+  }
+ ]
+}

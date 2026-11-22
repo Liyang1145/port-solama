@@ -23,6 +23,7 @@ import { ClutterCols } from './clutter.js'; // r6.4 b_clutter
 import { CLUT_CTX } from './clutcap.js';
 import { yardFurniture } from './portyard.js'; // r6.4 b_portyard
 import { yardLights, warehouseLight } from './portlight.js'; // r6.4 b_portlight
+import { GroundLayer } from './ground.js'; // r6.4 b_ground
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -58,6 +59,7 @@ export class BldgLayer {
     this.roofs = new RoofLayer(scene, this.lmats, city); // r6.4 b_rooftop: low / mid-rise roof plant, dishes, solar, rails, billboards, aviation lights (roofs.js)
     this.gaps = new ParcelGapLayer(scene, this.lmats, city); // r6.4 b_parcelgap: street-side closure of the 0–3 m slots between streamed parcels (parcelgap.js; after roofs: chains onParcel)
     this.shops = new StorefrontLayer(scene, this.lmats, city); // r6.4 b_storefront: ground-floor shop types on streamed parcels (storefront.js; chains onParcel)
+    this.ground = new GroundLayer(scene, this.mats, city); // r6.4 b_ground: manholes / drains / trench covers / kerb wear within 80 m (ground.js, own ring LOD)
     this.clut = new ClutterCols(city); // r6.4 b_clutter: sidewalk clutter colliders per streamed parcel / side row (clutter.js; chains onParcel)
     this.items = new Map(); this.built = new Map(); this.counts = { port: 0, walk: 0, bridge: 0, cables: 0 };
     const add = (k, it) => { let l = this.items.get(k); if (!l) this.items.set(k, l = []); l.push(it); };
@@ -132,6 +134,7 @@ export class BldgLayer {
     if (this.roofs) this.roofs.sync(globalThis.__G && globalThis.__G.camera);
     if (this.gaps) this.gaps.sync(globalThis.__G && globalThis.__G.camera);
     if (this.shops) this.shops.sync(globalThis.__G && globalThis.__G.camera);
+    if (this.ground) this.ground.sync(globalThis.__G && globalThis.__G.camera);
     // detail LOD: small clutter meshes ('vcolD') only within DETAIL_R of the camera (chunk centre distance)
     const cam = globalThis.__G && globalThis.__G.camera; if (cam) { const p = cam.position; let n = 0;
       for (const c of st.chunks.values()) { if (!c.near) continue; const on = Math.hypot(c.cx - p.x, c.cz - p.z) < DETAIL_R + Math.max(0, p.y - 40) * 0.5;

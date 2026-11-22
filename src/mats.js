@@ -502,6 +502,8 @@ if (uDbg == 5.0) gl_FragColor = vec4(diffuseColor.rgb, 1.0);
   });
 }
 
+// r6.4 b_ground (霓港 only): ground-detail shader text in the road / sidewalk programs (?noground = old text)
+const BG = CYBER && !(typeof location !== 'undefined' && /[?&]noground\b/.test(location.search));
 // --------------------------------------------------------------------- road surface ----
 // attributes: aRd = (across m, along m, segment length, kind) ; kind 0 = 4-lane two-way, 1 = intersection, 2 = 2-lane, 3 = 6-lane causeway
 export function roadMaterial(T, refl) {
@@ -537,7 +539,13 @@ if (kind == 0.0 || kind == 3.0) {
   // crosswalks + stop lines at both ends
   float e = min(v, L - v);
   float zebra = step(0.5, fract(u / 1.1)) * step(1.0, e) * step(e, 4.2) * step(au, hw - 0.5);
-  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
+${BG ? `  // b_ground: worn zebra — paint gone in the wheel paths, ragged stripe ends, a few stripes faded as a whole
+  { float zs = floor(u / 1.1); float zh = h12(vec2(zs, floor(L * 0.37)));
+    float wp = smoothstep(0.42, 0.2, abs(abs(fract(au / 3.5) - 0.5) - 0.25) * 3.5 / 1.4);
+    float zn = vnoise(vRW.xz * 5.5) * 0.55 + vnoise(vRW.xz * 19.0) * 0.45;
+    float keep = step(wp * 0.62 + (1.0 - smoothstep(0.0, 0.9, min(e - 1.0, 4.2 - e))) * 0.35 + zh * 0.25, zn + 0.18);
+    zebra *= keep * mix(1.0, 0.55, step(0.8, zh)); }
+` : ``}  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
   wpaint = max(wpaint, max(zebra, stopl));
   if (e < 5.4) ypaint *= step(5.4, e);
   // v3.4 lane arrows before the stop line (GTA6_REFERENCE §6 road markings)
@@ -569,12 +577,34 @@ float crk = smoothstep(0.035, 0.0, abs(vnoise(vRW.xz * 0.35) - 0.5)) * smoothste
 float oil = (kind == 1.0 ? 0.0 : smoothstep(0.18, 0.0, abs(lanePos - 0.0))) * smoothstep(0.55, 0.8, vnoise(vRW.xz * vec2(0.9, 0.9) + 3.7)) * 0.5;
 asph = mix(asph, asph * 0.45, max(crk * 0.8, oil));
 asph *= 1.0 + 0.12 * smoothstep(0.7, 0.9, vnoise(vRW.xz * 1.7));
+` : ``}${BG ? `// b_ground: utility-cut patches (darker newer asphalt, sealed seam, paint cut through) + alligator cracking in the wheel paths
+float bgPatch = 0.0;
+if (kind != 1.0) { float li = floor(au / 3.5); float pv = fract(v / 21.0 + li * 0.37) * 21.0; float pc = floor(v / 21.0 + li * 0.37);
+  vec2 hp = vec2(h12(vec2(pc, li + 3.0)), h12(vec2(pc + 7.1, li))); float uu = au - li * 3.5;
+  float a0 = 3.0 + hp.x * 8.0, a1 = a0 + 2.2 + hp.y * 5.0, b0 = 0.3 + hp.y * 0.8, b1 = b0 + 1.4 + hp.x * 1.2;
+  float inP = step(a0, pv) * step(pv, a1) * step(b0, uu) * step(uu, b1) * step(h12(vec2(pc, li + 11.0)), 0.3);
+  float edge = min(min(pv - a0, a1 - pv), min(uu - b0, b1 - uu));
+  bgPatch = inP; asph = mix(asph, asph * vec3(0.66, 0.66, 0.7), inP); asph *= 1.0 - inP * smoothstep(0.06, 0.0, edge) * 0.55;
+  paintMask *= 1.0 - inP * 0.7;
+  float trk = smoothstep(0.3, 0.12, abs(lanePos - 0.25)) * (1.0 - inP);
+  vec2 cq = vRW.xz * 2.2; vec2 ci = floor(cq), cf = fract(cq); float d1 = 9.0, d2 = 9.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { vec2 o = vec2(float(i), float(j)); vec2 pp = o + vec2(h12(ci + o), h12(ci + o + 17.0)) - cf; float dd = dot(pp, pp); if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd; }
+  float net = smoothstep(0.07, 0.0, sqrt(d2) - sqrt(d1)) * trk * smoothstep(0.55, 0.75, vnoise(vRW.xz * 0.08 + 5.0));
+  asph = mix(asph, asph * 0.5, net * 0.85); }
 ` : ``}vec3 col = mix(asph, wpaint > ypaint ? paintW : paintY, paintMask);
 col = mix(col, vec3(0.16, 0.42, 0.20) * (0.8 + 0.3 * wear), bikeG * (0.7 + 0.3 * smoothstep(0.2, 0.7, wear)));
 paintMask = max(paintMask, bikeG * 0.8);
 // wet: darker, puddles
 float pud = smoothstep(${CYBER ? '0.48, 0.62' : '0.56, 0.68'}, vnoise(vRW.xz * 0.11) * 0.7 + vnoise(vRW.xz * 0.6) * 0.3 + tracks * 0.6); // vis-sweep A: fewer puddles (the whole night road read as a flooded mirror)
-float wet = uWet;
+${BG ? `// b_ground: water collects at the drain inlets (positions = ground.js drainAt) and in the gutter along the kerb
+if (kind == 0.0 || kind == 2.0) { float hwd = kind == 0.0 ? 7.0 : 4.5; float sd = step(0.0, u); float vv = v - sd * 15.0; float dc = floor(vv / 30.0);
+  float dh = fract(dc * 0.6180339887 + sd * 0.37 + fract(L * 0.0137)), dh2 = fract(dc * 0.4142135 + sd * 0.71 + fract(L * 0.0291));
+  float vd = (dc + 0.5 + (dh - 0.5) * 0.5) * 30.0; float ed = min(vd + sd * 15.0, L - vd - sd * 15.0);
+  float rq = length(vec2((vv - vd) * 0.5, (au - (hwd - 0.3)) * 0.95)) + (vnoise(vRW.xz * 1.4) - 0.5) * 0.45;
+  float dpud = smoothstep(1.05, 0.6, rq) * step(0.18, dh2) * step(8.0, ed);
+  float gut = smoothstep(hwd - 1.1, hwd - 0.3, au) * smoothstep(0.5, 0.72, vnoise(vRW.xz * 0.32 + 9.0)) * step(5.4, min(v, L - v));
+  pud = max(pud, max(dpud, gut * 0.9)); }
+` : ``}float wet = uWet;
 col *= mix(1.0, 0.45, wet);
 diffuseColor.rgb = col;
 float paintF = paintMask;
@@ -630,8 +660,14 @@ export function simpleMats(T) {
   const side = texSet(T, 'sidewalk', 1); for (const t of [side.map, side.normalMap, side.roughnessMap]) t.repeat.set(1 / 3, 1 / 3);
   M.sidewalk = prep(new THREE.MeshStandardMaterial({ map: side.map, normalMap: side.normalMap, roughnessMap: side.roughnessMap, color: 0xffffff, roughness: 1 }), 'sidewalk', (s) => {
     s.uniforms.uWet = U.uWet;
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet;')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? '' : `
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet;' + (BG ? HASH : ''))
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? (BG ? `
+{ // r6.4 b_ground 霓港 pavers: slab-to-slab tone, dirtier / wider joints in places, replaced (lighter) and cracked slabs, oily stains
+  vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = h12(cl + 41.0), hs2 = h12(cl + 93.0); vec2 lc = fract(sp / 1.6);
+  diffuseColor.rgb *= 0.9 + 0.2 * hs; diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.17, 1.13), step(0.93, hs2));
+  vec2 g2 = abs(lc - 0.5); float jw = 0.485 - 0.012 * step(0.6, vnoise(sp * 0.7)); float jd = smoothstep(jw, jw + 0.01, max(g2.x, g2.y)); diffuseColor.rgb *= 1.0 - jd * 0.22 * vnoise(sp * 2.3 + 4.0);
+  float ck = step(0.8, hs) * smoothstep(0.014, 0.0, abs(lc.y - 0.5 - 0.22 * sin(lc.x * 5.0 + hs * 30.0))) * step(abs(lc.x - 0.5), 0.25 + 0.25 * hs2); diffuseColor.rgb *= 1.0 - ck * 0.45;
+  float stn = smoothstep(0.62, 0.8, vnoise(sp * 0.45 + 2.0)) * smoothstep(0.4, 0.7, vnoise(sp * 3.1)); diffuseColor.rgb *= 1.0 - stn * 0.25; roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.6, stn); }` : '') : `
 { // r6.3 索拉纳港 pavement wear: dark joint-sealant lines get dirtier, flattened gum spots, drip / coffee stains, a few hairline cracks per slab
   vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = fract(sin(dot(cl, vec2(12.9898, 78.233))) * 43758.5453);
   vec2 gq = sp * 7.0; vec2 gi = floor(gq); float gh = fract(sin(dot(gi, vec2(41.3, 289.1))) * 15731.7); float gum = step(0.993, gh) * smoothstep(0.32, 0.18, length(fract(gq) - 0.5));
