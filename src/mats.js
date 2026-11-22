@@ -3,18 +3,23 @@ import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
 import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
+import { envReg, envPatch, envFamily } from './envprog.js'; // b_envprog: merged environment programs
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
 export function setCSM(csm, aniso) { CSMREF = csm; ANISO = aniso; }
 
 export function prep(mat, key = 'std', patch = null) {
-  mat.onBeforeCompile = (s, r) => {
+  mat.onBeforeCompile = function (s, r) {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
     if (patch) patch(s);
+    if (this.userData.envOn) envPatch(s, this); // b_envprog: normalised environment material (see envprog.js)
   };
   // b_verify ?shotfast (test only): unpatched names share one program ('std'): same shader text, so the same pixels, fewer SwiftShader JITs
-  mat.customProgramCacheKey = SHOTFAST && !patch ? () => 'std' : () => key;
+  // b_envprog: normalised materials share one program per family, 'std' for every unpatched name (?oldenvmat: old keys)
+  const k0 = SHOTFAST && !patch ? 'std' : key, ke = envFamily(key, !!patch) + '|e';
+  mat.customProgramCacheKey = function () { return this.userData.envOn ? ke : k0; };
+  envReg(mat, key, !!patch);
   return mat;
 }
 

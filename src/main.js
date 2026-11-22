@@ -1,5 +1,6 @@
 // PORT SOLANA — entry: renderer, asset loading, world assembly, main loop, test hooks (window.__G)
 import * as THREE from 'three';
+import { envInstall } from './envprog.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Env, U } from './env.js';
@@ -28,6 +29,7 @@ if (SHOTFAST) window.__SF = shotfastShaders();
 if (SNAP) document.body.classList.add('snap');
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SNAP });
+envInstall(renderer); // b_envprog: merged environment shader programs (?oldenvmat: off)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.has('dpr') ? +Q.get('dpr') : 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 // r6.1: 索拉纳港 uses the Khronos PBR-Neutral curve (hue-true, no ACES over-saturated sky / clipped sidewalks); 霓港 keeps ACES for neon punch
