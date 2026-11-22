@@ -11,6 +11,7 @@ import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cableBundle, NEONC, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
+import { OLDENV2 } from '../../envprog.js'; // b_envprog2
 import { laundryLine } from './dress.js';
 import { shopStreet } from './arch.js';
 import { Viaduct, nearViaduct } from './viaduct.js';
@@ -28,14 +29,22 @@ import { GroundLayer } from './ground.js'; // r6.4 b_ground
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
 let CONE_MAT = null, CONE_G = null;
-function coneMat() {
-  if (CONE_MAT) return CONE_MAT;
-  CONE_MAT = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+// b_envprog2: the port's lamp cones (port.js) were the same shader with another exponent / strength -> uniforms uCP / uCK, one program
+// for both (the wash path is unchanged; port cone vertices have uv.x <= 1). ?oldenvmat2: the old two shaders
+export function coneMatU(cp, ck) {
+  const m = coneMat0(); if (OLDENV2) return m;
+  return new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight, uCP: { value: cp }, uCK: { value: ck } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: m.vertexShader, fragmentShader: m.fragmentShader.replace('uniform float uNight;', 'uniform float uNight; uniform float uCP; uniform float uCK;').replace('pow(vT, 2.2) * uNight * 0.11', 'pow(vT, uCP) * uNight * uCK') });
+}
+function coneMat() { if (CONE_MAT) return CONE_MAT; if (OLDENV2) return coneMat0(); return (CONE_MAT = coneMatU(2.2, 0.11)); }
+function coneMat0() {
+  if (CONE_MAT && OLDENV2) return CONE_MAT;
+  const m0 = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     // b_portlight: same program, second mode — uv.x >= 2 marks a "wash" vertex (ground light pool / light on a box face, portlight.js):
     // its vertex colour is the added night radiance, view-independent. Cone vertices (uv.x in [0, 1]) take the old path unchanged.
     vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ vC = color; vT = uv.y; vM = step(1.5, uv.x); vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
     fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ if (vM > 0.5) { gl_FragColor = vec4(vC * uNight, 1.0); return; } float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
-  return CONE_MAT;
+  if (OLDENV2) CONE_MAT = m0; return m0;
 }
 // cone from the lamp at (x, y, z) down to the ground, radius r at the bottom (unit geometry: apex at y=0 top, base at y=-1)
 function cone(b, x, y, z, h, r, col) {

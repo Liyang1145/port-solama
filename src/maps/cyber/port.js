@@ -19,6 +19,8 @@ import { withSeed, rng, rand, randi, pick, mulberry } from '../../util.js';
 import { kg, beam, tube, put, cable, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { envAdopt, prep } from '../../mats.js';
+import { OLDENV2 } from '../../envprog.js'; // b_envprog2
+import { coneMatU } from './bldglayer.js';
 
 export const QUAY = { x: -1150, z: -1000, th: -0.0555, u0: -266, u1: 266 }; // edge (-1420,-1015)-(-880,-985) of LANDS.port
 const BASE_R = 2600, NEAR_R = 650, FAR_R = 850, DETAIL_R = 260;
@@ -178,6 +180,7 @@ function puddleMat() {
 }
 function coneMat() {
   if (CONE) return CONE;
+  if (!OLDENV2) return (CONE = coneMatU(2.6, 0.028)); // b_envprog2: same program as the city's lamp cones (bldglayer.js)
   return (CONE = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ vC = color; vT = uv.y; vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
     fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.6) * uNight * 0.028; gl_FragColor = vec4(vC * a, 1.0); }' }));

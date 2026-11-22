@@ -119,7 +119,9 @@ function icAccessor() {
 function whiteIC(n) { const a = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); a.__env = 1; return a; }
 function wrapRenderer(r) {
   if (r.__envWrap) return; r.__envWrap = true; const st = r.state; const gl = r.getContext();
-  const rbd = r.renderBufferDirect; r.renderBufferDirect = function (camera, scene, geometry, material, object, group) { CUR = object; CURG = group; if (!OLDENV2 && material.userData.envFam) kindCheck(object, material); return rbd.call(this, camera, scene, geometry, material, object, group); };
+  const rbd = r.renderBufferDirect; r.renderBufferDirect = function (camera, scene, geometry, material, object, group) { CUR = object; CURG = group;
+    if (!OLDENV2) { if (material.userData.envFam) kindCheck(object, material); else if (scene === null && material.isMeshDepthMaterial && object.customDepthMaterial !== material && !DBG.includes('nodepth')) material = envDepth(object, group, material); }
+    return rbd.call(this, camera, scene, geometry, material, object, group); };
   const sm = st.setMaterial;
   st.setMaterial = function (material, frontFaceCW, ...rest) {
     sm.call(this, material, frontFaceCW, ...rest);
@@ -217,7 +219,7 @@ export const OLDENV2 = OLDENV || (typeof location !== 'undefined' && new URLSear
 const UBF = {
   std: '--', // unpatched prep() materials: no code of their own, they just stop being a separate program
   // B 霓港 / shared
-  road: 'm-', vcol: 'm-', sidewalk: 'm-', sand: 'm-', mgc: 'm-', grass: 'm-', terrain: 'm-',
+  road: 'm-', vcol: 'm-', sidewalk: 'm-', sand: 'm-', mgc: 'm-', grass: 'm-', mgg2: 'm-', terrain: 'm-',
   boulder: 'in', creek: 'm-', furn63: 'm-',
   // 霓港 decals (were hand-made materials, now prep()'d: envAdopt). viaconc stays out: adopting it moved 2 % of pixels by 1/255
   cnsign: 'm-', puddleN: 'm-', qpuddle: 'm-',
@@ -324,6 +326,22 @@ export function envUberWrap(fn, key) {
   w.envKey = (m) => (inUber(m, fam) ? 'env' + clsOf(m) + '|e' : fam + '|e'); w.envFam = fam; return w;
 }
 // main-pass check before three picks the program: a member drawn in a variant its family's code was trimmed out of -> own program
+// b_envprog2 shadow depth: three's depth material for a normalised source comes with or without alphaTest (and a clone per
+// alpha-tested source) -> 2 programs per instancing kind. Normalised sources get their own depth material (one per source, so its
+// map / alphaTest never change) that always has the alpha test, with ENV_AT's rule (no discard at alphaTest <= 0.0015): one program
+// per instancing kind, same depth values as before.
+const DEPTHM = new WeakMap();
+function envDepth(object, group, dm) {
+  const src = Array.isArray(object.material) ? (group ? object.material[group.materialIndex] : null) : object.material; if (!src || !src.userData.envOn) return dm;
+  let d = DEPTHM.get(src);
+  if (!d) { d = new THREE.MeshDepthMaterial({ depthPacking: dm.depthPacking }); d.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('#include <alphatest_fragment>', ENV_AT); };
+    d.customProgramCacheKey = () => 'envd'; DEPTHM.set(src, d); }
+  // what three's getDepthMaterial copied from the source for this draw
+  d.visible = dm.visible; d.wireframe = dm.wireframe; d.side = dm.side; d.alphaMap = dm.alphaMap; d.alphaTest = Math.max(dm.alphaTest, 0.001); d.map = dm.map;
+  d.clipShadows = dm.clipShadows; d.clippingPlanes = dm.clippingPlanes; d.clipIntersection = dm.clipIntersection; d.displacementMap = dm.displacementMap;
+  d.displacementScale = dm.displacementScale; d.displacementBias = dm.displacementBias; d.wireframeLinewidth = dm.wireframeLinewidth; d.linewidth = dm.linewidth; d.depthPacking = dm.depthPacking;
+  return d;
+}
 function kindCheck(object, m) {
   let k = UBF[m.userData.envFam]; if (k && AUTOI.has(m.userData.envFam)) k = 'i' + k[1]; if (!k || m.userData.envBad || !m.userData.envOn || m.isMeshDepthMaterial) return;
   const inst = !!object.isInstancedMesh, at = m.alphaTest > 0;

@@ -7,6 +7,7 @@ import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
 import { CYBER } from './mapsel.js';
+import { OLDENV2 } from './envprog.js'; // b_envprog2
 import { furnMat, PB } from './streetkit.js';
 
 function streetLightGeo() {
@@ -134,6 +135,14 @@ export function buildProps(scene, city, T) {
         a *= smoothstep(220.0, 60.0, vD) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
         gl_FragColor = vec4(vC * a * uK * smoothstep(0.35, 0.9, uNight), 1.0); }`,
   });
+  // b_envprog2: light pools and the cones share one program (uniform uPM picks the branch, each branch's code as it
+  // was); the pools get a white instanceColor so both are 'instanced + colour'. ?oldenvmat2: two programs
+  if (!OLDENV2) { const at = (t) => t.indexOf('void main(){'), body = (t) => t.slice(at(t) + 12, t.lastIndexOf('}')), head = (t) => t.slice(0, at(t));
+    const VS = 'uniform float uPM; ' + head(coneMat.vertexShader) + 'varying vec2 vUv;\nvoid main(){ if (uPM > 0.5) {' + body(poolMat.vertexShader) + '} else {' + body(coneMat.vertexShader) + '\n} }';
+    const FS = 'uniform float uPM; uniform vec3 uCol; ' + head(coneMat.fragmentShader) + 'varying vec2 vUv;\nvoid main(){ if (uPM > 0.5) {' + body(poolMat.fragmentShader) + '} else {' + body(coneMat.fragmentShader) + '\n} }';
+    for (const [m, k] of [[poolMat, 1], [coneMat, 0]]) { m.vertexShader = VS; m.fragmentShader = FS; m.uniforms.uPM = { value: k }; }
+    pools.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(lamps.length * 3).fill(1), 3);
+    poolMat.side = THREE.DoubleSide; poolMat.forceSinglePass = true; poolMat.userData.envCull = THREE.FrontSide; } // double-sided in the program like the cones, front-face culling restored after setMaterial (envprog.js)
   const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
   { const cA = new THREE.Color(1.0, 0.66, 0.36), cL = new THREE.Color(1.0, 0.86, 0.68), cC = new THREE.Color(0.45, 0.82, 1.0), cM = new THREE.Color(1.0, 0.35, 0.85);
     lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); }); }
