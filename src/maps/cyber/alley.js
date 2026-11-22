@@ -20,6 +20,7 @@ import { mulberry, withSeed, rng, rand, randi, pick } from '../../util.js';
 import { prep } from '../../mats.js';
 import { kg, neonSign, GLYPHS, NEONC, put } from './kit.js';
 import { cnFace, plume } from './street2.js';
+import { AF_OFF, svcBays, SVC } from './svcface.js'; // b_alleyface
 
 // b_overlayfit test switch: ?nooverlayfit dresses the alleys exactly as before this lane
 const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
@@ -119,6 +120,14 @@ const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Eule
 let CONE_G = null;
 function coneG() { if (!CONE_G) { CONE_G = new THREE.CylinderGeometry(0.06, 1, 1, 12, 1, true); CONE_G.translate(0, -0.5, 0); } return CONE_G; }
 
+// b_alleyface: the openings of the service face on the collider box b at z = zw (city.js leaves b.svc = per-edge service info);
+// null when that face is not a service face (or ?noalleyface)
+function svcOpen(b, zw) {
+  if (AF_OFF || !b.svc) return null; let hit = false; const out = [];
+  for (const e of b.svc) { if (!e || Math.abs(e.dz) > 0.01 || Math.abs(e.p[1] - zw) > 0.05) continue; hit = true;
+    for (const o of svcBays(e.len, e.ww, e.ps)) { const xc = e.p[0] + e.dx * o.c; out.push({ x0: xc - o.hw - 0.15, x1: xc + o.hw + 0.15, lo: e.y0 + o.bot, top: e.y0 + o.top, t: o.t, floor: !!o.floor }); } }
+  return hit ? out : null;
+}
 export class AlleyLayer {
   constructor(scene, mats, city) {
     this.mats = mats; this.city = city; this.group = new THREE.Group(); this.group.name = 'alleys'; scene.add(this.group);
@@ -156,10 +165,13 @@ export class AlleyLayer {
         const ca = Math.max(wa, sa + 0.1), cb = Math.min(wb, sb - 0.1); const st = this.stats.bcore || (this.stats.bcore = { walls: 0, cut: 0, cutLen: 0, dropped: 0 });
         if (ca > wa + 1e-3 || cb < wb - 1e-3) { st.cut++; st.cutLen += Math.max(0, ca - wa) + Math.max(0, wb - cb); }
         if (cb - ca < 3) { st.dropped++; continue; } wa = ca; wb = cb; st.walls++; }
-      walls.push({ s, zw, wa, wb, h: b.h, y0: city.groundH((wa + wb) / 2, zc) });
+      walls.push({ s, zw, wa, wb, h: b.h, y0: city.groundH((wa + wb) / 2, zc), sv: svcOpen(b, zw) });
     }
     const A = { a, idx, xs, xe, z: zc, through: xs <= a.x0 + 0.01 && xe >= a.x1 - 0.01, walls, inst: {}, uniq: [], cols: [], cx: (xs + xe) / 2 };
-    const push = (k, m) => { (A.inst[k] || (A.inst[k] = [])).push(...m.elements); };
+    let DRY = false; // b_alleyface: a fixture that would sit on a shutter / door / hatch of the service face is planned as before (same rng draws) but not placed
+    const push = (k, m) => { if (DRY) return; (A.inst[k] || (A.inst[k] = [])).push(...m.elements); };
+    const uq = (o) => { if (!DRY) A.uniq.push(o); };
+    const AF = this.stats.af || (this.stats.af = { off: AF_OFF, walls: 0, open: 0, doorMoved: 0, doorDrop: 0, jboxMoved: 0, jboxDrop: 0, ventMoved: 0, ventDrop: 0, pipeMoved: 0, drainCut: 0, stainCut: 0, stainDrop: 0, clusterDrop: 0, acSkip: 0, runSplit: 0 });
     // wall frame: along-wall a (world x), out d, height y -> matrix with local +z = out of the wall
     const at = (w, x, y, d, sx = 1, sy = 1, sz = 1, roll = 0) => { _e.set(0, w.s > 0 ? 0 : Math.PI, roll, 'YXZ'); _q.setFromEuler(_e); _s.set(sx, sy, sz); _p.set(x, y, w.zw + w.s * d); return _m.compose(_p, _q, _s); };
     const seg = (k, p0, p1, r) => { _a.set(...p0); _b.set(...p1); const L = _a.distanceTo(_b); if (L < 0.02) return; _b.sub(_a).normalize(); _q.setFromUnitVectors(_Y, _b); _s.set(r, L, r); _p.set((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2); push(k, _m.compose(_p, _q, _s)); };
@@ -187,16 +199,28 @@ export class AlleyLayer {
           P(kk, bx, y + (j > 2 ? 0.35 : 0) - (OF_OFF ? 0 : BAGY * sy), bd, sc, sy, sc, ry); if (!OF_OFF) { this.stats.of.bags++; A.of = (A.of || 0) | 1; } u += rand(0.25, 0.45); } u += 0.45; } // b_overlayfit: bags rest on their flattened bottom
       }
       depth = Math.min(0.95, depth + 0.05); const z0 = Math.min(zw, zw + s * depth), z1 = Math.max(zw, zw + s * depth);
-      if (OF_OFF) A.cols.push([x, z0, x + len, z1, 1.4]); else { if (ex0 < x - 1e-3 || ex1 > x + len + 1e-3 || ytop > 1.4) this.stats.of.clusterGrow++; A.cols.push([ex0, z0, ex1, z1, Math.max(1.4, ytop)]); }
+      if (DRY) return; if (OF_OFF) A.cols.push([x, z0, x + len, z1, 1.4]); else { if (ex0 < x - 1e-3 || ex1 > x + len + 1e-3 || ytop > 1.4) this.stats.of.clusterGrow++; A.cols.push([ex0, z0, ex1, z1, Math.max(1.4, ytop)]); }
     };
     // ---- walls
     // b_overlayfit: walking-height wall fixtures (downpipes, meter boxes, back doors, AC drain lines ending low) stood 0.14–0.27 m off
     // the wall with no collider -> one thin box each, wall face out to the fixture face
-    const wfix = (w, x0, x1, d, h) => { if (OF_OFF) return; const z0 = Math.min(w.zw, w.zw + w.s * d), z1 = Math.max(w.zw, w.zw + w.s * d); A.cols.push([x0, z0, x1, z1, h]); this.stats.of.wallCols++; };
+    const wfix = (w, x0, x1, d, h) => { if (OF_OFF || DRY) return; const z0 = Math.min(w.zw, w.zw + w.s * d), z1 = Math.max(w.zw, w.zw + w.s * d); A.cols.push([x0, z0, x1, z1, h]); this.stats.of.wallCols++; };
     for (const w of walls) {
       const len = w.wb - w.wa, y0 = w.y0, top = Math.min(w.h, 40); const fh = 3.3, yf = y0 + 4.2; const nF = Math.max(0, Math.floor((top - yf - 0.6) / fh) + 1);
       const busy = []; const free = (x0, x1) => busy.every(([p, q]) => x1 < p || x0 > q); const take = (x0, x1) => busy.push([x0, x1]);
       const lo = Math.max(w.wa, m0), hi = Math.min(w.wb, m1); if (hi - lo < 2) continue;
+      // b_alleyface: the ground floor of this wall is a service face (style-6 shader + city.js pieces). OP = its openings in world x
+      // ([x0, x1] incl. 0.15 m margin, lo / top heights). Walking-height fixtures move sideways off them (occ = where moved ones
+      // ended up); one that finds no room is dropped (DRY). Conduit runs drop to the band above the openings, the first AC row
+      // rises above them. Every rng draw happens exactly as before.
+      const OP = w.sv; const occ = []; if (OP) { AF.walls++; AF.open += OP.length; }
+      const hitO = (x0, x1, ya, yb2) => OP && OP.find((o) => x1 > o.x0 && x0 < o.x1 && yb2 > o.lo && ya < o.top);
+      const hitOcc = (x0, x1) => occ.some(([p, q]) => x1 > p && x0 < q);
+      const clearX = (x, hw, ya, yb2) => { const ok = (c) => c - hw >= lo && c + hw <= hi && !hitO(c - hw, c + hw, ya, yb2) && !hitOcc(c - hw, c + hw);
+        if (ok(x)) return x; for (let d = 0.1; d < 8; d += 0.1) { if (ok(x - d)) return x - d; if (ok(x + d)) return x + d; } return null; };
+      const pipeX = (x) => { if (!OP) return x; const o = OP.find((q) => x > q.x0 && x < q.x1); if (!o) return x; AF.pipeMoved++;
+        const c = [o.x0 - 0.02, o.x1 + 0.02].filter((v) => v > w.wa + 0.08 && v < w.wb - 0.08 && !OP.some((q) => q !== o && v > q.x0 && v < q.x1)); return c.length ? c.reduce((p, v) => Math.abs(v - x) < Math.abs(p - x) ? v : p) : x; };
+      let doorX = null;
       // fire escape (needs ≥ 3 floors and 4.5 m of wall)
       if (nF >= 2 && hi - lo > 4.5 && rng() < 0.85) { const x = rand(lo + 2, hi - 2); take(x - 2, x + 2);
         for (let k = 0; k < nF; k++) { const y = yf + k * fh; push(k === nF - 1 ? 'feTop' : k % 2 ? 'feB' : 'feA', at(w, x, y, 0)); }
@@ -205,30 +229,44 @@ export class AlleyLayer {
         // a crate or a potted bucket on a landing now and then
         for (let k = 0; k < nF; k++) if (rng() < 0.35) push(pick(['crateR', 'crateB', 'crateY', 'boxA']), at(w, x + rand(0.4, 1.4), yf + k * fh, 0.7, k % 2 ? 1 : 0.8, 1, 0.8)); }
       // back door + caged bulb (+ light cone) + small sign
-      { const x = Math.min(hi - 0.8, Math.max(lo + 0.8, rand(lo + 1, hi - 1))); if (free(x - 0.8, x + 0.8)) { take(x - 0.9, x + 0.9); push('door', at(w, x, y0, 0)); wfix(w, x - 0.58, x + 0.58, 0.15, y0 + 2.36); push('bulb', at(w, x, y0 + 2.7, 0));
-        A.uniq.push({ t: 'cone', p: W3(w, x, 0.12, y0 + 2.52), h: 2.45, r: 1.9 });
-        const r = rng(); if (r < 0.45) A.uniq.push({ t: 'neon', w, x: x + rand(-0.3, 0.3), y: y0 + 3.35, sw: rand(0.9, 1.5), sh: rand(0.5, 0.75), glyphs: rng() < 0.5 ? [pick(GLYPHS.slice(10))] : [GLYPHS[randi(0, 9)], GLYPHS[randi(0, 9)]], col: pick(NEONC), col2: pick(NEONC), gy: y0 });
-        else if (r < 0.8) A.uniq.push({ t: 'box', w, x: x + rand(-0.2, 0.2), y: y0 + 3.05, k: randi(0, 17) });
-        A.uniq.push({ t: 'stk', w, x0: x - 1.4, x1: x + 1.4, y0, n: randi(3, 8) }); } }
+      { const xr = Math.min(hi - 0.8, Math.max(lo + 0.8, rand(lo + 1, hi - 1))); if (free(xr - 0.8, xr + 0.8)) { take(xr - 0.9, xr + 0.9);
+        const xd = OP ? clearX(xr, 0.7, y0, y0 + 3.0) : xr; const x = xd ?? xr; if (OP) { if (xd === null) AF.doorDrop++; else { if (Math.abs(xd - xr) > 1e-6) AF.doorMoved++; occ.push([x - 0.9, x + 0.9]); doorX = x; } } DRY = xd === null;
+        push('door', at(w, x, y0, 0)); wfix(w, x - 0.58, x + 0.58, 0.15, y0 + 2.36); push('bulb', at(w, x, y0 + 2.7, 0));
+        uq({ t: 'cone', p: W3(w, x, 0.12, y0 + 2.52), h: 2.45, r: 1.9 });
+        const r = rng(); if (r < 0.45) uq({ t: 'neon', w, x: x + rand(-0.3, 0.3), y: y0 + 3.35, sw: rand(0.9, 1.5), sh: rand(0.5, 0.75), glyphs: rng() < 0.5 ? [pick(GLYPHS.slice(10))] : [GLYPHS[randi(0, 9)], GLYPHS[randi(0, 9)]], col: pick(NEONC), col2: pick(NEONC), gy: y0 });
+        else if (r < 0.8) uq({ t: 'box', w, x: x + rand(-0.2, 0.2), y: y0 + 3.05, k: randi(0, 17) });
+        uq({ t: 'stk', w, x0: x - 1.4, x1: x + 1.4, y0, n: randi(3, 8) }); DRY = false; } }
       // downpipes at the ends and every ~9 m, conduit runs along the wall, junction boxes with conduit, cable bundles on hooks
-      for (const x of [w.wa + 0.35, w.wb - 0.35]) if (x > lo - 2 && x < hi + 2) { const pk = rng() < 0.6 ? 'pipeGrey' : 'pipeRust', r = rand(0.055, 0.075); seg(pk, W3(w, x, 0.13, y0), W3(w, x, 0.13, top - 0.2), r); wfix(w, x - r, x + r, 0.13 + r, top); }
-      for (let x = w.wa + rand(6, 10); x < w.wb - 4; x += rand(7, 11)) if (free(x - 0.3, x + 0.3)) { seg('pipeGrey', W3(w, x, 0.12, y0), W3(w, x, 0.12, top - 0.2), 0.05); wfix(w, x - 0.05, x + 0.05, 0.17, top); }
-      const nr = randi(1, 3); for (let i = 0; i < nr; i++) { const y = y0 + rand(2.9, 4.4) + i * 0.22; seg(i === 1 ? 'pipeBlack' : rng() < 0.5 ? 'pipeRust' : 'pipeGrey', W3(w, w.wa + 0.2, 0.09 + i * 0.07, y), W3(w, w.wb - 0.2, 0.09 + i * 0.07, y), rand(0.025, 0.045)); }
-      for (let k = 0; k < Math.max(1, Math.round(len / 9)); k++) { const x = rand(lo + 0.5, hi - 0.5); if (!free(x - 0.3, x + 0.3)) continue; take(x - 0.3, x + 0.3); { const yj = y0 + rand(1.5, 2.0); push('jbox', at(w, x, yj, 0)); wfix(w, x - 0.24, x + 0.24, 0.2, yj + 0.34); }
-        seg('pipeBlack', W3(w, x + 0.05, 0.06, y0 + 2.2), W3(w, x + 0.05, 0.06, y0 + rand(3.0, 6.5)), 0.022); seg('pipeBlack', W3(w, x - 0.08, 0.07, y0 + 2.2), W3(w, x - 0.08, 0.07, top - rand(0.5, 3)), 0.016); }
+      for (const x0p of [w.wa + 0.35, w.wb - 0.35]) if (x0p > lo - 2 && x0p < hi + 2) { const x = pipeX(x0p); const pk = rng() < 0.6 ? 'pipeGrey' : 'pipeRust', r = rand(0.055, 0.075); seg(pk, W3(w, x, 0.13, y0), W3(w, x, 0.13, top - 0.2), r); wfix(w, x - r, x + r, 0.13 + r, top); }
+      for (let x = w.wa + rand(6, 10); x < w.wb - 4; x += rand(7, 11)) if (free(x - 0.3, x + 0.3)) { const xp = pipeX(x); seg('pipeGrey', W3(w, xp, 0.12, y0), W3(w, xp, 0.12, top - 0.2), 0.05); wfix(w, xp - 0.05, xp + 0.05, 0.17, top); }
+      const nr = randi(1, 3); for (let i = 0; i < nr; i++) { let y = y0 + rand(2.9, 4.4) + i * 0.22; if (OP) y = y0 + 2.95 + (y - y0 - 2.9 - i * 0.22) * 0.2 + i * 0.15; // b_alleyface: 2.95–3.55 m, between the openings and the first AC row
+        const pk = i === 1 ? 'pipeBlack' : rng() < 0.5 ? 'pipeRust' : 'pipeGrey', pr = rand(0.025, 0.045), d = 0.09 + i * 0.07;
+        const runs = OP && doorX !== null && doorX - 0.75 > w.wa + 0.2 && doorX + 0.75 < w.wb - 0.2 ? [[w.wa + 0.2, doorX - 0.75], [doorX + 0.75, w.wb - 0.2]] : [[w.wa + 0.2, w.wb - 0.2]]; if (runs.length > 1) AF.runSplit++; // break round the door's sign
+        for (const [ra, rb] of runs) seg(pk, W3(w, ra, d, y), W3(w, rb, d, y), pr); }
+      for (let k = 0; k < Math.max(1, Math.round(len / 9)); k++) { const xr = rand(lo + 0.5, hi - 0.5); if (!free(xr - 0.3, xr + 0.3)) continue; take(xr - 0.3, xr + 0.3);
+        const xj = OP ? clearX(xr, 0.3, y0 + 0.6, y0 + 3.0) : xr; const x = xj ?? xr; if (OP) { if (xj === null) AF.jboxDrop++; else { if (Math.abs(xj - xr) > 1e-6) AF.jboxMoved++; occ.push([x - 0.3, x + 0.3]); } } DRY = xj === null;
+        { const yj = y0 + rand(1.5, 2.0); push('jbox', at(w, x, yj, 0)); wfix(w, x - 0.24, x + 0.24, 0.2, yj + 0.34); }
+        seg('pipeBlack', W3(w, x + 0.05, 0.06, y0 + 2.2), W3(w, x + 0.05, 0.06, y0 + rand(3.0, 6.5)), 0.022); seg('pipeBlack', W3(w, x - 0.08, 0.07, y0 + 2.2), W3(w, x - 0.08, 0.07, top - rand(0.5, 3)), 0.016); DRY = false; }
       { const yb = y0 + rand(3.6, 5.2); let x = w.wa + 0.3; while (x < w.wb - 1.5) { const x2 = Math.min(w.wb - 0.3, x + rand(3.5, 6.5)); cableSpan(W3(w, x, 0.2, yb + rand(-0.1, 0.1)), W3(w, x2, 0.2, yb + rand(-0.1, 0.1)), rand(0.25, 0.55)); x = x2; } }
       // AC clusters: one or two dense zones on the wall, sparse elsewhere; drain lines / wet streaks below some
       const zones = []; for (let i = 0; i < randi(1, 2); i++) { const c = rand(w.wa, w.wb); zones.push([c - rand(2.5, 5), c + rand(2.5, 5)]); }
-      for (let k = 0; k < Math.max(1, nF); k++) { const y = yf - 1.2 + k * fh + 0.35; if (y > top - 1) break;
+      for (let k = 0; k < Math.max(1, nF); k++) { const y = yf - 1.2 + k * fh + 0.35 + (OP && k === 0 ? 0.27 : 0); if (y > top - 1) break; // b_alleyface: first row 3.47–3.87 m, over the service openings
         for (let x = w.wa + 0.8; x < w.wb - 0.6; x += rand(1.1, 1.6)) { const z = zones.some(([p, q]) => x > p && x < q); if (rng() > (z ? 0.72 : 0.12) || !free(x - 0.5, x + 0.5) && y < yf + nF * fh) continue;
-          const yy = y + rand(-0.15, 0.25); push('acBody', at(w, x, yy, 0)); push('acDark', at(w, x, yy, 0));
-          const dr = rng(); if (dr < 0.3) { const yd = y0 + (rng() < 0.5 ? 0.05 : rand(1, 3)); seg('pipeBlack', W3(w, x - 0.38, 0.25, yy), W3(w, x - 0.38, 0.25, yd), 0.012); if (yd < y0 + 2.1) wfix(w, x - 0.41, x - 0.35, 0.27, yy); }
-          else if (dr < 0.65) push('stain', at(w, x + rand(-0.25, 0.25), yy - 0.02, 0, rand(0.7, 1.4), rand(0.8, Math.min(3.5, yy - y0 - 0.2)), 1));
-          if (dr < 0.3 && rng() < 0.6) A.uniq.push({ t: 'pud', x: x - 0.38, z: w.zw + w.s * 0.45, y: y0 + 0.012, r: rand(0.25, 0.5) }); } }
+          const yy = y + rand(-0.15, 0.25); const skip = OP && k === 0 && hitOcc(x - 0.5, x + 0.5); if (skip) { AF.acSkip++; DRY = true; } // not over a moved door's sign
+          push('acBody', at(w, x, yy, 0)); push('acDark', at(w, x, yy, 0));
+          const dr = rng(); if (dr < 0.3) { let yd = y0 + (rng() < 0.5 ? 0.05 : rand(1, 3)); { const o = hitO(x - 0.4, x - 0.36, yd, yy); if (o && o.top < yy - 0.1) { yd = Math.max(yd, o.top + 0.05); AF.drainCut++; } } // drain line ends over an opening
+            seg('pipeBlack', W3(w, x - 0.38, 0.25, yy), W3(w, x - 0.38, 0.25, yd), 0.012); if (yd < y0 + 2.1) wfix(w, x - 0.41, x - 0.35, 0.27, yy); }
+          else if (dr < 0.65) { const xs2 = x + rand(-0.25, 0.25), sx = rand(0.7, 1.4); let sy = rand(0.8, Math.min(3.5, yy - y0 - 0.2)); const o = hitO(xs2 - 0.07 * sx, xs2 + 0.07 * sx, yy - 0.02 - sy, yy);
+            if (o && o.top < yy) { sy = Math.min(sy, yy - 0.04 - o.top); AF.stainCut++; } if (sy >= 0.2) push('stain', at(w, xs2, yy - 0.02, 0, sx, sy, 1)); else AF.stainDrop++; }
+          if (dr < 0.3 && rng() < 0.6) uq({ t: 'pud', x: x - 0.38, z: w.zw + w.s * 0.45, y: y0 + 0.012, r: rand(0.25, 0.5) }); DRY = false; } }
       // exhaust hood + steam (kitchen / laundry vent) on some walls
-      if (rng() < 0.55) { const x = rand(lo + 0.5, hi - 0.5); if (free(x - 0.5, x + 0.5)) { take(x - 0.5, x + 0.5); const y = y0 + rand(2.3, 3.0); push('vent', at(w, x, y, 0)); A.uniq.push({ t: 'steam', p: W3(w, x, 0.45, y - 0.1), w: rand(0.6, 1.0), h: rand(2.2, 3.4) }); A.steam = (A.steam || 0) + 1; } }
+      if (rng() < 0.55) { const xr = rand(lo + 0.5, hi - 0.5); if (free(xr - 0.5, xr + 0.5)) { take(xr - 0.5, xr + 0.5); const y = y0 + rand(2.3, 3.0);
+        const xv = OP ? clearX(xr, 0.4, y - 0.25, y + 0.3) : xr; const x = xv ?? xr; if (OP) { if (xv === null) AF.ventDrop++; else { if (Math.abs(xv - xr) > 1e-6) AF.ventMoved++; occ.push([x - 0.4, x + 0.4]); } } DRY = xv === null;
+        push('vent', at(w, x, y, 0)); uq({ t: 'steam', p: W3(w, x, 0.45, y - 0.1), w: rand(0.6, 1.0), h: rand(2.2, 3.4) }); if (!DRY) A.steam = (A.steam || 0) + 1; DRY = false; } }
       // ground clutter clusters
-      for (let x = lo + rand(0, 1.5); x < hi - 1;) { const L = rand(1.2, 2.8); if (x + L < hi && free(x, x + L) && rng() < 0.7) { take(x, x + L); cluster(w.s, w.zw, x, L, y0); } x += L + rand(0.6, 3.5); }
+      for (let x = lo + rand(0, 1.5); x < hi - 1;) { const L = rand(1.2, 2.8); if (x + L < hi && free(x, x + L) && rng() < 0.7) { take(x, x + L);
+        DRY = !!OP && (OP.some((o) => o.floor && x + L > o.x0 + 0.25 && x < o.x1 - 0.25) || occ.some(([p, q]) => q - p > 1.5 && x + L > p + 0.2 && x < q - 0.2)); if (DRY) AF.clusterDrop++; // not in front of a door / shutter
+        cluster(w.s, w.zw, x, L, y0); DRY = false; } x += L + rand(0.6, 3.5); }
     }
     // ---- open back yards between the building runs: sparse clutter on the alley edge, long cable runs between same-side walls
     for (const s of [1, -1]) {

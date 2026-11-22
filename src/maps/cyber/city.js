@@ -17,6 +17,7 @@ import { neonGlowMat, neonReflMat } from './neontube.js';
 import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
+import { AF_OFF, svcBays, SVC } from './svcface.js'; // b_alleyface
 import { pedLoop, addPropCols, lanePoint, pedPath, pathLanePoint, pedWarm, pedWant } from './pedlane.js';
 const Q_NOPALM = typeof location !== 'undefined' && /[?&]nopalmloop\b/.test(location.search); // test switch: old loops, no prop colliders
 const Q_NOSP = Q_NOPALM || (typeof location !== 'undefined' && /[?&]nostreetpeds\b/.test(location.search)); // test switch (b_streetpeds): old graph paths, loops solved on first use, no bollard colliders
@@ -183,9 +184,11 @@ export function buildCity(scene, mats, T) {
   const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [] };
   for (const b of blocks) {
     if (b.area === 'promenade') { promenade(W, b, shrubs, trees); continue; }
+    bld.curBlock = b; // b_alleyface: volume() tells street fronts from alley / back-yard / gap faces by the block's lot (no rng use)
     if (b.area === 'island') islandBlock(bld, b, palms, trees, shrubs);
     else if (b.area === 'bayfront') bayfrontBlock(bld, b, palms, trees);
     else downtownBlock(bld, b, palms, trees);
+    bld.curBlock = null;
   }
   // ------------------------------------------- v4.0 district edges + far skyline ----
   districtEdges(bld, deco);
@@ -339,17 +342,20 @@ export function volume(ctx, poly, y0, y1, opts) {
   const seed = rand(0, 100);
   if (y0 < 1.75 && streamed(ctx)) FOOT_LOG.push(poly); // b_parcelfit
   const ground = opts.ground ?? 4.6;
+  const svc = opts.store && y0 < 1 ? svcEdges(ctx, poly, seed, opts.storeW || 4.5, y0) : null; // b_alleyface
   if (opts.store && y0 < 1) {
-    prismWalls(b, poly, y0, y0 + ground, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]), null, 0, true);
+    const fa = facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]);
+    prismWalls(b, poly, y0, y0 + ground, svc ? (i, len) => (svc[i] ? { aWin: [6, ground, svc[i].ww, seed], aCol: opts.wall, aGlass: [svc[i].ps, svc[i].kind, y0], aUp: [0, 0, 0] } : fa(i, len)) : fa, null, 0, true);
     prismWalls(b, poly, y0 + ground, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
   } else prismWalls(b, poly, y0, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
   if (opts.relief !== false && (opts.style === 0 || opts.style === 2 || opts.style === 1)) relief(ctx, poly, opts.store && y0 < 1 ? y0 + ground : y0, y1, opts.fh, opts.ww, opts.style, opts.wall, y1 - y0 > 40 || opts.lite);
-  if (opts.store && y0 < 1 && opts.canopy !== false) canopies(ctx, poly, y0 + ground, opts.wall);
-  if (opts.store && y0 < 1) shopfront(ctx, poly, y0, ground, opts.storeW || 4.5, opts.wall);
+  if (opts.store && y0 < 1 && opts.canopy !== false) canopies(ctx, poly, y0 + ground, opts.wall, svc);
+  if (opts.store && y0 < 1) shopfront(ctx, poly, y0, ground, opts.storeW || 4.5, opts.wall, svc);
   polyCap(W.b('roof', cx, cz), poly, y1);
   if (opts.collide !== false) {
     const xs = poly.map((p) => p[0]), zs = poly.map((p) => p[1]);
     const bx = col.add(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), y1, 'bld');
+    if (bx && !streamed(ctx) && svc) bx.svc = svc; // b_alleyface: service edges (alley.js keeps its wall fixtures off the openings)
     if (bx && !streamed(ctx)) bx.poly = poly; // b_coreflow: the real footprint, for storefront.js exactCore() (no rng use, box unchanged here)
   }
 }
@@ -395,23 +401,58 @@ function relief(ctx, poly, y0, y1, fh, ww, style, wall, lite) {
     }
   }
 }
+// b_alleyface: which store-band edges of a hand-built core volume face an alley / back yard / gap instead of a street: the point
+// 4 m out from the edge middle still lies inside the block's lot (b.inner, i.e. not on the sidewalk). Edges < 2 m (the rounded
+// Deco corners) stay shopfront. Returns per edge null or { ww, ps, kind (1 alley, 0 back / gap), p, dx, dz, len, y0 }. No rng use.
+function svcEdges(ctx, poly, seed, sw, y0) {
+  if (AF_OFF || streamed(ctx) || !ctx.curBlock || !ctx.curBlock.inner) return null;
+  const [ix0, iz0, ix1, iz1] = ctx.curBlock.inner; let any = false;
+  const out = poly.map((p, i) => { const E = edgeFrame(poly, i); if (E.len < 2) return null; const q = E.P(E.len / 2, 4);
+    if (!(q[0] > ix0 && q[0] < ix1 && q[1] > iz0 && q[1] < iz1)) return null;
+    const kind = (ctx.alleys || []).some((a) => Math.abs(q[1] - a.z) < a.w / 2 + 1.5 && q[0] > a.x0 && q[0] < a.x1) ? 1 : 0;
+    const n = Math.max(1, Math.round(E.len / sw)); any = true;
+    return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: p, dx: E.dx, dz: E.dz, len: E.len, y0 }; });
+  return any ? out : null;
+}
+// b_alleyface: the real pieces of a service face (the rest is the style-6 shader): concrete plinth, roller-shutter housings,
+// steel door hoods, delivery-hatch sill + housing, meter cabinets. Bays from svcface.js (same rule as the shader).
+const SVC_STAT = { edges: 0, alley: 0, bays: 0, open: [0, 0, 0, 0, 0, 0] };
+export { SVC_STAT };
+function svcFront(b, E, y0, ground, s) {
+  const galv = [0.40, 0.43, 0.45], dark = [0.17, 0.18, 0.19], steel = [0.33, 0.34, 0.35], cab = [0.52, 0.55, 0.53], plinth = [0.30, 0.30, 0.29];
+  SVC_STAT.edges++; if (s.kind) SVC_STAT.alley++;
+  lbox(b, E, 0, E.len, -0.02, 0.06, y0, y0 + 0.3, plinth); // concrete plinth (splash zone)
+  const n = Math.max(1, Math.round(E.len / s.ww)); SVC_STAT.bays += n;
+  for (const o of svcBays(E.len, s.ww, s.ps)) { SVC_STAT.open[o.t]++; const a0 = o.c - o.hw, a1 = o.c + o.hw;
+    if (o.t === SVC.SHUT) { lbox(b, E, a0 - 0.1, a1 + 0.1, -0.02, 0.3, y0 + 2.55, y0 + 2.86, galv, true); // roll housing
+      for (const a of [a0 - 0.07, a1 + 0.07]) lbox(b, E, a - 0.035, a + 0.035, -0.02, 0.09, y0 + 0.06, y0 + 2.55, steel); } // guide rails
+    else if (o.t === SVC.DOOR) { lbox(b, E, a0 - 0.2, a1 + 0.2, -0.02, 0.42, y0 + 2.28, y0 + 2.36, dark, true); // drip hood
+      lbox(b, E, a0 - 0.08, a1 + 0.08, -0.02, 0.05, y0 + 2.15, y0 + 2.22, steel); lbox(b, E, a0 - 0.08, a0, -0.02, 0.05, y0, y0 + 2.15, steel); lbox(b, E, a1, a1 + 0.08, -0.02, 0.05, y0, y0 + 2.15, steel); }
+    else if (o.t === SVC.HATCH) { lbox(b, E, a0 - 0.12, a1 + 0.12, -0.02, 0.34, y0 + 0.9, y0 + 1.0, steel, true); lbox(b, E, a0 - 0.08, a1 + 0.08, -0.02, 0.22, y0 + 2.05, y0 + 2.26, galv, true); }
+    else if (o.t === SVC.LOUV) lbox(b, E, a0 - 0.05, a1 + 0.05, -0.02, 0.09, y0 + 1.84, y0 + 1.9, steel, true); // drip sill
+    else if (o.t === SVC.METER) lbox(b, E, a0, a1, -0.02, 0.22, y0 + 1.1, y0 + 2.25, cab, true); // meter cabinet
+  }
+  void ground;
+}
 // v3.5 shopfront geometry on the ground-floor band: piers between bays, projecting transom / sign ledge, stone kick plate
-function shopfront(ctx, poly, y0, ground, sw, wall) {
+function shopfront(ctx, poly, y0, ground, sw, wall, svc = null) {
   const b = ctx.W.b('vcol', poly[0][0], poly[0][1]);
-  if (!streamed(ctx)) for (let i = 0; i < poly.length; i++) { const E = edgeFrame(poly, i); if (E.len >= 4) CORE_SHOP_LOG.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ground, sw }); } // no rng use
+  if (!streamed(ctx)) for (let i = 0; i < poly.length; i++) { const E = edgeFrame(poly, i); if (E.len >= 4) CORE_SHOP_LOG.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ground, sw, svc: !!(svc && svc[i]) }); } // no rng use; b_alleyface: storefront.js skips svc edges
   const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 2.5) continue; const n = Math.max(1, Math.round(E.len / sw)); const cw = E.len / n;
+    if (svc && svc[i]) { svcFront(b, E, y0, ground, svc[i]); continue; } // b_alleyface: service frontage instead of shop piers / sign ledge
     for (let k = 0; k <= n; k++) { const a = k * cw; lbox(b, E, Math.max(0, a - 0.17), Math.min(E.len, a + 0.17), -0.02, 0.2, y0, y0 + ground - 0.05, pier); }
     const yt = 0.8 * ground; lbox(b, E, 0, E.len, -0.02, 0.3, yt, yt + 0.14, ledge, true);
     lbox(b, E, 0, E.len, -0.02, 0.07, y0, 0.06 * ground + 0.04, kick);
   }
 }
-function canopies(ctx, poly, y, wall) {
+function canopies(ctx, poly, y, wall, svc = null) {
   const b = ctx.W.b('vcol', poly[0][0], poly[0][1]); const dark = [0.22, 0.23, 0.25], soffit = [0.85, 0.85, 0.83];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 12) continue;
     const a0 = E.len * rand(0.1, 0.3), a1 = E.len * rand(0.7, 0.9); const dep = rand(1.8, 2.6);
+    if (svc && svc[i]) continue; // b_alleyface: no shop canopy over a service face (the three rand() above still run: same rng order)
     lbox(b, E, a0, a1, 0, dep, y - 0.12, y + 0.18, dark, true); // canopy slab
     lbox(b, E, a0, a1, dep - 0.05, dep + 0.03, y - 0.25, y + 0.3, soffit); // fascia
     for (const a of [a0 + 0.4, a1 - 0.4]) lbox(b, E, a - 0.05, a + 0.05, 0.1, dep - 0.2, y + 0.18, y + 1.6, dark); // tie-back rods

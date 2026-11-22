@@ -230,7 +230,8 @@ export class StorefrontLayer {
       || (gr && (() => { const n = gr.index.near(x, z); return n && n.d < n.e.hw + 7; })());
     const inBld = (x, z) => col.query(x, z, 0.5, []).some((b) => b.tag === 'bld' && x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ);
     E.forEach((e, ei) => {
-      bs.edges++; const ox = -e.dz, oz = e.dx; const P = (a, d) => [e.p[0] + e.dx * a + ox * d, e.p[1] + e.dz * a + oz * d];
+      bs.edges++; if (e.svc) { bs.rejSvc = (bs.rejSvc || 0) + 1; return; } // b_alleyface: alley / back-yard service face -> no shop (index ei unchanged)
+      const ox = -e.dz, oz = e.dx; const P = (a, d) => [e.p[0] + e.dx * a + ox * d, e.p[1] + e.dz * a + oz * d];
       // faces a street sidewalk: a road within reach of the edge middle, and no building right in front (party walls, back yards)
       let ok = true; for (const t of [0.25, 0.5, 0.75]) { const q = P(e.len * t, 1.5); if (inBld(q[0], q[1])) { ok = false; break; } } if (!ok) { bs.rejBld = (bs.rejBld || 0) + 1; return; }
       { const q = P(e.len / 2, 1.5); if (!nearRoad(q[0], q[1])) { bs.rejRoad = (bs.rejRoad || 0) + 1; return; } }

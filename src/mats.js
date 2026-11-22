@@ -298,8 +298,82 @@ vec2 fw = fwidth(cf); float aa = smoothstep(0.18, 0.6, max(fw.x, fw.y));
 float avgG = style == 0.0 ? 0.80 : (style == 1.0 ? 0.76 : (style == 5.0 ? 0.48 : (style == 3.0 ? 0.70 : (style == 2.0 ? 0.22 : 0.0))));
 isGlass = mix(isGlass, avgG, aa); frame = mix(frame, (1.0 - avgG) * (style == 2.0 || style == 5.0 ? 0.15 : 0.7), aa); shade = mix(shade, 1.0, aa); bl *= 1.0 - aa;
 frameCol *= 0.88 + 0.24 * vnoise(vUvM * vec2(13.0, 17.0) + seed); // r6.1 paint wear / dirt on frames
-vec3 col = mix(wallCol, frameCol, frame);
-reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
+${CYBER ? `// b_alleyface (霓港): style 6 = service frontage of the core's ground floor facing an alley / back yard / gap (city.js svcEdges):
+// sooty concrete + glazed tile dado, roller shutters, steel doors with an exit sign, exhaust louvres, delivery hatches, meter
+// conduits, paper notices, rust run-off. Bay plan = svcface.js (v = (7k + ps) mod 11; vGlass = (ps, alley?, band base y)).
+float svcM = 0.0, svcH = 0.0, svcR = 0.8, svcMet = 0.0; vec3 svcC = vec3(0.0), svcE = vec3(0.0);
+if (style == 6.0) {
+  float yb = vUvM.y - vGlass.z; float uu = vUvM.x; float kb = floor(uu / ww); float lu = uu - (kb + 0.5) * ww;
+  float vv = mod(kb * 7.0 + vGlass.x, 11.0);
+  float t = vv < 1.5 ? 0.0 : (vv < 3.5 ? 1.0 : (vv < 5.5 ? 2.0 : (vv < 7.5 ? 3.0 : (vv < 8.5 ? 4.0 : 5.0))));
+  if (ww < 2.4) t = 0.0;
+  float hs = h12(vec2(kb * 1.31 + 0.7, seed * 0.53));
+  float px = max(max(fwidth(uu), fwidth(yb)), 1e-4); float fine = 1.0 - smoothstep(0.012, 0.04, px);
+  vec3 wc = mix(wallCol, concP * vec3(0.62, 0.62, 0.60), 0.55 + 0.2 * vGlass.y) * (0.92 + 0.16 * hs);
+  float dado = step(yb, 1.25);
+  vec2 tg = vec2(uu / 0.2, yb / 0.15); vec2 tq = abs(fract(tg) - 0.5); float tin = 1.0 - smoothstep(0.43, 0.48, max(tq.x, tq.y));
+  tin = mix(tin, 0.88, 1.0 - fine); float tv = h12(floor(tg) + seed);
+  vec3 tileC = mix(vec3(0.74, 0.76, 0.72), vec3(0.36, 0.52, 0.46), step(0.5, fract(seed * 0.37))) * (0.86 + 0.18 * tv);
+  tileC = mix(tileC * 0.45, tileC, tin); tileC = mix(tileC, wc * 0.55, step(0.972, tv) * fine);
+  tileC *= 1.0 - 0.4 * smoothstep(0.7, 0.0, yb) * (0.6 + 0.4 * vnoise(vec2(uu * 1.7, seed)));
+  wc = mix(wc, tileC, dado); wc *= 1.0 - 0.45 * step(abs(yb - 1.26), 0.022);
+  float stk = smoothstep(0.55, 0.9, vnoise(vec2(uu * 2.3, seed * 1.9)) * 0.7 + vnoise(vec2(uu * 7.1, yb * 0.15)) * 0.3);
+  wc *= 1.0 - stk * 0.28 * (1.0 - dado * 0.6);
+  svcC = wc; svcM = 1.0; svcR = mix(0.88, 0.22 + 0.25 * (1.0 - tin), dado); svcH = dado * (tin - 1.0) * 0.004 * fine;
+  float hw = 0.0, o0 = 0.0, o1 = 0.0;
+  if (t == 2.0) { hw = min(ww * 0.5 - 0.45, 1.5); o1 = 2.55; }
+  else if (t == 5.0) { hw = 0.5; o1 = 2.15; }
+  else if (t == 4.0) { hw = min(0.7, ww * 0.5 - 0.5); o0 = 1.0; o1 = 2.05; }
+  else if (t == 3.0) { hw = 0.6; o0 = 1.9; o1 = 2.7; }
+  float inO = step(abs(lu), hw) * step(o0, yb) * step(yb, o1); float oy = yb - o0;
+  if (t == 3.0 || t == 4.0 || t == 1.0) { float b0 = t == 1.0 ? 1.1 : o0 - 0.08; float hw2 = t == 1.0 ? 0.45 : hw;
+    float run = step(abs(lu), hw2) * step(yb, b0) * smoothstep(b0 - 1.6, b0, yb) * smoothstep(0.3, 0.75, vnoise(vec2(lu * 6.0, hs * 9.0)));
+    svcC = mix(svcC, svcC * vec3(0.55, 0.42, 0.33), run * 0.7); }
+  if (t == 2.0 || t == 4.0) {
+    float sl = fract(oy / 0.075);
+    vec3 sc = mix(vec3(0.52, 0.55, 0.57), vec3(0.34, 0.38, 0.42), step(0.5, hs)) * (0.82 + 0.3 * vnoise(vec2(uu * 2.6, yb * 0.9) + seed));
+    sc *= mix(0.86, 0.68 + 0.36 * smoothstep(0.0, 0.55, sl) * smoothstep(1.0, 0.75, sl), fine);
+    sc = mix(sc, vec3(0.30, 0.19, 0.12), smoothstep(0.7, 0.0, oy) * 0.55 * vnoise(vec2(uu * 4.0, 3.0)));
+    float tag = step(0.45, hs) * smoothstep(0.5, 0.56, vnoise(vec2(lu * 1.6, yb * 2.4) + hs * 17.0)) * step(abs(lu), hw - 0.15) * step(0.35, oy) * step(yb, o1 - 0.3);
+    sc = mix(sc, neonPal(hs * 3.7) * 0.75 + 0.05, tag * 0.85);
+    sc = mix(sc, vec3(0.12, 0.12, 0.13), step(oy, 0.07));
+    sc = mix(sc, vec3(0.05), step(abs(lu), 0.06) * step(abs(oy - 0.16), 0.05) * step(o0, 0.5));
+    svcC = mix(svcC, sc, inO); svcR = mix(svcR, 0.5 + 0.2 * tag, inO); svcMet = 0.6 * inO * (1.0 - tag);
+    svcH += inO * (smoothstep(0.0, 0.5, sl) * smoothstep(1.0, 0.5, sl) - 0.5) * 0.006 * fine;
+  } else if (t == 5.0) {
+    vec3 dc = hs < 0.33 ? vec3(0.17, 0.27, 0.22) : (hs < 0.66 ? vec3(0.40, 0.16, 0.12) : vec3(0.28, 0.30, 0.33));
+    dc *= 0.8 + 0.35 * vnoise(vec2(uu * 3.0, yb * 1.3) + seed);
+    float pnl = step(0.06, hw - abs(lu)) * step(abs(abs(lu) - (hw - 0.1)), 0.012) * step(0.3, yb) * step(yb, 2.0);
+    float grl = step(abs(lu), hw - 0.14) * step(0.25, yb) * step(yb, 0.55) * step(0.5, fract(yb / 0.04));
+    float kick = step(yb, 0.24); float lever = step(abs(lu - hw * 0.62), 0.07) * step(abs(yb - 1.03), 0.025);
+    vec3 dcol = mix(dc, dc * 0.55, pnl); dcol = mix(dcol, vec3(0.05), grl * fine); dcol = mix(dcol, vec3(0.42, 0.42, 0.40), kick); dcol = mix(dcol, vec3(0.7, 0.7, 0.66), lever);
+    dcol *= 1.0 - 0.3 * smoothstep(0.5, 0.0, abs(lu - hw * 0.6)) * smoothstep(0.6, 1.1, yb) * step(yb, 1.5);
+    svcC = mix(svcC, dcol, inO); svcR = mix(svcR, 0.48, inO); svcMet = 0.45 * inO;
+    float sgn = step(abs(lu), 0.17) * step(abs(yb - 2.49), 0.07);
+    float gly = sgn * step(0.5, fract(lu * 9.0 + 0.25)) * step(abs(yb - 2.49), 0.035) * fine;
+    svcC = mix(svcC, mix(vec3(0.1, 0.75, 0.35), vec3(0.9), gly), sgn); svcE = vec3(0.15, 1.0, 0.4) * sgn * (1.0 - gly * 0.6) * 2.2;
+  } else if (t == 3.0) {
+    float bl_ = fract(oy / 0.07); float fr_ = clamp(step(hw - 0.05, abs(lu)) + step(oy, 0.05) + step(o1 - 0.05, yb), 0.0, 1.0);
+    vec3 lc = mix(vec3(0.05), vec3(0.46, 0.48, 0.49) * (0.7 + 0.5 * smoothstep(0.2, 0.7, bl_)), mix(0.6, step(0.35, bl_), fine));
+    lc = mix(lc, vec3(0.40, 0.42, 0.43), fr_); lc = mix(lc, lc * vec3(0.7, 0.55, 0.42), 0.4 * vnoise(vec2(lu * 5.0, yb * 4.0)));
+    svcC = mix(svcC, lc, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.5 * inO; svcH += inO * (bl_ - 0.5) * 0.008 * fine;
+  } else if (t == 1.0) {
+    float cy = step(2.2, yb) * step(yb, fh - 0.05);
+    float cnd = clamp(cy * (step(abs(lu + 0.24), 0.022) + step(abs(lu), 0.028) + step(abs(lu - 0.24), 0.018)), 0.0, 1.0);
+    float clp = cnd * step(0.85, fract(yb / 0.9));
+    svcC = mix(svcC, vec3(0.16, 0.17, 0.18) + clp * 0.25, cnd); svcH += cnd * 0.01 * fine;
+    float lab = step(abs(lu - 0.66), 0.09) * step(abs(yb - 1.75), 0.06); svcC = mix(svcC, vec3(0.85, 0.7, 0.1), lab);
+  } else {
+    float pw = 0.32 + 0.2 * fract(hs * 7.0); float pcx = (fract(hs * 3.3) - 0.5) * max(ww - 1.2, 0.0);
+    float pp = step(0.55, hs) * step(abs(lu - pcx), pw * 0.5) * step(abs(yb - 1.65), 0.24);
+    vec3 pcol = mix(vec3(0.82, 0.8, 0.72), vec3(0.85, 0.3, 0.25), step(0.8, hs)) * (0.7 + 0.3 * vnoise(vec2(uu * 8.0, yb * 8.0)));
+    pcol = mix(pcol, vec3(0.15), step(0.5, fract(yb * 14.0)) * step(abs(lu - pcx), pw * 0.35) * step(abs(yb - 1.62), 0.12) * fine);
+    svcC = mix(svcC, pcol, pp); svcR = mix(svcR, 0.9, pp);
+  }
+  svcH *= 1.0 - smoothstep(0.08, 0.3, px);
+}
+` : ''}vec3 col = mix(wallCol, frameCol, frame);
+${CYBER ? 'col = mix(col, svcC, svcM); // b_alleyface\n' : ''}reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
 col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
@@ -313,10 +387,10 @@ roughnessFactor *= mix(texelRoughness.g * 0.9 + 0.1, 0.35 + 0.2 * micro, frame);
 roughnessFactor *= 0.9 + 0.2 * micro;
 ${CYBER ? `roughnessFactor = mix(roughnessFactor, 0.32, clamp(streak * 3.0 + roofStreak * 0.5 + plinth * 0.6, 0.0, 1.0) * (0.35 + 0.65 * uNight)); // wet run-off / splash zone` : ``}
 roughnessFactor = mix(roughnessFactor, mix(0.02 + 0.06 * rnd2 + gDirt * 0.25, 0.6, bl), isGlass);
-`)
+${CYBER ? 'roughnessFactor = mix(roughnessFactor, svcR, svcM); // b_alleyface\n' : ''}`)
       .replace('#include <metalnessmap_fragment>', `
 float metalnessFactor = mix(isMetal * 0.7, (style == 0.0 ? 0.9 : (style == 3.0 ? 0.45 : 0.6)) * (1.0 - bl), isGlass);
-`)
+${CYBER ? 'metalnessFactor = max(metalnessFactor, svcMet); // b_alleyface\n' : ''}`)
       .replace('#include <normal_fragment_maps>', `
 #include <normal_fragment_maps>
 normal = normalize(mix(normal, nonPerturbedNormal, max(isGlass, frame)));
@@ -324,7 +398,7 @@ normal = normalize(mix(normal, nonPerturbedNormal, max(isGlass, frame)));
 { float wallOnly = (1.0 - isGlass) * (1.0 - frame) * (1.0 - reveal) * (1.0 - aa);
 ${CYBER ? `  float hb = (vnoise(vUvM * vec2(3.0, 1.2) + seed) * 0.5 + vnoise(vUvM * 9.0) * 0.25) * 0.006 - smoothstep(0.035, 0.0, abs(fract(vUvM.y / 1.2) - 0.5) - 0.465) * 0.004
            - smoothstep(0.06, 0.0, length(fract(vUvM / vec2(0.9, 0.6)) - 0.5)) * 0.003;` : `  float hb = (vnoise(vUvM * vec2(2.3, 2.9) + seed) * 0.55 + vnoise(vUvM * 8.5 + 3.0) * 0.3 + vnoise(vUvM * 23.0) * 0.15) * 0.007;`}
-  hb *= wallOnly;
+${CYBER ? '  hb += svcH; // b_alleyface\n' : ''}  hb *= wallOnly;
   vec2 dH = vec2(dFdx(hb), dFdy(hb));
   vec3 sX = dFdx(-vViewPosition), sY = dFdy(-vViewPosition); vec3 R1 = cross(sY, normal), R2 = cross(normal, sX);
   float fDet = dot(sX, R1) * faceDirection; vec3 vGrad = sign(fDet) * (dH.x * R1 + dH.y * R2);
@@ -462,6 +536,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
   totalEmissiveRadiance += room * inside * k;
 ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner strip on towers, neon fascia over storefronts
   if (n > 0.01) {
+    totalEmissiveRadiance += svcE * n; // b_alleyface: exit signs over the service doors
     vec3 pc = neonPal(seed * 0.137 + 0.05);
     float fl = cid.y;
     if (style == 0.0 || style == 1.0 || (style == 2.0 && vUvM.y > 16.0 && fract(seed * 0.31) < 0.5)) {
@@ -487,7 +562,7 @@ ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner stri
       float fall = exp(-max(dy, 0.0) / 2.2) * step(-0.2, dy) + exp(min(dy, 0.0) / 1.4) * (1.0 - step(-0.2, dy)) * 0.8;
       fall *= smoothstep(13.0, 2.0, vUvM.y);
       vec3 spillC = neonPal(seed * 0.21 + bay * 0.37);
-      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6; }
+      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6 * (style == 6.0 ? 0.25 : 1.0); } // b_alleyface: weak spill on service faces
   }
 ` : ``}  // coloured facade up-lighting on the Art Deco hotels at night
   float wallM = (1.0 - isGlass) * (1.0 - frame * 0.5);
