@@ -111,7 +111,7 @@ export function buildProps(scene, city, T) {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);
     m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, s1); im.setMatrixAt(i, m4); glow.setMatrixAt(i, m4); const a = m4.clone();
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
-    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
+    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), CYBER ? POOL_S : s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
   // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
   // the lamp head, fading toward its rim (view-facing ratio) and the ground; warm sodium/LED white on 索拉纳港, the cyan/magenta
@@ -336,13 +336,14 @@ export function updateProps(P, cam, night, phase) {
 // b_lampfix (霓港 only): the 10 cool-LED street-lamp point lights were 60 / range 30 / decay 1.6 — a lamp head 8.6 m up lit the
 // asphalt under it ~16x brighter than the moon key and turned the stall-street road into white patches. New default: a dimmer,
 // shorter, physically-falling-off pool so the road reads as a lamp pool and the neon practicals stay the key light.
-//   K = [intensity, range m, decay, ground-pool decal gain, wet-streak gain]; ?oldlamp → the old values (for comparison);
-//   ?lampk=I,R,D,pool,streak overrides for tuning; globalThis.__LAMPK = [...] swaps them at runtime (test plans).
+//   K = [intensity, range m, decay, ground-pool decal gain, wet-streak gain, ground-pool radius scale (build time)]; ?oldlamp → the old values (for comparison);
+//   ?lampk=I,R,D,pool,streak,poolscale overrides for tuning; globalThis.__LAMPK = [...] swaps them at runtime (test plans).
 // Map 索拉纳港 (A) keeps 60 / 30 / 1.6 untouched. No new lights, no new shader programs (distance / decay / colours are uniforms).
-const LAMP_OLD = [60, 30, 1.6, 1, 1], LAMP_NEW = [18, 24, 2.0, 0.55, 0.6];
+const LAMP_OLD = [60, 30, 1.6, 1, 1, 1], LAMP_NEW = [24, 24, 2.0, 0.35, 0.6, 0.7];
 const LAMP_Q = typeof location !== 'undefined' ? location.search : '';
 const LAMP_K = /[?&]oldlamp\b/.test(LAMP_Q) ? LAMP_OLD : (() => { const m = /[?&]lampk=([0-9.,]+)/.exec(LAMP_Q); if (!m) return LAMP_NEW; const v = m[1].split(',').map(Number); return LAMP_NEW.map((d, i) => (isFinite(v[i]) && v[i] >= 0 && i < v.length ? v[i] : d)); })();
 const POOL_C = [0.45, 0.78, 1.0];
+const POOL_S = new THREE.Vector3(LAMP_K[5], 1, LAMP_K[5]); // b_lampfix: 霓港 ground-pool decal radius (16 m quad × K[5]; build time only)
 export function updateLampLights(P, lamps, pos, night) {
   const K = CYBER ? (globalThis.__LAMPK || LAMP_K) : LAMP_OLD;
   if (CYBER) { if (P.pools) P.pools.material.uniforms.uCol.value.setRGB(POOL_C[0] * K[3], POOL_C[1] * K[3], POOL_C[2] * K[3]); for (const pl of P.lampLights) { pl.distance = K[1]; pl.decay = K[2]; } }
