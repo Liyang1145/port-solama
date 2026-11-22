@@ -14,6 +14,7 @@ import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { cnText, cnMeasure, cnReady, cnWhenReady } from './cnglyph.js';
+import { clutSnap, clutGrab } from './clutcap.js'; // b_clutter
 
 // ------------------------------------------------------------------ text atlas ----
 // 1024²: rows 0-5 = 24 shop sign cells (256×128), rows 6-7 = 16 sticker cells (128×128)
@@ -301,10 +302,10 @@ export function wiring(W, F, a, y0, yt, next = null) {
   if (next != null) cableBundle(c, V3(F, a, 0.12, yt + 0.55), V3(F, next, 0.12, yt + 0.5), rand(0.25, 0.6));
 }
 // per-bay extras for shopStreet: stickers everywhere (more on gritty streets), condensers, wiring runs
-export function shopBits(W, F, a0, a1, y0, yt, grit, last) {
+export function shopBits(W, F, a0, a1, y0, yt, grit, last, clut = false) {
   const n = Math.round(rand(0, 3 + grit * 6)); if (n) stickers(W, F, a1 - 0.25, a1 + 0.25, y0, n);
   if (rng() < 0.25 + grit * 0.2) stickers(W, F, a0 + 0.3, a1 - 0.3, y0, randi(1, 3), 0.29); // on the shutter / glass line
-  if (rng() < 0.22 + grit * 0.25) condenser(W, F, rand(a0 + 0.7, a1 - 0.7), y0, yt);
+  if (rng() < 0.22 + grit * 0.25) { const s0 = clut && clutSnap(W); condenser(W, F, rand(a0 + 0.7, a1 - 0.7), y0, yt); if (clut) clutGrab(W, s0, F, y0, 'cond'); } // b_clutter: ground AC unit stands 0.56 m proud
   if (rng() < 0.18 + grit * 0.3) wiring(W, F, a1 + 0.02, y0, yt, last ? null : a1 + rand(3, 6));
 }
 void RUST;

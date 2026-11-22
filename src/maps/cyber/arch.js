@@ -12,6 +12,7 @@ import { box, polyCap, prismWalls, rect } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL, RUST } from './kit.js';
 import { grime, sidewalk, hangingSign, laundryLine, streak } from './dress.js';
+import { clutSnap, clutGrab } from './clutcap.js'; // b_clutter
 import { cnSignboard, shopBits } from './street2.js';
 
 // --------------------------------------------------------------- shop street ----
@@ -36,8 +37,8 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     if (opts.signs !== false && rng() < 0.75) { if (rng() < 0.5) { sk = cnSignboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.7, 0.95)); sg = 1; } else { signboard(W, F, a0 + 0.1, a1 - 0.1, y0 + ground * 0.8 + 0.18, rand(0.6, 0.9), y0); sg = 2; } }
     // r6.4 b_storefront: streamed parcels (stub collider, no query) log each bay for storefront.js — no rng use, geometry unchanged
     if (LOG) LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, aw, sw: swl, i, n });
-    if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1);
-    if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } }
+    if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1, !!swl);
+    if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); const s0 = swl && clutSnap(W); for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } if (swl) clutGrab(W, s0, F, y0, 'vend'); }
   }
   // r6.3: hanging light-box signs on wall arms over the pavement (every couple of bays) + sidewalk dressing (bins, trash, crates,
   // food stalls, umbrella tables, puddles, ground pipes) weighted by how gritty the street is

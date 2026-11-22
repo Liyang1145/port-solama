@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies } from './city.js';
+import { CLUT_CTX } from './clutcap.js'; // b_clutter
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
@@ -154,8 +155,8 @@ export class Stream {
     for (const p of c.parcels) {
       if (p.far) continue;
       const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [] };
-      withSeed(p.seed, () => genParcel(ctx, p));
-      const m = parcelMatrix(p);
+      const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
+      withSeed(p.seed, () => genParcel(ctx, p)); CLUT_CTX.m = null;
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
       if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
     }

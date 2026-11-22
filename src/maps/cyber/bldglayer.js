@@ -19,6 +19,8 @@ import { RoofLayer } from './roofs.js';
 import { ParcelGapLayer } from './parcelgap.js';
 import { StorefrontLayer } from './storefront.js';
 import { ParcelFit } from './parcelfit.js'; // r6.4 b_parcelfit
+import { ClutterCols } from './clutter.js'; // r6.4 b_clutter
+import { CLUT_CTX } from './clutcap.js';
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
@@ -52,6 +54,7 @@ export class BldgLayer {
     this.roofs = new RoofLayer(scene, this.lmats, city); // r6.4 b_rooftop: low / mid-rise roof plant, dishes, solar, rails, billboards, aviation lights (roofs.js)
     this.gaps = new ParcelGapLayer(scene, this.lmats, city); // r6.4 b_parcelgap: street-side closure of the 0–3 m slots between streamed parcels (parcelgap.js; after roofs: chains onParcel)
     this.shops = new StorefrontLayer(scene, this.lmats, city); // r6.4 b_storefront: ground-floor shop types on streamed parcels (storefront.js; chains onParcel)
+    this.clut = new ClutterCols(city); // r6.4 b_clutter: sidewalk clutter colliders per streamed parcel / side row (clutter.js; chains onParcel)
     this.items = new Map(); this.built = new Map(); this.counts = { port: 0, walk: 0, bridge: 0, cables: 0 };
     const add = (k, it) => { let l = this.items.get(k); if (!l) this.items.set(k, l = []); l.push(it); };
     const P = city.parcels.filter((p) => !p.far);
@@ -110,8 +113,9 @@ export class BldgLayer {
         const m = parcelMatrix(it.p); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, it.p.x, it.p.z).append(b, m); }
       else if (it.kind === 'side') { const lw = mkWorld(); const p = it.p; const dt = p.style === 'downtown'; const ins = dt ? 1 : 0; const ctx = { W: lw };
         const bays = []; // b_corner: the side row's bays (same record as SHOP_LOG) -> storefront.js corner shops
-        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6, log: bays }));
-        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m);
+        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); CLUT_CTX.m = m; // b_clutter (clutcap.js kerb check)
+        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6, log: bays })); CLUT_CTX.m = null; for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m);
+        if (this.clut) this.clut.take(it, m, 1); // b_clutter
         if (this.shops) this.shops.onSide(key, it, bays, m); }
       else withSeed(it.seed, () => (it.kind === 'walk' ? skyway(W, it) : it.kind === 'bridge' ? skyBridge(W, it) : streetCables(W, it)));
     }

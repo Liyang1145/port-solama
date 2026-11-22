@@ -145,7 +145,9 @@ export function pathLanePoint(L, path, u, out = {}) {
   u = Math.max(0, Math.min(path.L, u)); const C = path.cum; let lo = 0, hi = C.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (C[m] <= u) lo = m; else hi = m; }
   const t = (u - C[lo]) / (C[hi] - C[lo] || 1); const s = path.ss[lo] + (path.ss[hi] - path.ss[lo]) * t;
   const f = Math.max(0, Math.min(L.n - 1, (s - L.sA) / STEP)); const i = Math.min(L.n - 2, Math.floor(f)); const w = f - i;
-  out.x = L.xs[i] * (1 - w) + L.xs[i + 1] * w; out.z = L.zs[i] * (1 - w) + L.zs[i + 1] * w; return out;
+  out.x = L.xs[i] * (1 - w) + L.xs[i + 1] * w; out.z = L.zs[i] * (1 - w) + L.zs[i + 1] * w;
+  if (L.prev) { const b = (performance.now() - L.t0) / 700; if (b >= 1) L.prev = null; else { const x = out.x, z = out.z; pathLanePoint(L.prev, path, u, out); const s2 = b * b * (3 - 2 * b); out.x += (x - out.x) * s2; out.z += (z - out.z) * s2; } } // b_clutter: re-planned lane eased in
+  return out;
 }
 
 // ---- frame-split precompute: lanes of the loops / paths around the player are solved a slice per frame (≤ budget ms),
@@ -156,17 +158,34 @@ export function pedWant(city, o, isPath) { if (o._lane || o._want) return; o._wa
 export function pedWarm(city, PE, at, budget = 2) {
   const st = pedStats(city); st.frames++; if (!at) return;
   const W = warmQ(city);
+  if (city._clutNew && city._clutNew.length) clutDirty(city, PE, W, city._clutNew.splice(0));
   if (Math.hypot(at.x - W.x, at.z - W.z) > 20 || ++W.f > 120) { W.x = at.x; W.z = at.z; W.f = 0; const q = [];
     for (const b of PE.loops) if (!b._lane) { const d = Math.hypot((b.x0 + b.x1) / 2 - at.x, (b.z0 + b.z1) / 2 - at.z); if (d < 400) q.push([d, b, 0]); }
     for (const p of PE.paths) if (!p._lane && p.e) { const d = Math.hypot(p.mx - at.x, p.mz - at.z) - p.L / 2; if (d < 260) q.push([d, p, 1]); }
     q.sort((a, b) => b[0] - a[0]); W.q = q; } // nearest at the end (pop)
   if (!W.q.length && !W.pri.length) return; const t0 = performance.now();
-  for (const Qu of [W.pri, W.q]) { while (Qu.length) { const [, o, k] = Qu[Qu.length - 1]; if (o._lane) { Qu.pop(); continue; }
+  for (const Qu of [W.pri, W.q]) { while (Qu.length) { const [, o, k] = Qu[Qu.length - 1]; if (o._lane && !o._stale) { Qu.pop(); continue; }
     if (!o._job) o._job = k ? pathJob(city, o) : loopJob(city, o);
     let done = false; for (;;) { const c0 = performance.now(); done = o._job.it.next().done; const cm = performance.now() - c0; if (cm > st.chunkMax) st.chunkMax = cm; if (cm > 4 && st.slow.length < 12) st.slow.push([k, Math.round(o._job.L.n || o._job.L.per), +cm.toFixed(1), o._job.L._ph, st.frames]); if (done || performance.now() - t0 >= budget) break; }
-    if (done) { o._lane = o._job.L; o._job = null; Qu.pop(); st.warmN++; }
+    if (done) { const L = o._job.L; if (o._lane && o._stale) { L.prev = o._lane; L.prev.prev = null; L.t0 = performance.now(); st.resolveN = (st.resolveN || 0) + 1; } o._lane = L; o._stale = 0; o._job = null; Qu.pop(); st.warmN++; }
     if (performance.now() - t0 >= budget) break; } if (performance.now() - t0 >= budget) break; }
   const ms = performance.now() - t0; st.warmMs += ms; if (ms > st.warmMaxFrame) st.warmMaxFrame = ms;
+}
+
+// b_clutter: sidewalk clutter boxes (clutter.js, tag 'clut') appear when a parcel streams in. Road-graph lanes already solved (or
+// being solved) near them are re-planned: a solved lane stays in use until its re-solve finishes (then eased over, pathLanePoint),
+// a job in progress restarts. Only paths whose polyline passes within 7 m of a new box.
+function clutDirty(city, PE, W, boxes) {
+  const st = pedStats(city); st.clutBoxes = (st.clutBoxes || 0) + boxes.length;
+  for (const p of PE.paths) { if (!p.e || !(p._lane || p._job)) continue;
+    if (!p._bb) { let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const q of p.pts) { x0 = Math.min(x0, q[0]); z0 = Math.min(z0, q[1]); x1 = Math.max(x1, q[0]); z1 = Math.max(z1, q[1]); } p._bb = [x0 - 7, z0 - 7, x1 + 7, z1 + 7]; }
+    const B = p._bb; let hit = false;
+    for (const b of boxes) { if (b.maxX < B[0] || b.minX > B[2] || b.maxZ < B[1] || b.minZ > B[3]) continue;
+      const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2; const r = 7 + Math.max(b.maxX - b.minX, b.maxZ - b.minZ) / 2;
+      for (const q of p.pts) if (Math.abs(q[0] - cx) < r && Math.abs(q[1] - cz) < r) { hit = true; break; } if (hit) break; }
+    if (!hit) continue; st.clutDirty = (st.clutDirty || 0) + 1;
+    if (p._job) { p._job = null; continue; } // restarts from scratch with the new boxes (still queued: no lane yet)
+    if (!p._stale) { p._stale = 1; W.pri.push([0, p, 1]); } }
 }
 
 function loopBase(x0, z0, x1, z1, u) {

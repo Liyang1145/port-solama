@@ -14,6 +14,7 @@ import { kg, beam, tube, put, cable, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
 import { STALLS } from './street2.js';
+import { clutSnap, clutGrab } from './clutcap.js'; // b_clutter
 
 // r6.3 hanging light-box sign faces: 4x4 atlas of invented, Chinese-style stroke glyphs (original, procedurally drawn; no real
 // characters or brands). Light background in the vertex (neon) colour, darker glyph strokes; night emissive like 'neon'.
@@ -98,15 +99,16 @@ export function grime(W, F, yb, yt, wall, brackets = [], opts = {}) {
     gquad(v, VV(F, 0, 0.02, yb), VV(F, L, 0.02, yb), VV(F, L, 0.02, dampTop), VV(F, 0, 0.02, dampTop), wd, wall.map((q) => q * 0.97)); }
 }
 
+
 // --------------------------------------------------------------- sidewalk ----
 const BAGC = [[0.05, 0.05, 0.055], [0.07, 0.08, 0.07], [0.12, 0.18, 0.12], [0.1, 0.13, 0.22], [0.6, 0.6, 0.58], [0.04, 0.04, 0.045]];
-export function trashPile(W, F, a, d, y0) {
+export function trashPile(W, F, a, d, y0, cap = null) {
   const c = W.b('vcolD', F.P(a, d)[0], F.P(a, d)[1]); const G = kg(); const k = randi(3, 7);
   for (let i = 0; i < k; i++) { const p = V3(F, a + rand(-0.8, 0.8), d + rand(-0.35, 0.35), 0); const s = rand(0.26, 0.42); const h = s * rand(0.75, 1.0);
     put(c, G.ball, p[0], y0 + h * 0.8 + (i > 3 ? 0.3 : 0), p[2], s, h, s * rand(0.85, 1.1), pick(BAGC), rand(0, 3));
     if (rng() < 0.35) put(c, G.ball, p[0], y0 + h * 1.65 + (i > 3 ? 0.3 : 0), p[2], 0.07, 0.1, 0.07, pick(BAGC)); } // tied neck
   if (rng() < 0.6) { const p = V3(F, a + rand(-1.2, 1.2), d + rand(-0.3, 0.4), 0); put(c, G.box, p[0], y0 + 0.02, p[2], rand(0.5, 0.9), 0.03, rand(0.4, 0.7), [0.5, 0.4, 0.27], rand(0, 3)); } // flattened carton
-  if (rng() < 0.5) { const p = V3(F, a + rand(-1, 1), d + rand(-0.3, 0.3), 0); const s = rand(0.3, 0.45); put(c, G.box, p[0], y0 + s / 2, p[2], s * 1.3, s, s, [0.58, 0.45, 0.3], Math.atan2(F.ox, F.oz) + rand(-0.5, 0.5)); }
+  if (rng() < 0.5) { if (cap) cap.s = clutSnap(W); const p = V3(F, a + rand(-1, 1), d + rand(-0.3, 0.3), 0); const s = rand(0.3, 0.45); put(c, G.box, p[0], y0 + s / 2, p[2], s * 1.3, s, s, [0.58, 0.45, 0.3], Math.atan2(F.ox, F.oz) + rand(-0.5, 0.5)); } // b_clutter: cap.s marks the standing carton (its own collider; bags are soft)
 }
 export function wheelieBin(W, F, a, d, y0) {
   const c = W.b('vcolD', F.P(a, d)[0], F.P(a, d)[1]); const G = kg(); const col = pick([[0.12, 0.3, 0.14], [0.15, 0.17, 0.2], [0.55, 0.38, 0.08], [0.15, 0.25, 0.45]]); const ang = Math.atan2(F.ox, F.oz) + rand(-0.3, 0.3);
@@ -202,15 +204,20 @@ export function laundryLine(W, A, B, sag = 0.3) {
 export function sidewalk(W, F, y0, grit = 0.5, opts = {}) {
   const L = F.len; if (L < 5) return; const yP = y0 + 0.012; const lg = opts.log; // b_signsync: footprints (a span, d span) for storefront.js
   let a = rand(0.8, 2.5);
+  // b_clutter: each item group is bracketed (clutSnap … grab): clutcap.js fits its collider footprint and, on a streamed lot, moves
+  // a group that overruns the kerb / stands on a lamp or palm back toward the facade (or hides it when there is no room); the
+  // storefront.js footprint log entries of the group follow the move. No rng use.
+  const grab = (s0, n0, k, cap) => { const r = clutGrab(W, s0, F, y0, k); if (r && r.hid) lg.length = n0; else if (r && r.sh) for (let i = n0; i < lg.length; i++) { lg[i].d0 -= r.sh; lg[i].d1 -= r.sh; }
+    if (cap && cap.s && !(r && r.hid)) clutGrab(W, cap.s, F, y0, 'carton', true); return r; };
   while (a < L - 1.2) {
-    const r = rng();
-    if (r < 0.16 * grit + 0.04) { const d = rand(0.5, 0.9); trashPile(W, F, a, d, y0); lg && lg.push({ k: 'trash', a0: a - 1.0, a1: a + 1.0, d0: d - 0.45, d1: d + 0.5 }); a += rand(2.5, 5); }
+    const r = rng(); const s0 = lg && clutSnap(W), n0 = lg ? lg.length : 0;
+    if (r < 0.16 * grit + 0.04) { const cap = lg ? {} : null; const d = rand(0.5, 0.9); trashPile(W, F, a, d, y0, cap); lg && lg.push({ k: 'trash', a0: a - 1.0, a1: a + 1.0, d0: d - 0.45, d1: d + 0.5 }); if (lg) grab(s0, n0, 'trash', cap); a += rand(2.5, 5); }
     else if (r < 0.26 * grit + 0.07) { const d = rand(0.55, 0.8); wheelieBin(W, F, a, d, y0); lg && lg.push({ k: 'bin', a0: a - 0.42, a1: a + 0.42, d0: d - 0.45, d1: d + 0.45 });
-      if (rng() < 0.6) { const d2 = rand(0.55, 0.8); wheelieBin(W, F, a + 0.75, d2, y0); lg && lg.push({ k: 'bin', a0: a + 0.33, a1: a + 1.17, d0: d2 - 0.45, d1: d2 + 0.45 }); } a += rand(3, 6); }
-    else if (r < 0.36 * grit + 0.1) { const d = rand(0.6, 1.0); crates(W, F, a, d, y0); lg && lg.push({ k: 'crates', a0: a - 0.65, a1: a + 0.65, d0: d - 0.5, d1: d + 0.5 }); a += rand(3, 6); }
-    else if (r < 0.4 * grit + 0.12) { gasBottles(W, F, a, 0.45, y0); lg && lg.push({ k: 'gas', a0: a - 0.1, a1: a + 1.3, d0: 0.25, d1: 0.65 }); a += rand(2, 4); }
-    else if (r < 0.52 && opts.stalls !== false && L > 10) { const f = rng() < 0.3 ? foodStall : pick(STALLS); const as = Math.min(L - 1.6, a + 1.2), d = rand(2.0, 2.6); f(W, F, as, d, y0); lg && lg.push({ k: 'stall', a0: as - 1.75, a1: as + 1.75, d0: d - 0.7, d1: d + 1.3 }); a += rand(6, 10); } // r6.4: + 面摊 / 烧烤 / 维修摊 (street2.js)
-    else if (r < 0.62 && opts.tables !== false) { const d = rand(1.8, 2.6); umbrellaTable(W, F, a + 0.8, d, y0); lg && lg.push({ k: 'table', a0: a - 0.1, a1: a + 1.7, d0: d - 0.9, d1: d + 0.9 }); a += rand(4, 7); }
+      if (rng() < 0.6) { const d2 = rand(0.55, 0.8); wheelieBin(W, F, a + 0.75, d2, y0); lg && lg.push({ k: 'bin', a0: a + 0.33, a1: a + 1.17, d0: d2 - 0.45, d1: d2 + 0.45 }); } if (lg) grab(s0, n0, 'bin'); a += rand(3, 6); }
+    else if (r < 0.36 * grit + 0.1) { const d = rand(0.6, 1.0); crates(W, F, a, d, y0); lg && lg.push({ k: 'crates', a0: a - 0.65, a1: a + 0.65, d0: d - 0.5, d1: d + 0.5 }); if (lg) grab(s0, n0, 'crates'); a += rand(3, 6); }
+    else if (r < 0.4 * grit + 0.12) { gasBottles(W, F, a, 0.45, y0); lg && lg.push({ k: 'gas', a0: a - 0.1, a1: a + 1.3, d0: 0.25, d1: 0.65 }); if (lg) grab(s0, n0, 'gas'); a += rand(2, 4); }
+    else if (r < 0.52 && opts.stalls !== false && L > 10) { const f = rng() < 0.3 ? foodStall : pick(STALLS); const as = Math.min(L - 1.6, a + 1.2), d = rand(2.0, 2.6); f(W, F, as, d, y0); lg && lg.push({ k: 'stall', a0: as - 1.75, a1: as + 1.75, d0: d - 0.7, d1: d + 1.3 }); if (lg) grab(s0, n0, 'stall'); a += rand(6, 10); } // r6.4: + 面摊 / 烧烤 / 维修摊 (street2.js)
+    else if (r < 0.62 && opts.tables !== false) { const d = rand(1.8, 2.6); umbrellaTable(W, F, a + 0.8, d, y0); lg && lg.push({ k: 'table', a0: a - 0.1, a1: a + 1.7, d0: d - 0.9, d1: d + 0.9 }); if (lg) grab(s0, n0, 'table'); a += rand(4, 7); }
     else a += rand(2, 5);
   }
   const np = Math.round(L / rand(6, 12)); for (let i = 0; i < np; i++) puddle(W, F, rand(1, L - 1), rand(1.0, 3.4), yP + i * 0.0005, rand(0.4, 1.3));
