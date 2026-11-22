@@ -18,7 +18,7 @@ import { neonGlowMat, neonReflMat } from './neontube.js';
 import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
-import { AF_OFF, svcBays, SVC, SVC_CTX } from './svcface.js'; // b_alleyface
+import { AF_OFF, svcBays, SVC, SVC_CTX, svcPieceList, NF_OFF, nfFace, nfPairs, inBox as nfInBox } from './svcface.js'; // b_alleyface
 import { pedLoop, addPropCols, lanePoint, pedPath, pathLanePoint, pedWarm, pedWant } from './pedlane.js';
 const Q_NOPALM = typeof location !== 'undefined' && /[?&]nopalmloop\b/.test(location.search); // test switch: old loops, no prop colliders
 const Q_NOSP = Q_NOPALM || (typeof location !== 'undefined' && /[?&]nostreetpeds\b/.test(location.search)); // test switch (b_streetpeds): old graph paths, loops solved on first use, no bollard colliders
@@ -183,6 +183,7 @@ export function buildCity(scene, mats, T) {
   // ------------------------------------------------------------- buildings -----
   const B = W.b.bind(W);
   const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [] };
+  NF_CORE = NF_OFF() ? null : []; // b_narrowfix
   for (const b of blocks) {
     if (b.area === 'promenade') { promenade(W, b, shrubs, trees); continue; }
     bld.curBlock = b; // b_alleyface: volume() tells street fronts from alley / back-yard / gap faces by the block's lot (no rng use)
@@ -191,6 +192,7 @@ export function buildCity(scene, mats, T) {
     else downtownBlock(bld, b, palms, trees);
     bld.curBlock = null;
   }
+  nfCore(col); // b_narrowfix: core service pieces, now that every core block stands
   // ------------------------------------------- v4.0 district edges + far skyline ----
   districtEdges(bld, deco);
   marina(bld); landmarks(bld);
@@ -428,7 +430,7 @@ function svcEdgesLot(poly, seed, sw, y0) {
     else if (Math.abs(E.oz) > 0.7) { if (p.svcRoad & (E.oz > 0 ? 1 : 2)) return null; kind = 0; }
     else return null;
     const n = Math.max(1, Math.round(E.len / sw)); any = true;
-    return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: q, dx: E.dx, dz: E.dz, len: E.len, y0 }; });
+    return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: q, dx: E.dx, dz: E.dz, len: E.len, y0, fx: (p.svcFix && p.svcFix[i]) || null }; }); // b_narrowfix: fx from svccol.js (startup)
   return any ? out : null;
 }
 // b_alleyface: the real pieces of a service face (the rest is the style-6 shader): concrete plinth, roller-shutter housings,
@@ -438,21 +440,30 @@ export { SVC_STAT };
 export const SVC_CORE = []; // b_svccol: the hand-built core's service edges (world frame) -> svccol.js colliders
 export { svcEdgesLot, edgeFrame as svcEdgeFrame }; // b_svccol: startup prediction of a streamed lot's service openings
 function svcFront(b, E, y0, ground, s) {
-  const galv = [0.40, 0.43, 0.45], dark = [0.17, 0.18, 0.19], steel = [0.33, 0.34, 0.35], cab = [0.36, 0.39, 0.37], plinth = [0.30, 0.30, 0.29];
+  const C = { galv: [0.40, 0.43, 0.45], dark: [0.17, 0.18, 0.19], steel: [0.33, 0.34, 0.35], cab: [0.36, 0.39, 0.37], plinth: [0.30, 0.30, 0.29], door: [0.102, 0.124, 0.156] };
   SVC_STAT.edges++; if (s.kind) SVC_STAT.alley++;
-  lbox(b, E, 0, E.len, -0.02, 0.06, y0, y0 + 0.3, plinth); // concrete plinth (splash zone)
   const n = Math.max(1, Math.round(E.len / s.ww)); SVC_STAT.bays += n;
   const lg = SVC_CTX.log; if (lg) SVC_STAT.lot = (SVC_STAT.lot || 0) + 1;
   for (const o of svcBays(E.len, s.ww, s.ps)) { SVC_STAT.open[o.t]++; const a0 = o.c - o.hw, a1 = o.c + o.hw;
-    if (lg) lg.push({ a: E.P(a0, 0), b: E.P(a1, 0), lo: y0 + o.bot, hi: y0 + o.top, t: o.t, floor: !!o.floor }); // b_alleyface2 (parcel frame)
-    if (o.t === SVC.SHUT) lbox(b, E, a0 - 0.1, a1 + 0.1, -0.02, 0.3, y0 + 2.55, y0 + 2.86, galv, true); // roll housing (guide rails are painted)
-    else if (o.t === SVC.DOOR) { lbox(b, E, a0 - 0.08, a1 + 0.08, -0.02, 0.2, y0 + 2.28, y0 + 2.36, [0.102, 0.124, 0.156], true); // drip hood (b_alleyface2: alley.js door hood size + steel)
-    } // (door frame painted)
-    else if (o.t === SVC.HATCH) { lbox(b, E, a0 - 0.12, a1 + 0.12, -0.02, 0.34, y0 + 0.9, y0 + 1.0, steel, true); lbox(b, E, a0 - 0.08, a1 + 0.08, -0.02, 0.22, y0 + 2.05, y0 + 2.26, galv, true); }
-    else if (o.t === SVC.LOUV) lbox(b, E, a0 - 0.05, a1 + 0.05, -0.02, 0.09, y0 + 1.84, y0 + 1.9, steel, true); // drip sill
-    else if (o.t === SVC.METER) { lbox(b, E, a0, a1, -0.02, 0.2, y0 + 1.1, y0 + 2.22, cab, true); lbox(b, E, a0 - 0.04, a1 + 0.04, -0.02, 0.25, y0 + 2.22, y0 + 2.28, dark, true); } // meter cabinet + rain lid
-  }
+    if (lg) lg.push({ a: E.P(a0, 0), b: E.P(a1, 0), lo: y0 + o.bot, hi: y0 + o.top, t: o.t, floor: !!o.floor }); } // b_alleyface2 (parcel frame)
+  // concrete plinth, roll housings, door drip hoods (b_alleyface2 size + steel), hatch sill + housing, louvre drip sills, meter
+  // cabinets + rain lids: svcface.js svcPieceList (b_narrowfix: flush versions where a neighbour wall stands close, s.fx)
+  for (const q of svcPieceList(E.len, s.ww, s.ps, s.fx)) lbox(b, E, q.u0, q.u1, -0.02, q.d, y0 + q.ya, y0 + q.yb, C[q.c], q.cap);
   void ground;
+}
+// b_narrowfix: the hand-built core's service pieces are built once every core block (and its collider) stands: a face built back to
+// back with the next block (zero gap) or across a slot narrower than its pieces gets the flush versions / none (svcface.js nfFace,
+// nfPairs), so nothing reaches into the neighbour. Same vcol buckets, same piece list; no rng use. ?nonarrowfix: inline as before.
+let NF_CORE = null;
+export const NF_STAT = { core: { faces: 0, fixed: 0, pairs: 0 } };
+function nfCore(col) {
+  const L = NF_CORE; NF_CORE = null; if (!L) return; const PE = (r, u, d) => r.E.P(u, d); PE.dir = (r) => [r.E.dx, r.E.dz];
+  const ents = L.map((d) => { const rec = { E: d.E, len: d.E.len, ww: d.s.ww, ps: d.s.ps }; const poly = d.poly;
+    const F = { P: PE, rec, own: (b, x, z, ox, oz) => b.poly === poly || nfInBox(b, x - ox * 0.05, z - oz * 0.05), self: null, near: null };
+    return { d, F, fx: nfFace(col, F), fixed: false }; });
+  NF_STAT.core.pairs = nfPairs(ents);
+  for (const e of ents) { const { b, E, y0, ground, s, poly } = e.d; NF_STAT.core.faces++; if (e.fx) NF_STAT.core.fixed++; const s2 = { ...s, fx: e.fx };
+    svcFront(b, E, y0, ground, s2); SVC_CORE.push({ p: E.P(0, 0), dx: E.dx, dz: E.dz, len: E.len, y0, ww: s.ww, ps: s.ps, poly, fx: e.fx }); }
 }
 // v3.5 shopfront geometry on the ground-floor band: piers between bays, projecting transom / sign ledge, stone kick plate
 function shopfront(ctx, poly, y0, ground, sw, wall, svc = null) {
@@ -461,7 +472,8 @@ function shopfront(ctx, poly, y0, ground, sw, wall, svc = null) {
   const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 2.5) continue; const n = Math.max(1, Math.round(E.len / sw)); const cw = E.len / n;
-    if (svc && svc[i]) { svcFront(b, E, y0, ground, svc[i]); if (!streamed(ctx)) SVC_CORE.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ww: svc[i].ww, ps: svc[i].ps, poly }); continue; } // b_alleyface: service frontage instead of shop piers / sign ledge (b_svccol: core edges logged for their colliders, no rng)
+    if (svc && svc[i]) { if (!streamed(ctx) && NF_CORE) { NF_CORE.push({ b, E, y0, ground, s: svc[i], poly }); continue; } // b_narrowfix: core pieces wait until every core block stands (nfCore)
+      svcFront(b, E, y0, ground, svc[i]); if (!streamed(ctx)) SVC_CORE.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ww: svc[i].ww, ps: svc[i].ps, poly }); continue; } // b_alleyface: service frontage instead of shop piers / sign ledge (b_svccol: core edges logged for their colliders, no rng)
     for (let k = 0; k <= n; k++) { const a = k * cw; lbox(b, E, Math.max(0, a - 0.17), Math.min(E.len, a + 0.17), -0.02, 0.2, y0, y0 + ground - 0.05, pier); }
     const yt = 0.8 * ground; lbox(b, E, 0, E.len, -0.02, 0.3, yt, yt + 0.14, ledge, true);
     lbox(b, E, 0, E.len, -0.02, 0.07, y0, 0.06 * ground + 0.04, kick);

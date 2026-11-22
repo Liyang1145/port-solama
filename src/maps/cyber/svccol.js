@@ -22,7 +22,8 @@
 // Test switch ?nosvccol: as before this lane (no prediction, no boxes, refit at the first plan).
 import * as THREE from 'three';
 import { withSeed } from '../../util.js';
-import { SVC_CTX, svcBays, SVC, AF_OFF } from './svcface.js';
+import { SVC_CTX, svcBays, SVC, AF_OFF, svcPieceList, NF_MARGIN, NF_OFF, nfFace, nfPairs, inBox as inBoxNF, segFree, freeDepth, rayBox } from './svcface.js';
+export { segFree, freeDepth, rayBox, inBoxNF as inBox };
 import { SVC_CORE, svcEdgesLot, svcEdgeFrame, PARCEL_COLS } from './city.js';
 import { genParcel } from './stream.js';
 
@@ -44,11 +45,18 @@ export function svcPieces(o) {
 // the service edges with real pieces, exactly as city.js shopfront() calls svcFront (edges ≥ 2.5 m), in the frame of the polygon
 export function svcEdgeRecs(poly, svc, y0) {
   const out = []; if (!svc) return out;
-  for (let i = 0; i < poly.length; i++) { const E = svcEdgeFrame(poly, i); if (E.len < 2.5 || !svc[i]) continue; out.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ww: svc[i].ww, ps: svc[i].ps }); }
+  for (let i = 0; i < poly.length; i++) { const E = svcEdgeFrame(poly, i); if (E.len < 2.5 || !svc[i]) continue; out.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ww: svc[i].ww, ps: svc[i].ps, i, fx: svc[i].fx || null }); }
   return out;
 }
 
-const PW = (r, u, d) => [r.p[0] + r.dx * u - r.dz * d, r.p[1] + r.dz * u + r.dx * d]; PW.dir = (r) => [r.dx, r.dz]; // edge frame (u along, d out) -> polygon frame
+// b_narrowfix: the collider boxes of an edge record, from the drawn pieces: per hatch (sill + housing) / meter (cabinet + lid) one
+// box over the union of its pieces, when it stands ≥ 0.15 m proud (b_svccol rule; full pieces -> the b_svccol boxes exactly)
+export function recBoxes(rec) { const by = new Map();
+  for (const q of recPieces(rec)) { if (q.i < 0 || (q.t !== SVC.HATCH && q.t !== SVC.METER)) continue; let g = by.get(q.i); if (!g) by.set(q.i, g = { u0: q.u0, u1: q.u1, d: q.d, h: q.t === SVC.HATCH ? 2.26 : 2.28, k: q.t === SVC.HATCH ? 'hatch' : 'meter' });
+    g.u0 = Math.min(g.u0, q.u0); g.u1 = Math.max(g.u1, q.u1); g.d = Math.max(g.d, q.d); }
+  return [...by.values()].filter((g) => g.d >= 0.15); }
+export const recPieces = (rec) => svcPieceList(rec.len, rec.ww, rec.ps, rec.fx || null); // b_narrowfix: drawn pieces of an edge record
+export const PW = (r, u, d) => [r.p[0] + r.dx * u - r.dz * d, r.p[1] + r.dz * u + r.dx * d]; PW.dir = (r) => [r.dx, r.dz]; // edge frame (u along, d out) -> polygon frame
 // replay a streamed lot to its store volume -> { recs (edge records, parcel frame), bays [{ rec, o }], F (= the near build's p.svcF), PL (u, d -> world) } or null
 export function predictLot(p, st = {}) {
   const D = { rec: null, miss: false }; const ctx = { W: null, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [] };
@@ -67,27 +75,44 @@ export function predictLot(p, st = {}) {
 export class SvcCol {
   constructor(city, gaps, fit = null) {
     this.city = city; this.gaps = gaps; const t0 = performance.now(); const off = SC_OFF();
-    this.stats = { off, lots: 0, predicted: 0, miss: 0, err: 0, open: 0, boxes: { hatch: 0, meter: 0 }, core: 0, checked: 0, mismatch: 0, slots: 0, ms: 0, plane: { lots: 0, proudMax: 0, removed: 0, added: 0 } };
+    this.stats = { off, nf: { off: NF_OFF(), faces: 0, fixed: 0, bays: 0, pairs: 0, ms: 0 }, lots: 0, predicted: 0, miss: 0, err: 0, open: 0, boxes: { hatch: 0, meter: 0 }, core: 0, checked: 0, mismatch: 0, slots: 0, ms: 0, plane: { lots: 0, proudMax: 0, removed: 0, added: 0 } };
     this.recs = new Map(); // parcel -> edge records (parcel frame)
     if (off) return;
-    const col = city.col; const add = (P, rec, o, pc) => { // world box for one piece; P maps (u along, d out) -> world
+    const col = city.col; const add = (P, rec, pc) => { // world box for one piece; P maps (u along, d out) -> world
       const um = (pc.u0 + pc.u1) / 2, dm = pc.d / 2; const [cx, cz] = P(rec, um, dm); const [ux, uz] = P.dir(rec);
       const b = col.addOBB(cx, cz, ux, uz, (pc.u1 - pc.u0) / 2, dm, rec.y0 + pc.h, 'svc'); b.svk = pc.k; this.stats.boxes[pc.k]++; return b; };
-    // hand-built core: world-frame edges
-    if (col && col.addOBB) for (const r of SVC_CORE) { this.stats.core++; for (const o of svcBays(r.len, r.ww, r.ps)) { this.stats.open++; const pc = svcPieces(o); if (pc) add(PW, r, o, pc); } }
+    const boxes = (P, rec) => { if (!col || !col.addOBB) return; for (const pc of recBoxes(rec)) add(P, rec, pc); };
+    // hand-built core: world-frame edges (b_narrowfix: city.js nfCore already gave them their flush pieces, rec.fx)
+    for (const r of SVC_CORE) { this.stats.core++; this.stats.open += svcBays(r.len, r.ww, r.ps).length; boxes(PW, r); }
     // streamed lots: replay to the store volume
+    const lots = [];
     for (const p of city.parcels || []) {
       if (p.far || !STORE.has(p.style) || p.svcRoad === undefined) continue; this.stats.lots++;
-      const r = predictLot(p, this.stats); if (!r) continue; this.recs.set(p, r.recs); this.stats.predicted++;
-      for (const { rec, o } of r.bays) { this.stats.open++; const pc = svcPieces(o); if (pc && col && col.addOBB) add(r.PL, rec, o, pc); }
-      p.svcF = r.F; p.svcPred = r.F;
+      const r = predictLot(p, this.stats); if (!r) continue; this.recs.set(p, r.recs); this.stats.predicted++; this.stats.open += r.bays.length;
+      p.svcF = r.F; p.svcPred = r.F; lots.push([p, r]);
       if (fit && fit.fit) this.plane(p, r, fit);
     }
+    // b_narrowfix: faces close to a neighbour wall (narrow slots) -> flush pieces (p.svcFix, read by city.js svcEdgesLot at the near build)
+    if (!NF_OFF() && col) this.narrow(lots, fit);
+    for (const [, r] of lots) for (const rec of r.recs) boxes(r.PL, rec);
     // slots: baffles / wall clutter heap clear of the openings now (colliders created in their final place)
     if (gaps && gaps.svcRefit) for (const g of gaps.gaps) { gaps.svcRefit(g); this.stats.slots++; }
     if (city.stream) { const prev = city.stream.onParcel; city.stream.onParcel = (c, p, m) => { this.check(p); if (prev) prev(c, p, m); }; }
     this.stats.ms = Math.round(performance.now() - t0);
   }
+  // b_narrowfix: free depth in front of every lot service face (foreign 'bld' colliders and the neighbours' exact footprints), then the
+  // facing-pairs pass with the core's pieces as fixed; result per lot edge index on p.svcFix and on the edge records (same object)
+  narrow(lots, fit) { const t0 = performance.now(); const col = this.city.col; const S = this.stats.nf;
+    const K = 40; const cell = new Map(); if (fit && fit.fit) for (const [p, f] of fit.fit) { const k = Math.floor(p.x / K) + ',' + Math.floor(p.z / K); let l = cell.get(k); if (!l) cell.set(k, l = []); l.push([p, f]); }
+    const near = (x, z) => { const o = []; const cx = Math.floor(x / K), cz = Math.floor(z / K); for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++) { const l = cell.get(i + ',' + j); if (l) for (const e of l) o.push(e); } return o; };
+    const ents = [];
+    for (const r of SVC_CORE) if (r.fx) ents.push({ F: { P: PW, rec: r, self: null }, fx: r.fx, fixed: true });
+    for (const [p, r] of lots) { const own = new Set(PARCEL_COLS.get(p) || []); const ownF = (b) => own.has(b);
+      for (const rec of r.recs) { S.faces++; const F = { P: r.PL, rec, own: ownF, self: p, near }; const fx = nfFace(col, F); if (!fx) continue; ents.push({ F, fx, fixed: false, p, rec }); } }
+    S.pairs = nfPairs(ents);
+    for (const e of ents) { if (e.fixed) continue; const fx = e.fx; const full = fx.cp == null && fx.c.every((v) => v == null || v >= 0.36); if (full) continue; // nothing changes
+      S.fixed++; S.bays += fx.c.filter((v) => v != null && v < 0.36).length; (e.p.svcFix || (e.p.svcFix = {}))[e.rec.i] = fx; e.rec.fx = fx; }
+    S.ms = Math.round(performance.now() - t0); }
   // the lot's collider must stop at the service-face plane: a kept parcel box (city.js obbCollider AABB of a near-axis lot, within
   // b_parcelfit's 0.3 m tolerance) can stand up to ~0.3 m proud of a back / slot wall -> that lot gets parcelfit's exact pieces
   plane(p, r, fit) {
