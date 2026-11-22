@@ -639,14 +639,39 @@ export function simpleMats(T) {
   vec2 sq = sp * 0.55; vec2 si = floor(sq); float sh = fract(sin(dot(si, vec2(7.7, 113.3))) * 9134.1); float stain = step(0.82, sh) * smoothstep(0.42, 0.1, length(fract(sq) - 0.5 + (sh - 0.9) * 0.4));
   diffuseColor.rgb *= 1.0 - stain * 0.16;
   vec2 lc = fract(sp / 1.6); float ck = step(0.72, hs) * smoothstep(0.012, 0.0, abs(lc.y - 0.5 - 0.25 * sin(lc.x * 6.0 + hs * 20.0)) ) * step(abs(lc.x - 0.5), 0.3 + 0.2 * hs);
-  diffuseColor.rgb *= 1.0 - ck * 0.35; }`))
+  diffuseColor.rgb *= 1.0 - ck * 0.35;
+  // a_promenade: per-slab tone (pour batches), every third joint a wider tooled expansion joint with dark sealant, spalled
+  // slab corners, and a grime band along the kerb on the island streets (leaf litter, tyre dust, run-off), fading 0-0.9 m
+  diffuseColor.rgb *= 0.965 + 0.07 * hs;
+  vec2 ej = abs(fract(sp / 4.8) - 0.5); float ex = smoothstep(0.4935, 0.499, max(ej.x, ej.y)); diffuseColor.rgb *= 1.0 - ex * 0.42;
+  vec2 cq = abs(lc - 0.5); float sp2 = step(0.55, fract(hs * 7.3)) * smoothstep(0.43, 0.49, min(cq.x, cq.y)) * step(0.46, max(cq.x, cq.y)); diffuseColor.rgb *= 1.0 - sp2 * 0.22;
+  if (sp.x > -22.0 && sp.x < 335.0 && abs(sp.y) < 372.0) {
+    float dk = min(min(abs(abs(sp.x - 50.0) - 7.0), abs(abs(sp.x - 170.0) - 7.0)), abs(abs(sp.x - 290.0) - 7.0));
+    float zr = sp.y - floor((sp.y + 75.0) / 150.0) * 150.0; dk = min(dk, abs(abs(zr) - 7.0));
+    float gn = fract(sin(dot(floor(sp * 3.0), vec2(17.1, 91.7))) * 4375.85);
+    float band = smoothstep(0.95, 0.25, dk) * (0.55 + 0.45 * gn);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 0.75, 0.7), band * 0.6);
+  } }`))
       .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying vec3 vSWP;');
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSWP;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSWP = (modelMatrix * vec4(position,1.0)).xyz;');
   });
   const pav = texSet(T, 'pavers', 1); for (const t of [pav.map, pav.normalMap, pav.roughnessMap]) t.repeat.set(1 / 2.5, 1 / 2.5);
   M.pavers = prep(new THREE.MeshStandardMaterial({ map: pav.map, normalMap: pav.normalMap, roughnessMap: pav.roughnessMap, color: 0xffffff, roughness: 1, ...(CYBER ? { polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -2 } : {}) }), 'pavers');
   const conc = texSet(T, 'concrete', 1); for (const t of [conc.map, conc.normalMap, conc.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
-  M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete');
+  M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete', CYBER ? null : (s) => {
+    // a_promenade (map 索拉纳港): kerb wear on the low kerb geometry only (world y < 0.16): black tyre-rub streaks on the vertical
+    // face, chipped / lighter arris, dirt line at the gutter foot. Same program key, compiled once as before.
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvKW = (modelMatrix * vec4(position, 1.0)).xyz; vKN = normalize(mat3(modelMatrix) * normal);');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;')
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+  if (vKW.y < 0.16) { float al = dot(vKW.xz, vec2(abs(vKN.z), abs(vKN.x))); float h1 = fract(sin(floor(al * 0.7) * 12.989) * 43758.5);
+    float face = 1.0 - abs(vKN.y); float ty = smoothstep(0.02, 0.07, vKW.y) * smoothstep(0.15, 0.09, vKW.y);
+    float rub = step(0.55, h1) * smoothstep(0.0, 0.25, fract(al * 0.7)) * smoothstep(1.0, 0.6, fract(al * 0.7)) * ty * face;
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09, 0.09, 0.1), rub * 0.55); roughnessFactor = mix(roughnessFactor, 0.6, rub * 0.5);
+    float chip = step(0.86, fract(sin(floor(al * 6.0) * 78.23) * 1937.1)) * smoothstep(0.125, 0.15, vKW.y) * (1.0 - vKN.y * 0.5);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.76, 0.72), chip * 0.35);
+    diffuseColor.rgb *= 1.0 - smoothstep(0.035, 0.0, vKW.y) * face * 0.35; }`);
+  });
   const sand = texSet(T, 'sand', 1); for (const t of [sand.map, sand.normalMap, sand.roughnessMap]) t.repeat.set(1 / 6, 1 / 6);
   if (CYBER) {
   // v4.5: sand albedo 1.22 -> 0.98 (noon beach no longer glares), dune-scale tone variation, wind ripples (normal), a wrack line
