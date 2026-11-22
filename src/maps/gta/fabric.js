@@ -102,7 +102,7 @@ function chunkOf(fab, x, z) {
 // body: [cx, y0, cz, w(along ang), h, d, ang, r, g, b, kind, seed]   kinds: 0 house 1 retail 2 warehouse 3 apartment 4 office 5 garage 6 hedge 7 wall 8 plain (trailer/container)
 function addBody(fab, cx, cz, y0, w, d, h, ang, colr, kind, col, collide = true) {
   const c = chunkOf(fab, cx, cz); c.I.body.push([cx, y0, cz, w, h, d, ang, colr[0], colr[1], colr[2], kind, fab.R()]);
-  if (collide && col) col.addOBB(cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, y0 + h, 'bld');
+  fab._lastBox = collide && col ? col.addOBB(cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, y0 + h, 'bld') : null;
   fab.stats.bodies = (fab.stats.bodies || 0) + 1;
 }
 const addRoof = (fab, cx, cz, y0, w, d, h, ang, colr) => chunkOf(fab, cx, cz).I.roof.push([cx, y0, cz, w, h, d, ang, colr[0], colr[1], colr[2]]);
@@ -114,6 +114,7 @@ const addLamp = (fab, x, z, ang) => chunkOf(fab, x, z).I.lamp.push([x, z, ang]);
 // street lights along a segment A->B: every `step` m, offset o (signed, + = left of travel), arm pointing back over the road
 function lampRow(fab, A, B, o, step, t0 = 10) { const d = sub(B, A), L = len2(d); if (L < 2 * t0) return; const tx = d[0] / L, tz = d[1] / L;
   for (let t = t0; t < L - t0 * 0.5; t += step) { const x = A[0] + tx * t - tz * o, z = A[1] + tz * t + tx * o; const sg = Math.sign(o); addLamp(fab, x, z, Math.atan2(sg * tx, sg * tz)); } }
+const lastRec = (fab, p, key) => { const L = chunkOf(fab, p[0], p[1]).I[key]; return L[L.length - 1]; }; // a_curbalign
 const addFlat = (fab, x, z, w, d, ang, colr, y = 0.012) => chunkOf(fab, x, z).I.flat.push([x, z, w, d, ang, colr[0], colr[1], colr[2], y]);
 
 // road ribbon A->B (kind 0 4-lane hw 7 / 2 2-lane hw 4.5); aRd lateral sign convention as region.js
@@ -129,8 +130,10 @@ function junction(fab, P) { if (P.length < 3) return; const H = hull(P); const c
 function walkSeg(fab, A, B, s, o0, o1, t0, t1, cuts = []) {
   const d = sub(B, A), L = len2(d); if (L < 1) return; const tx = d[0] / L, tz = d[1] / L; const nx = -tz * s, nz = tx * s;
   const pieces = []; let a = t0; for (const [c0, c1] of cuts.slice().sort((p, q) => p[0] - q[0])) { if (c1 < a) continue; if (c0 > a) pieces.push([a, Math.min(c0, t1)]); a = Math.max(a, c1); } if (a < t1) pieces.push([a, t1]);
+  const made = []; // a_curbalign: [acc, first vertex, corners] of every quad (curbfix.js re-shapes the joints of curved runs)
   for (const [p0, p1] of pieces) { if (p1 - p0 < 0.5) continue; const Q = (t, o) => [A[0] + tx * t + nx * o, A[1] + tz * t + nz * o];
-    const P = [Q(p0, o0), Q(p1, o0), Q(p1, o1), Q(p0, o1)]; const c = chunkOf(fab, (P[0][0] + P[2][0]) / 2, (P[0][1] + P[2][1]) / 2); c.walk.quad(P, 0.03, P.map((q) => [q[0], q[1]]), null); }
+    const P = [Q(p0, o0), Q(p1, o0), Q(p1, o1), Q(p0, o1)]; const c = chunkOf(fab, (P[0][0] + P[2][0]) / 2, (P[0][1] + P[2][1]) / 2); made.push([c.walk, c.walk.n, P]); c.walk.quad(P, 0.03, P.map((q) => [q[0], q[1]]), null); }
+  return made;
 }
 // paved / parking surface quad in a local frame (uv = metres along/across for the stall shader), mode 0 stalls 1 concrete yard 2 asphalt 3 sports field 4 plaza
 function lotQuad(fab, P, ua, va, mode, y = 0.006) { const c = chunkOf(fab, (P[0][0] + P[2][0]) / 2, (P[0][1] + P[2][1]) / 2);
@@ -234,23 +237,29 @@ function drawPolyRoad(fab, cell, cuts, pts, hw, kind, s0, s1) {
   return [pts[0], pts[n]];
 }
 // sidewalks + verge trees along a frame line, piecewise when the frame is curved
-function sidesA(fab, F, a0, a1, b, opts) { const n = F.curved ? Math.max(1, Math.ceil((a1 - a0) / 14)) : 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a0 + ((a1 - a0) * k) / n, b), F.P(a0 + ((a1 - a0) * (k + 1)) / n, b), opts); }
-function sidesB(fab, F, a, b0, b1, opts) { const n = F.curved ? Math.max(1, Math.ceil((b1 - b0) / 14)) : 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a, b0 + ((b1 - b0) * k) / n), F.P(a, b0 + ((b1 - b0) * (k + 1)) / n), opts); }
+function sidesA(fab, F, a0, a1, b, opts) { const n = F.curved ? Math.max(1, Math.ceil((a1 - a0) / 14)) : 1; const run = fab.nRun = (fab.nRun || 0) + 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a0 + ((a1 - a0) * k) / n, b), F.P(a0 + ((a1 - a0) * (k + 1)) / n, b), opts, run); }
+function sidesB(fab, F, a, b0, b1, opts) { const n = F.curved ? Math.max(1, Math.ceil((b1 - b0) / 14)) : 1; const run = fab.nRun = (fab.nRun || 0) + 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a, b0 + ((b1 - b0) * k) / n), F.P(a, b0 + ((b1 - b0) * (k + 1)) / n), opts, run); }
 // local-frame quad (a0..a1, b0..b1) in world
 const fq = (F, a0, a1, b0, b1) => [F.P(a0, b0), F.P(a1, b0), F.P(a1, b1), F.P(a0, b1)];
 // frame direction angle (box rotation about y so that local +x runs along a)
 const fang = (F, a, b) => { const p = F.P(a, b), q = F.P(a + 1, b); return Math.atan2(-(q[1] - p[1]), q[0] - p[0]); };
 // verge trees + sidewalks along a local street piece (both sides)
-function localSides(fab, A, B, opts = {}) {
+function localSides(fab, A, B, opts = {}, run = 0) {
   const L = len2(sub(B, A)); if (L < 4) return; const d = norm2(sub(B, A));
+  const seg = { A, B, run, res: !!fab._res, w: {} }; (fab.locSegs = fab.locSegs || []).push(seg); // a_curbalign: the street piece every local sidewalk was laid along
   if (opts.lamps !== false && fab.R() < Math.min(1, L / 28)) lampRow(fab, A, B, LW + 0.5, 40, Math.min(L * 0.5, 4 + fab.R() * 20));
-  for (const s of [-1, 1]) { walkSeg(fab, A, B, s, LW + LVG, LIN, 0, L, []);
+  for (const s of [-1, 1]) { seg.w[s] = walkSeg(fab, A, B, s, LW + LVG, LIN, 0, L, []);
     if (opts.trees !== false) for (let t = 6 + fab.R() * 5; t < L - 5; t += fab.rr(11, 17)) { if (fab.R() < 0.18) continue; const o = (LW + LVG * 0.5) * s; const x = A[0] + d[0] * t - d[1] * o, z = A[1] + d[1] * t + d[0] * o; if (fab.canals && inCanal(fab, x, z)) continue;
       if (opts.palms ? fab.R() < 0.75 : fab.R() < 0.18) addPalm(fab, x, z, fab.rr(7, 12)); else addTree(fab, x, z, fab.rr(2.4, 3.8), fab.rr(2.2, 3.2), pickR(fab, LEAF)); } }
 }
 
 // ------------------------------------------------------------------ residential ----
 function residentialCell(fab, cell, cuts, col, canal) {
+  fab._res = cell; // a_curbalign: local sidewalks laid while this is set belong to a residential cell
+  { const q = cell.C.map((p) => [p[0], p[1]]); q.x0 = Math.min(...q.map((p) => p[0])); q.x1 = Math.max(...q.map((p) => p[0])); q.z0 = Math.min(...q.map((p) => p[1])); q.z1 = Math.max(...q.map((p) => p[1])); (fab.resCells = fab.resCells || []).push(q); }
+  try { residentialCell0(fab, cell, cuts, col, canal); } finally { fab._res = null; }
+}
+function residentialCell0(fab, cell, cuts, col, canal) {
   const F = frame(cell, canal ? true : cell.Lu >= cell.Lv); const { La, Lb } = F; const R = fab.R, rr = fab.rr;
   // commercial frontage bands on the arterials at b = 0 / b = Lb
   let bs = 0, be = Lb;
@@ -331,7 +340,8 @@ function residentialCell(fab, cell, cuts, col, canal) {
 function deck(fab, cx, cz, y0, w, d, h, ang) { chunkOf(fab, cx, cz).I.body.push([cx, y0, cz, w, h, d, ang, 0.74, 0.73, 0.70, 7, 0.37]); }
 function edgeWall(fab, cx, cz, w, d, h, ang) { chunkOf(fab, cx, cz).I.body.push([cx, 0, cz, w, h, d, ang, 0.86, 0.84, 0.8, 7, 0.61]); parapet(fab, cx, cz, w, d, h, ang); }
 function parapet(fab, cx, cz, w, d, h, ang) { (fab.parapets = fab.parapets || []).push([cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, h]); }
-function wallRun(fab, F, a0, a1, b, col) { const ang = fang(F, (a0 + a1) / 2, b); for (let a = a0 + 2; a < a1 - 2; a += 40) { const ae = Math.min(a1 - 2, a + 40); const p = F.P((a + ae) / 2, b); addBody(fab, p[0], p[1], 0, ae - a, 0.35, 2.1, ang, [0.86, 0.82, 0.74], 7, col); } }
+function wallRun(fab, F, a0, a1, b, col) { const ang = fang(F, (a0 + a1) / 2, b); for (let a = a0 + 2; a < a1 - 2; a += 40) { const ae = Math.min(a1 - 2, a + 40); const p = F.P((a + ae) / 2, b); addBody(fab, p[0], p[1], 0, ae - a, 0.35, 2.1, ang, [0.86, 0.82, 0.74], 7, col);
+  (fab.walls = fab.walls || []).push({ rec: lastRec(fab, p, 'body'), list: chunkOf(fab, p[0], p[1]).I.body, box: fab._lastBox }); } } // a_curbalign: curbfix.js cuts them where streets pass
 function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   const R = fab.R, rr = fab.rr; const fw = a1 - a0, depth = Math.abs(f1 - f0); if (depth < 18) return;
   const setback = rr(5.5, 8.5), hd = Math.min(depth - setback - 6, rr(10, 14)), hw = Math.max(8, fw - rr(3.5, 6.5));
@@ -339,23 +349,26 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   const p = F.P(ac, bc); const ang = fang(F, ac, bc);
   const two = R() < (canal ? 0.5 : 0.28); const h = two ? rr(5.9, 6.6) : rr(3.2, 3.7);
   const wall = pickR(fab, WALLS); addBody(fab, p[0], p[1], 0, hw, hd, h, ang, wall, 0, col);
+  // a_curbalign: what curbfix.js needs about this lot (record references; no random draws)
+  const LT = { s, ang, canal, front: F.P(ac, f0), dfront: null, house: lastRec(fab, p, 'body'), box: fab._lastBox, roof: null, verge: null, yard: null, car: null, ftree: null, hedge: null, dock: null, boat: null };
+  (fab.lots = fab.lots || []).push(LT);
   const flat = R() < (canal ? 0.3 : 0.07);
-  if (!flat) addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, Math.min(hw, hd) * rr(0.22, 0.3), ang, pickR(fab, ROOFS));
+  if (!flat) { addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, Math.min(hw, hd) * rr(0.22, 0.3), ang, pickR(fab, ROOFS)); LT.roof = lastRec(fab, p, 'roof'); }
   // driveway (verge part + yard part, skipping the sidewalk) on one side, car on it half the time
   const ds = R() < 0.5 ? -1 : 1; const ad = ac + ds * (hw / 2 - 1.8);
   const yardA = f0, yardB = f0 + s * setback; const pv = F.P(ad, (f0 - s * (LSW + LVG * 0.5)));
-  addFlat(fab, ...F.P(ad, f0 - s * (LSW + LVG / 2) + 0), 3.2, LVG + 0.2, ang, [0.66, 0.65, 0.62]); void pv;
-  const pm = F.P(ad, (yardA + yardB) / 2); addFlat(fab, pm[0], pm[1], 3.4, setback + 0.2, ang, [0.70, 0.69, 0.66]);
-  if (R() < 0.55) addCar(fab, ...F.P(ad, f0 + s * (setback * 0.45)), ang + Math.PI / 2, pickR(fab, CARS));
+  { const q = F.P(ad, f0 - s * (LSW + LVG / 2) + 0); addFlat(fab, ...q, 3.2, LVG + 0.2, ang, [0.66, 0.65, 0.62]); LT.verge = lastRec(fab, q, 'flat'); } void pv;
+  const pm = F.P(ad, (yardA + yardB) / 2); addFlat(fab, pm[0], pm[1], 3.4, setback + 0.2, ang, [0.70, 0.69, 0.66]); LT.yard = lastRec(fab, pm, 'flat'); LT.dfront = F.P(ad, f0);
+  if (R() < 0.55) { const q = F.P(ad, f0 + s * (setback * 0.45)); addCar(fab, ...q, ang + Math.PI / 2, pickR(fab, CARS)); LT.car = lastRec(fab, q, 'car'); }
   // back yard: pool + deck, trees, hedge on the back line
   const back0 = f0 + s * (setback + hd), yd = depth - setback - hd;
   if (yd > 8 && R() < (canal ? 0.75 : 0.42)) { const pb = back0 + s * (yd * 0.5); const pp = F.P(ac + rr(-2, 2), pb); const pw = rr(7, 10), pd = Math.min(yd - 4, rr(3.6, 5));
     addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); addPool(fab, pp[0], pp[1], pw, pd, ang); }
   if (R() < 0.6) { const t = F.P(a0 + rr(2, fw - 2), back0 + s * rr(2, yd - 1)); if (R() < 0.3) addPalm(fab, t[0], t[1], rr(7, 11)); else addTree(fab, t[0], t[1], rr(2.6, 4.6), rr(2.5, 4), pickR(fab, LEAF)); }
-  if (R() < 0.35) { const t = F.P(a0 + rr(2, fw - 2), f0 + s * rr(2, setback - 1.5)); if (R() < 0.4) addPalm(fab, t[0], t[1], rr(6, 10)); else addTree(fab, t[0], t[1], rr(2, 3.4), rr(2, 3), pickR(fab, LEAF)); }
-  if (!canal && R() < 0.5) { const hb = F.P(ac, f0 + s * (depth - 0.4)); addBody(fab, hb[0], hb[1], 0, fw - 0.4, 0.7, rr(1.4, 2.0), ang, [0.22, 0.32, 0.16], 6, null, false); }
-  if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); addFlat(fab, dk[0], dk[1], Math.min(10, fw - 4), 2.4, ang, [0.52, 0.42, 0.30], 0.35);
-    if (R() < 0.45) { const bt = F.P(ac + rr(-2, 2), f0 + s * (depth + 4.2)); addBody(fab, bt[0], bt[1], -0.8, rr(7, 11), 2.6, 1.6, ang, [0.95, 0.95, 0.94], 8, null, false); } }
+  if (R() < 0.35) { const t = F.P(a0 + rr(2, fw - 2), f0 + s * rr(2, setback - 1.5)); if (R() < 0.4) { addPalm(fab, t[0], t[1], rr(6, 10)); LT.ftree = ['palm', lastRec(fab, t, 'palm')]; } else { addTree(fab, t[0], t[1], rr(2, 3.4), rr(2, 3), pickR(fab, LEAF)); LT.ftree = ['tree', lastRec(fab, t, 'tree')]; } }
+  if (!canal && R() < 0.5) { const hb = F.P(ac, f0 + s * (depth - 0.4)); addBody(fab, hb[0], hb[1], 0, fw - 0.4, 0.7, rr(1.4, 2.0), ang, [0.22, 0.32, 0.16], 6, null, false); LT.hedge = lastRec(fab, hb, 'body'); }
+  if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); addFlat(fab, dk[0], dk[1], Math.min(10, fw - 4), 2.4, ang, [0.52, 0.42, 0.30], 0.35); LT.dock = lastRec(fab, dk, 'flat');
+    if (R() < 0.45) { const bt = F.P(ac + rr(-2, 2), f0 + s * (depth + 4.2)); addBody(fab, bt[0], bt[1], -0.8, rr(7, 11), 2.6, 1.6, ang, [0.95, 0.95, 0.94], 8, null, false); LT.boat = lastRec(fab, bt, 'body'); } }
 }
 // strip-mall band facing the arterial at b = bEdge (dir +1 into the cell from b=0, -1 from b=Lb)
 function stripBand(fab, F, bEdge, dir, La, col) {
