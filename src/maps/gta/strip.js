@@ -32,7 +32,11 @@ const axes = (a) => [[Math.cos(a), -Math.sin(a)], [Math.sin(a), Math.cos(a)]];
 const fangP = (P, a, b) => { const p = P(a, b), q = P(a + 1, b); return Math.atan2(-(q[1] - p[1]), q[0] - p[0]); };
 class Grid { constructor(C) { this.C = C; this.m = new Map(); }
   add(o, x0, z0, x1, z1) { const C = this.C; for (let i = Math.floor(x0 / C); i <= Math.floor(x1 / C); i++) for (let j = Math.floor(z0 / C); j <= Math.floor(z1 / C); j++) { const k = i * 65536 + j; let l = this.m.get(k); if (!l) this.m.set(k, l = []); l.push(o); } }
-  near(x0, z0, x1, z1, f) { const C = this.C; const seen = new Set(); for (let i = Math.floor(x0 / C); i <= Math.floor(x1 / C); i++) for (let j = Math.floor(z0 / C); j <= Math.floor(z1 / C); j++) { const l = this.m.get(i * 65536 + j); if (l) for (const o of l) { if (seen.has(o)) continue; seen.add(o); if (f(o)) return true; } } return false; } }
+  // a_stripfix: dedupe by a query stamp on the object instead of a new Set per query (same visiting order, no garbage)
+  near(x0, z0, x1, z1, f) { const C = this.C; const i0 = Math.floor(x0 / C), i1 = Math.floor(x1 / C), j0 = Math.floor(z0 / C), j1 = Math.floor(z1 / C);
+    if (i0 === i1 && j0 === j1) { const l = this.m.get(i0 * 65536 + j0); if (l) for (let k = 0; k < l.length; k++) if (f(l[k])) return true; return false; }
+    const st = ++STAMP; for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const l = this.m.get(i * 65536 + j); if (l) for (let k = 0; k < l.length; k++) { const o = l[k]; if (o._st === st) continue; o._st = st; if (f(o)) return true; } } return false; } }
+let STAMP = 0;
 function obbOverlap(a, b, pad) { const A = axes(a.a), B = axes(b.a); const dx = b.x - a.x, dz = b.z - a.z;
   for (const [ax, az] of [A[0], A[1], B[0], B[1]]) { const ra = a.hl * Math.abs(A[0][0] * ax + A[0][1] * az) + a.hw * Math.abs(A[1][0] * ax + A[1][1] * az); const rb = b.hl * Math.abs(B[0][0] * ax + B[0][1] * az) + b.hw * Math.abs(B[1][0] * ax + B[1][1] * az);
     if (Math.abs(dx * ax + dz * az) > ra + rb + pad) return false; } return true; }
@@ -52,12 +56,17 @@ const GAS = [['海鸥能源', '#1d4f9a', '#ffffff', [0.11, 0.31, 0.60]], ['棕�
 const SIGNST = [['#f4f2ec', '#b8231b'], ['#f4f2ec', '#1b4f9e'], ['#f4f2ec', '#1f6b3a'], ['#f4f2ec', '#202020'], ['#1b4f9e', '#ffffff'], ['#a3221a', '#ffffff'], ['#1f6b3a', '#ffffff'], ['#222224', '#f2d36a'], ['#f2e6c8', '#7a3b12'], ['#0f6f78', '#ffffff']];
 const TRIM = [[0.93, 0.91, 0.86], [0.56, 0.34, 0.25], [0.22, 0.34, 0.38], [0.30, 0.27, 0.24], [0.86, 0.80, 0.69], [0.93, 0.93, 0.92]];
 const CONC = [0.73, 0.72, 0.69], KERB = [0.62, 0.61, 0.58], YEL = [0.82, 0.68, 0.18], CMU = [0.67, 0.66, 0.63], DKB = [0.21, 0.19, 0.17], WHT = [0.94, 0.94, 0.92], RTU = [0.78, 0.79, 0.78];
-const lin = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+const LIN = new Map(); const lin = (hex) => { let v = LIN.get(hex); if (!v) { const c = new THREE.Color(hex); LIN.set(hex, v = [c.r, c.g, c.b]); } return v; }; // a_stripfix: cached (read-only uses)
 const mul = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
 
 // ---------------------------------------------------------------- box records ----
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
-function box(out, x, y0, z, sx, sy, sz, a, c, kind, seed) { _q.setFromAxisAngle(_Y, a); _m.compose(_v.set(x, y0, z), _q, _s.set(sx, sy, sz)); const e = _m.elements; for (let k = 0; k < 16; k++) out.push(e[k]); out.push(c[0], c[1], c[2], kind, seed); }
+// a_stripfix: box records go straight into four growable Float32 arenas (casters far / near, no-cast far / near); a unit's boxes are
+// contiguous in each arena (units are filled one after another), packed as subarray views (was: JS number arrays + a copy each)
+class Arena { constructor() { this.a = new Float32Array(1 << 16); this.n = 0; }
+  room(k) { if (this.n + k > this.a.length) { const b = new Float32Array(Math.max(this.a.length * 2, this.n + k)); b.set(this.a.subarray(0, this.n)); this.a = b; } } }
+function box(out, x, y0, z, sx, sy, sz, a, c, kind, seed) { _q.setFromAxisAngle(_Y, a); _m.compose(_v.set(x, y0, z), _q, _s.set(sx, sy, sz)); const e = _m.elements;
+  const A = out.A; if (out.u !== A.cur) throw new Error('strip arena: unit out of order'); A.room(NF); const d = A.a; let n = A.n; for (let k = 0; k < 16; k++) d[n++] = e[k]; d[n++] = c[0]; d[n++] = c[1]; d[n++] = c[2]; d[n++] = kind; d[n++] = seed; A.n = n; }
 // a local frame: origin O, along U (box x), out N (box z), angle a. cb(list, s, t, y0, sx, sy, st, c, kind)
 function frameAt(O, a, flip) { const [U, V] = axes(a); const N = flip ? [-V[0], -V[1]] : V; const W = (s, t) => [O[0] + U[0] * s + N[0] * t, O[1] + U[1] * s + N[1] * t]; return { O, a, U, N, W }; }
 
@@ -66,34 +75,73 @@ export function prepStrip(fab) {
   if (STRIP_OFF || !fab || !fab.strips || !fab.strips.length) return null; const T0 = performance.now();
   const K = { units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], raise: new Grid(16), stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
   const S = K.stats; const why = (k) => { S.refused[k] = (S.refused[k] || 0) + 1; };
-  // test grids from the final records (bodies, trunks, arterial sidewalks, parked cars)
+  // test grids from the final records (bodies, trunks, arterial sidewalks, parked cars). a_stripfix: filed lazily per 640 m
+  // chunk (only the chunks around a band, when that band is built); the record arrays are kept by reference here because
+  // attachFabric drops the chunk's handle (records are not moved / dropped after this pass, so the lists are the same as at load)
   const G = { body: new Grid(32), trunk: new Grid(16), walk: new Grid(16), car: new Grid(16) };
   let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity;
   for (const SB of fab.strips) for (const s of SB.shops) { const r = s.rec; bx0 = Math.min(bx0, r[0]); bx1 = Math.max(bx1, r[0]); bz0 = Math.min(bz0, r[2]); bz1 = Math.max(bz1, r[2]); }
   bx0 -= 140; bz0 -= 140; bx1 += 140; bz1 += 140;
   const mask = new Set(); for (const SB of fab.strips) for (let a = -8; a <= SB.La + 8; a += 24) for (let b = -12; b <= 96; b += 24) { const p = SB.P(a, SB.bEdge + SB.dir * b); const i = Math.floor(p[0] / 32), j = Math.floor(p[1] / 32); for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) mask.add((i + di) * 65536 + j + dj); }
   const inB = (x, z) => mask.has(Math.floor(x / 32) * 65536 + Math.floor(z / 32)); // only records near a strip band are filed
-  for (const ch of fab.chunks.values()) { const I = ch.I; if (!I) continue; if (ch.cx + 400 < bx0 || ch.cx - 400 > bx1 || ch.cz + 400 < bz0 || ch.cz - 400 > bz1) continue;
-    for (const b of I.body) { if (b.gone || !inB(b[0], b[2])) continue; const R = { x: b[0], z: b[2], a: b[6], hl: b[3] / 2, hw: b[5] / 2, rec: b }; G.body.add(R, ...ext(R)); }
-    for (const t of I.tree) { if (t.gone || !inB(t[0], t[1])) continue; const r = 0.24 * (0.75 + t[2] * 0.12) + 0.05; G.trunk.add({ x: t[0], z: t[1], r }, t[0] - r, t[1] - r, t[0] + r, t[1] + r); }
-    for (const p of I.palm) { if (p.gone || !inB(p[0], p[1])) continue; const r = 0.24 * (p[2] / 10) + 0.07; G.trunk.add({ x: p[0], z: p[1], r }, p[0] - r, p[1] - r, p[0] + r, p[1] + r); }
-    for (const l of I.lamp) { if (!inB(l[0], l[1])) continue; G.trunk.add({ x: l[0], z: l[1], r: 0.16 }, l[0] - 0.16, l[1] - 0.16, l[0] + 0.16, l[1] + 0.16); }
-    for (const p of I.car) { if (!inB(p[0], p[1])) continue; const R = { x: p[0], z: p[1], a: p[2], hl: CARHL, hw: CARHW, rec: p }; G.car.add(R, ...ext(R)); }
-    const w = ch.walk; if (w && w.p) for (let v = 0; v + 3 < w.n; v += 4) { const q = new Float32Array(12); let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-      for (let k = 0; k < 4; k++) { const x = w.p[(v + k) * 3], z = w.p[(v + k) * 3 + 2]; q[k * 2] = x; q[k * 2 + 1] = z; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-      if (!inB(x0, z0) && !inB(x1, z1) && !inB((x0 + x1) / 2, (z0 + z1) / 2)) continue; q[8] = x0; q[9] = z0; q[10] = x1; q[11] = z1; G.walk.add(q, x0, z0, x1, z1); } }
-  S.msGrid = Math.round(performance.now() - T0);
+  const srcs = []; for (const ch of fab.chunks.values()) { const I = ch.I; if (!I) continue; if (ch.cx + 400 < bx0 || ch.cx - 400 > bx1 || ch.cz + 400 < bz0 || ch.cz - 400 > bz1) continue;
+    srcs.push({ cx: ch.cx, cz: ch.cz, body: I.body, tree: I.tree, palm: I.palm, lamp: I.lamp, car: I.car, wp: ch.walk && ch.walk.p ? ch.walk.p : null, wn: ch.walk ? ch.walk.n : 0, L: null, filed: false }); }
+  // a chunk's filtered records, in the same order the eager pass filed them (walk quads: bounds first, then the Float32 copy)
+  const lists = (sc) => { if (sc.L) return sc.L; const o = sc.L = { body: [], trunk: [], car: [], walk: [] };
+    for (const b of sc.body) { if (b.gone || !inB(b[0], b[2])) continue; o.body.push({ x: b[0], z: b[2], a: b[6], hl: b[3] / 2, hw: b[5] / 2, rec: b }); }
+    for (const t of sc.tree) { if (t.gone || !inB(t[0], t[1])) continue; const r = 0.24 * (0.75 + t[2] * 0.12) + 0.05; o.trunk.push({ x: t[0], z: t[1], r }); }
+    for (const p of sc.palm) { if (p.gone || !inB(p[0], p[1])) continue; const r = 0.24 * (p[2] / 10) + 0.07; o.trunk.push({ x: p[0], z: p[1], r }); }
+    for (const l of sc.lamp) { if (!inB(l[0], l[1])) continue; o.trunk.push({ x: l[0], z: l[1], r: 0.16 }); }
+    for (const p of sc.car) { if (!inB(p[0], p[1])) continue; o.car.push({ x: p[0], z: p[1], a: p[2], hl: CARHL, hw: CARHW, rec: p }); }
+    const w = sc.wp; if (w) for (let v = 0; v + 3 < sc.wn; v += 4) { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (let k = 0; k < 4; k++) { const x = w[(v + k) * 3], z = w[(v + k) * 3 + 2]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      if (!inB(x0, z0) && !inB(x1, z1) && !inB((x0 + x1) / 2, (z0 + z1) / 2)) continue; const q = new Float32Array(12);
+      for (let k = 0; k < 4; k++) { q[k * 2] = w[(v + k) * 3]; q[k * 2 + 1] = w[(v + k) * 3 + 2]; } q[8] = x0; q[9] = z0; q[10] = x1; q[11] = z1; o.walk.push(q); }
+    return o; };
+  const fileChunk = (sc) => { sc.filed = true; const o = lists(sc); for (const R of o.body) G.body.add(R, ...ext(R)); for (const t of o.trunk) G.trunk.add(t, t.x - t.r, t.z - t.r, t.x + t.r, t.z + t.r);
+    for (const R of o.car) G.car.add(R, ...ext(R)); for (const q of o.walk) G.walk.add(q, q[8], q[9], q[10], q[11]); };
+  const CHM = 320 + 140; // chunk half size + the longest body half length (records belong to the chunk of their centre)
+  const srcNear = (x0, z0, x1, z1) => srcs.filter((sc) => !(sc.cx + CHM < x0 || sc.cx - CHM > x1 || sc.cz + CHM < z0 || sc.cz - CHM > z1));
+  const ensureChunks = (bb) => { for (const sc of srcNear(...bb)) if (!sc.filed) fileChunk(sc); };
   const walkHit = (x, z) => G.walk.near(x, z, x, z, (q) => x >= q[8] && x <= q[10] && z >= q[9] && z <= q[11] && (triIn(x, z, q[0], q[1], q[2], q[3], q[4], q[5]) || triIn(x, z, q[0], q[1], q[4], q[5], q[6], q[7])));
   const onWalk = (R) => { const [u, v] = axes(R.a); for (let a = -1; a <= 1.0001; a += 0.5) for (let b = -1; b <= 1.0001; b += 1) if (walkHit(R.x + u[0] * a * R.hl + v[0] * b * R.hw, R.z + u[1] * a * R.hl + v[1] * b * R.hw)) return true; return false; };
   const blocked = (R, opt = {}) => { const e = ext(R, 0.6);
     if (G.body.near(...e, (B) => B.rec !== opt.own && obbOverlap(R, B, 0.05))) return 'body';
     if (G.trunk.near(...e, (t) => circRect(t.x, t.z, t.r + 0.1, R))) return 'trunk';
-    if (!opt.cars && G.car.near(...e, (C) => !C.rec.dead && obbOverlap(R, C, 0.1))) return 'car';
+    if (!opt.cars && G.car.near(...e, (C) => !(C.rec.dead && C.rec.dseq < LIM) && obbOverlap(R, C, 0.1))) return 'car';
     if (!opt.nowalk && onWalk(R)) return 'walk';
-    if (!opt.nozone) for (const Z of K.zones) if (obbOverlap(R, Z, 0.2)) return 'zone';
+    if (!opt.nozone) for (const Z of K.zones) if (Z.seq < LIM && obbOverlap(R, Z, 0.2)) return 'zone';
     return null; };
   K.zones = []; // gas aprons / drive-through lanes: no other piece may stand there
-  const dropCars = (R) => { G.car.near(...ext(R, 0.5), (C) => { if (!C.rec.dead && obbOverlap(R, C, 0.25)) { C.rec.dead = true; S.carsDropped++; } return false; }); };
+  // a_stripfix: bands are built lazily in any order, so every check sees exactly what the eager pass (band by band) saw: zones
+  // and dropped cars carry a sequence number (band * 4 + 1 lane, + 2 apron), LIM is the point of the eager pass being replayed
+  let LIM = Infinity;
+  // the zone / car-drop decisions are taken at load (lot shader zones, fab.parked) by a brute-force scan of the nearby chunks
+  // (same filters, same overlap tests as the grids: a record either overlaps or not, whichever structure finds it)
+  // raw record arrays with a cheap distance reject first, so phase A builds no per-record objects
+  const SCR = { x: 0, z: 0, a: 0, hl: 0, hw: 0 }; const f32 = Math.fround;
+  const scanBody = (R, pad, own) => { const e = R.hl + R.hw + pad; for (const sc of srcNear(...ext(R, 2))) for (const b of sc.body) {
+      const m = e + b[3] / 2 + b[5] / 2; if (Math.abs(b[0] - R.x) > m || Math.abs(b[2] - R.z) > m) continue; if (b.gone || b === own || !inB(b[0], b[2])) continue;
+      SCR.x = b[0]; SCR.z = b[2]; SCR.a = b[6]; SCR.hl = b[3] / 2; SCR.hw = b[5] / 2; if (obbOverlap(R, SCR, pad)) return true; } return false; };
+  const scanTrunk = (R) => { const e = R.hl + R.hw + 1; for (const sc of srcNear(...ext(R, 2))) {
+      for (const t of sc.tree) { if (Math.abs(t[0] - R.x) > e || Math.abs(t[1] - R.z) > e || t.gone || !inB(t[0], t[1])) continue; const r = 0.24 * (0.75 + t[2] * 0.12) + 0.05; if (circRect(t[0], t[1], r + 0.1, R)) return true; }
+      for (const t of sc.palm) { if (Math.abs(t[0] - R.x) > e || Math.abs(t[1] - R.z) > e || t.gone || !inB(t[0], t[1])) continue; const r = 0.24 * (t[2] / 10) + 0.07; if (circRect(t[0], t[1], r + 0.1, R)) return true; }
+      for (const t of sc.lamp) { if (Math.abs(t[0] - R.x) > e || Math.abs(t[1] - R.z) > e || !inB(t[0], t[1])) continue; if (circRect(t[0], t[1], 0.16 + 0.1, R)) return true; } } return false; };
+  const scanWalk = (R) => { const e = R.hl + R.hw + 1; const Q = []; // the filed quads (float32 copies, as the grid holds them) near R, then the 15 probe points
+    for (const sc of srcNear(...ext(R, 2))) { const w = sc.wp; if (!w) continue; for (let v = 0; v + 3 < sc.wn; v += 4) { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+        for (let k = 0; k < 4; k++) { const x = w[(v + k) * 3], z = w[(v + k) * 3 + 2]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+        if (x1 < R.x - e || x0 > R.x + e || z1 < R.z - e || z0 > R.z + e) continue; if (!inB(x0, z0) && !inB(x1, z1) && !inB((x0 + x1) / 2, (z0 + z1) / 2)) continue;
+        const q = []; for (let k = 0; k < 4; k++) q.push(f32(w[(v + k) * 3]), f32(w[(v + k) * 3 + 2])); q.push(f32(x0), f32(z0), f32(x1), f32(z1)); Q.push(q); } }
+    const hit = (x, z) => { for (const q of Q) if (x >= q[8] && x <= q[10] && z >= q[9] && z <= q[11] && (triIn(x, z, q[0], q[1], q[2], q[3], q[4], q[5]) || triIn(x, z, q[0], q[1], q[4], q[5], q[6], q[7]))) return true; return false; };
+    const [u, v] = axes(R.a); for (let a = -1; a <= 1.0001; a += 0.5) for (let b = -1; b <= 1.0001; b += 1) if (hit(R.x + u[0] * a * R.hl + v[0] * b * R.hw, R.z + u[1] * a * R.hl + v[1] * b * R.hw)) return true; return false; };
+  const blockedScan = (R, opt = {}) => { if (scanBody(R, 0.05, opt.own)) return 'body'; if (scanTrunk(R)) return 'trunk';
+    if (!opt.cars) throw new Error('blockedScan: cars');
+    if (!opt.nowalk && scanWalk(R)) return 'walk';
+    if (!opt.nozone) for (const Z of K.zones) if (obbOverlap(R, Z, 0.2)) return 'zone';
+    return null; };
+  const dropCars = (R, seq) => { const e = R.hl + R.hw + CARHL + CARHW + 0.25; for (const sc of srcNear(...ext(R, 2))) for (const p of sc.car) {
+      if (Math.abs(p[0] - R.x) > e || Math.abs(p[1] - R.z) > e || p.dead || !inB(p[0], p[1])) continue; SCR.x = p[0]; SCR.z = p[1]; SCR.a = p[2]; SCR.hl = CARHL; SCR.hw = CARHW;
+      if (obbOverlap(R, SCR, 0.25)) { p.dead = true; p.dseq = seq; S.carsDropped++; } } };
   // text
   const TX = typeof document !== 'undefined'; const rcache = new Map();
   const ras = (key, W, H, pal, draw) => { if (!TX) return null; let r = rcache.get(key); if (!r) { r = raster(W, H, pal, draw); rcache.set(key, r); } return r; };
@@ -105,15 +153,50 @@ export function prepStrip(fab) {
   const nameRas = (txt, st) => { const n = txt.length; const W = 15 * n + 6, H = 20; return ras('n' + txt + st, W, H, [SIGNST[st][0], SIGNST[st][1]], (g) => { g.fillStyle = SIGNST[st][1]; g.font = `bold 15px ${FONT}`; g.fillText(txt, W / 2, H / 2 + 1); }); };
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z); const UP = V3(0, 1, 0);
   // unit record: lists S (casters far), S1 (casters near), F (no-cast far), F1 (no-cast near), centre
-  const newUnit = (x, z) => { const u = { x, z, S: [], S1: [], F: [], F1: [] }; K.units.push(u); return u; };
+  const AR = [new Arena(), new Arena(), new Arena(), new Arena()];
+  const newUnit = (x, z) => { const u = { x, z, S: null, S1: null, F: null, F1: null, o: [0, 0, 0, 0] }; K.units.push(u); for (let k = 0; k < 4; k++) { AR[k].cur = u; u.o[k] = AR[k].n; }
+    u.S = { A: AR[0], u }; u.S1 = { A: AR[1], u }; u.F = { A: AR[2], u }; u.F1 = { A: AR[3], u }; return u; };
   const addCol = (R, h, k) => { K.cols.push({ x: R.x, z: R.z, a: R.a, hl: R.hl, hw: R.hw, h, k }); };
   const cbF = (fr, seed) => (list, s, t, y0, sx, sy, st, c, kind = 8) => { const p = fr.W(s, t); box(list, p[0], y0, p[1], sx, sy, st, fr.a, c, kind, seed); };
 
-  K.prof = { grid: performance.now() - T0 };
-  // -------------------------------------------------------------- 1. strip shops ----
-  let tenantNo = 0;
-  for (let bi = 0; bi < fab.strips.length; bi++) { const SB = fab.strips[bi]; S.bands++; const B = (x) => SB.bEdge + SB.dir * x; const P = SB.P;
-    const bandSeed = SB.shops.length ? SB.shops[0].rec[11] : bi * 0.37; const tenantsOf = [];
+  // -------------------------------------------------------------- a_stripfix phase A (load): what the rest of the load needs ----
+  // shop / pad face sets (attachFabric), front walks (groundH), tenant names (a running count over all bands), drive-through lanes
+  // and filling-station aprons (lot shader zones + the parked cars they remove, before parkcol / the car instances). Everything
+  // else (kit boxes, signs, colliders) is built per band when the camera or a collision query first comes near it (buildBand).
+  let tenantNo = 0; const bounds0 = (L, hs) => { const hw = L / 2; const k0 = Math.ceil((-hw + 0.45) / 1.5), k1 = Math.floor((hw - 0.45) / 1.5); const bounds = [k0]; let k = k0, j = 0;
+    while (k1 - k >= 7) { const w = [4, 5, 6, 8][Math.floor(hs(10 + j++) * 4)]; if (k1 - (k + w) < 4) break; k += w; bounds.push(k); } bounds.push(k1); return bounds; };
+  for (let bi = 0; bi < fab.strips.length; bi++) { const SB = fab.strips[bi]; const B = (x) => SB.bEdge + SB.dir * x; const P = SB.P;
+    const bandSeed = SB.shops.length ? SB.shops[0].rec[11] : bi * 0.37; const ten = SB._ten = [];
+    { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; const g = (x, z, e) => { x0 = Math.min(x0, x - e); x1 = Math.max(x1, x + e); z0 = Math.min(z0, z - e); z1 = Math.max(z1, z + e); };
+      for (let a = -8; a <= SB.La + 8; a += 12) for (let b = -12; b <= 96; b += 12) { const p = P(a, B(b)); g(p[0], p[1], 0); }
+      for (const sh of SB.shops) g(sh.rec[0], sh.rec[2], sh.rec[3] / 2 + sh.rec[5] + 12); if (SB.pad) g(SB.pad.rec[0], SB.pad.rec[2], SB.pad.rec[3] / 2 + SB.pad.rec[5] + 14);
+      SB._bb = [x0 - 40, z0 - 40, x1 + 40, z1 + 40]; SB._built = false; }
+    for (const sh of SB.shops) { const r = sh.rec; if (r.gone) continue;
+      const seed = r[11], hs = (k) => hh(seed * 7.31 + 0.5, k); const C = [r[0], r[2]], L = r[3], D = r[5] / 2, a = r[6];
+      const [, V] = axes(a); const lp = P(sh.a + sh.L / 2, B(30)); const flip = (lp[0] - C[0]) * V[0] + (lp[1] - C[1]) * V[1] < 0;
+      const N = frameAt(C, a, flip).N; const F2 = frameAt([C[0] + N[0] * D, C[1] + N[1] * D], a, flip);
+      { let th = Math.atan2(N[1], N[0]); if (th < 0) th += Math.PI * 2; r.hs = 0.05 + 0.4 * th / (Math.PI * 2); } // fabBody strip face set (lot face = storefront)
+      { const p = F2.W(0, 1.66), R = { x: p[0], z: p[1], a, hl: L / 2 + 0.2, hw: 1.66, y: 0.12 }; K.raise.add(R, ...ext(R)); } // walk + kerb top for groundH
+      const bounds = bounds0(L, hs); sh._ni = [];
+      for (let i = 0; i < bounds.length - 1; i++) { if (bounds[i + 1] - bounds[i] < 3) continue; const ts = hh(seed * 3.1 + i, 5);
+        const ni = (Math.floor(bandSeed * 997) + tenantNo++ * 7 + Math.floor(ts * 5)) % SHOPS.length; sh._ni[i] = ni; ten.push(SHOPS[ni]); } }
+    SB._lb = null; SB._gb = null;
+    if (SB.pad && !SB.pad.rec.gone) { const r = SB.pad.rec; const C = [r[0], r[2]], w = r[3], D = r[5] / 2, a = r[6];
+      const [, V] = axes(a); const ap = P(SB.pad.ap, B(0)); const flip = (ap[0] - C[0]) * V[0] + (ap[1] - C[1]) * V[1] < 0; const N = flip ? [-V[0], -V[1]] : V;
+      { let th = Math.atan2(N[1], N[0]); if (th < 0) th += Math.PI * 2; r.hs = 0.05 + 0.4 * th / (Math.PI * 2); }
+      const F2 = frameAt([C[0] + N[0] * D, C[1] + N[1] * D], a, flip); const lane = (() => { const p = F2.W(-1, -2 * D - 2.1); return { x: p[0], z: p[1], a, hl: w / 2 + 7, hw: 1.8 }; })();
+      const lb = SB._lb = blockedScan({ ...lane, hl: lane.hl - 0.5, hw: 1.6 }, { own: r, cars: true });
+      if (!lb) { dropCars(lane, bi * 4 + 1); lane.kind = 2; lane.dash = 1; lane.seq = bi * 4 + 1; K.zones.push(lane); } }
+    const La = SB.La; const endP = hh(bandSeed, 70) < 0.5 ? 0 : 1; let gasEnd = -1;
+    if (!SB.pad && La > 200 && hh(bandSeed, 71) < 0.6) gasEnd = 1 - endP;
+    if (gasEnd >= 0) { const ac = gasEnd === 0 ? 21 : La - 21; const ang = fangP(P, ac, B(12.8)); const c0 = P(ac, B(12.8));
+      const apron = { x: c0[0], z: c0[1], a: ang, hl: 18, hw: 12.2 }; const gb = SB._gb = scanBody(apron, 0.3, undefined);
+      if (!gb) { dropCars(apron, bi * 4 + 2); apron.kind = 1; apron.seq = bi * 4 + 2; K.zones.push(apron); } } }
+  S.msGrid = Math.round(performance.now() - T0);
+  // -------------------------------------------------------------- phase B: one band's kit (strip shops, pad, station, pylon, poles) ----
+  const buildBand = (bi) => { const SB = fab.strips[bi]; if (SB._built) return; SB._built = true; const tB = performance.now(); const u0 = K.units.length, c0n = K.cols.length;
+    ensureChunks(SB._bb); LIM = bi * 4 + 1; S.bands++; const B = (x) => SB.bEdge + SB.dir * x; const P = SB.P;
+    const bandSeed = SB.shops.length ? SB.shops[0].rec[11] : bi * 0.37; const tenantsOf = SB._ten;
     for (const sh of SB.shops) { const r = sh.rec; if (r.gone) continue; S.shops++;
       const seed = r[11], hs = (k) => hh(seed * 7.31 + 0.5, k); const C = [r[0], r[2]], L = r[3], h = r[4], D = r[5] / 2, a = r[6];
       const [, V] = axes(a); const lp = P(sh.a + sh.L / 2, B(30)); const flip = (lp[0] - C[0]) * V[0] + (lp[1] - C[1]) * V[1] < 0;
@@ -122,7 +205,6 @@ export function prepStrip(fab) {
       const u = newUnit(C[0], C[1]); u.meta = { k: 'shop', C, N, U: F2.U, L, D, h, band: bi }; const wall = [r[7], r[8], r[9]]; const trim = TRIM[Math.floor(hs(1) * TRIM.length)]; const hw = L / 2;
       const yellow = hs(2) < 0.45; const colC = hs(3) < 0.5 ? mul(wall, 0.97) : trim;
       // walk + kerb, canopy slab + sign-band fascia, coping
-      { const p = F2.W(0, 1.66), R = { x: p[0], z: p[1], a, hl: L / 2 + 0.2, hw: 1.66, y: 0.12 }; K.raise.add(R, ...ext(R)); } // a_stripfix: walk + kerb top for groundH
       cb(u.S, 0, 1.6, 0, L + 0.4, 0.12, 3.2, CONC); cb(u.F, 0, 3.24, 0, L + 0.4, 0.13, 0.16, yellow ? YEL : KERB);
       cb(u.S, 0, 1.55, 3.15, L + 0.5, 0.25, 3.1, [0.90, 0.89, 0.85]); cb(u.S, 0, 2.95, 3.0, L + 0.56, 1.1, 0.3, trim);
       cb(u.F, 0, 3.11, 3.0, L + 0.6, 0.07, 0.04, mul(trim, 0.7)); // drip edge
@@ -141,7 +223,7 @@ export function prepStrip(fab) {
         cb(u.S, s, 2.6, 0.12, 0.4, 3.03, 0.4, colC); cb(u.S1, s, 2.6, 0.12, 0.54, 0.32, 0.54, mul(colC, 0.85)); cb(u.S1, s, 2.6, 2.95, 0.54, 0.2, 0.54, mul(colC, 1.03)); addCol(R, 3.2, 'column'); S.columns++; }
       // per tenant: entrance, light-box sign, rooftop unit
       for (let i = 0; i < bounds.length - 1; i++) { const m0 = bounds[i], m1 = bounds[i + 1], nm = m1 - m0; if (nm < 3) continue; S.tenants++; const ts = hh(seed * 3.1 + i, 5);
-        const ni = (Math.floor(bandSeed * 997) + tenantNo++ * 7 + Math.floor(ts * 5)) % SHOPS.length, nmT = SHOPS[ni]; tenantsOf.push(nmT);
+        const ni = sh._ni[i], nmT = SHOPS[ni]; // a_stripfix: named in phase A (running count over the bands)
         if (nm >= 4) { const jj = nm >= 6 ? (ts < 0.5 ? 2 : nm - 2) : 2; const sd = (m0 + jj) * 1.5; const fc = ts < 0.6 ? [0.22, 0.20, 0.18] : [0.66, 0.67, 0.68];
           cb(u.F, sd, 0.045, 0, 3.0, 3.0, 0.09, fc, 15); S.doors++; }
         const sc = (m0 + m1) * 0.75; const wS = Math.min(nm * 1.5 * 0.66, 6.5), hS = 0.74; const st = (ni * 7 + (hh(seed * 5.7 + i, 9) < 0.25 ? 3 : 0)) % SIGNST.length; // one look per shop name (a chain reads the same), a few variants
@@ -166,8 +248,8 @@ export function prepStrip(fab) {
       const F2 = frameAt([C[0] + N[0] * D, C[1] + N[1] * D], a, flip); const cb = cbF(F2, seed); const u = newUnit(C[0], C[1]); u.meta = { k: 'pad', C, N, U: F2.U, w, D, band: bi }; const bi2 = Math.floor(hh(seed, 1) * FOOD.length); const [nm, bg, fg] = FOOD[bi2]; const bgc = lin(bg);
       // lane along the back (t from -2D-0.3 to -2D-3.9), from upstream (s-) to the pickup window
       const lane = (() => { const p = F2.W(-1, -2 * D - 2.1); return { x: p[0], z: p[1], a, hl: w / 2 + 7, hw: 1.8 }; })();
-      const lb = blocked({ ...lane, hl: lane.hl - 0.5, hw: 1.6 }, { own: r, cars: true });
-      if (!lb) { dropCars(lane); lane.kind = 2; lane.dash = 1; K.zones.push(lane);
+      LIM = bi * 4 + 2; const lb = SB._lb; // decided in phase A (zone + car drop done there)
+      if (!lb) {
         // pickup window + awning on the back wall
         cb(u.F, w / 4, -2 * D - 0.04, 0.9, 1.5, 1.35, 0.08, [0.25, 0.25, 0.26], 15); cb(u.S, w / 4, -2 * D - 0.55, 2.45, 2.4, 0.12, 1.1, bgc);
         // menu board + speaker post on the outer side of the lane, clearance bar at the entry
@@ -195,8 +277,8 @@ export function prepStrip(fab) {
       const ac = gasEnd === 0 ? 21 : La - 21; const ang = fangP(P, ac, B(12.8)); const c0 = P(ac, B(12.8)); const nb = P(ac, B(13.8)); const fr = frameAt(c0, ang, (nb[0] - c0[0]) * Math.sin(ang) + (nb[1] - c0[1]) * Math.cos(ang) < 0); // t: arterial -> lot interior
       // frame: s along a, t along +b(into the cell for dir +1) -> flip for dir -1 so t points from the arterial into the lot
       const apron = { x: c0[0], z: c0[1], a: ang, hl: 18, hw: 12.2 };
-      const gb = G.body.near(...ext(apron, 0.6), (Bd) => obbOverlap(apron, Bd, 0.3));
-      if (!gb) { S.gas++; const seed = bandSeed * 3.3 + 0.7; const cb = cbF(fr, seed); const u = newUnit(c0[0], c0[1]); u.meta = { k: 'gas', C: c0, N: fr.N, U: fr.U, band: bi }; dropCars(apron); apron.kind = 1; K.zones.push(apron);
+      const gb = SB._gb;
+      if (!gb) { S.gas++; const seed = bandSeed * 3.3 + 0.7; const cb = cbF(fr, seed); const u = newUnit(c0[0], c0[1]); u.meta = { k: 'gas', C: c0, N: fr.N, U: fr.U, band: bi }; 
         const gi = Math.floor(hh(seed, 1) * GAS.length); const [gn, gbg, gfg, gc] = GAS[gi]; const sgn = gasEnd === 0 ? 1 : -1; // s toward the band interior
         // canopy 26 x 11 over b 7..18 (t -5.8..5.2)
         const tc = -0.3; cb(u.S, 0, tc, 5.1, 26, 0.4, 11, [0.93, 0.93, 0.91]);
@@ -222,6 +304,7 @@ export function prepStrip(fab) {
                 print(sg, rr, V3(o2[0], 0.95 + i * 0.72 + 0.31, o2[1]), UP, nrm, 1.9, 0.5); } }
             addCol({ x: p[0], z: p[1], a: ang + Math.PI / 2, hl: 1.2, hw: 0.35 }, 4.2, 'pricesign'); } else why('pricesign:' + bw); } }
       else why('gas:body'); }
+    LIM = bi * 4 + 3;
     { // pylon at the end endP: a 1.15 from that end, b 1.6..4.4
       const a0 = endP === 0 ? 1.15 : La - 1.15; const c0 = P(a0, B(3.0)); const ang = fangP(P, a0, B(3.0)); const R = { x: c0[0], z: c0[1], a: ang, hl: 0.55, hw: 1.85 };
       const pw = blocked(R, { cars: false }); if (pw) why('pylon:' + pw);
@@ -245,19 +328,30 @@ export function prepStrip(fab) {
         cb(u.S, 0, 0, 0, 0.55, 0.75, 0.55, CONC); cb(u.S, 0, 0, 0.75, 0.18, 8.2, 0.18, [0.24, 0.23, 0.22]); cb(u.S, 0, 0, 8.85, 0.1, 0.1, 2.4, [0.24, 0.23, 0.22]);
         for (const q of [-1, 1]) cb(u.S, 0, q * 1.25, 8.72, 0.5, 0.18, 0.8, [0.26, 0.25, 0.24], 17);
         addCol(R, 9.0, 'pole'); } }
-  }
-  K.prof.bands = performance.now() - T0;
+    // pack this band's units (subarray views of the arenas), file them; colliders straight into the collision grid once it is attached
+    for (let i = u0; i < K.units.length; i++) { const u = K.units[i], v = K.units[i + 1]; const end = (k) => (v ? v.o[k] : AR[k].n);
+      u.S = AR[0].a.subarray(u.o[0], end(0)); u.S1 = AR[1].a.subarray(u.o[1], end(1)); u.F = AR[2].a.subarray(u.o[2], end(2)); u.F1 = AR[3].a.subarray(u.o[3], end(3)); u.o = null; K.ug.add(u, u.x, u.z, u.x, u.z); }
+    if (K.col) for (let i = c0n; i < K.cols.length; i++) addColTo(K.col, K.cols[i]);
+    K.built++; if (K.built === fab.strips.length) K.allBuilt = true; K.msBuild += performance.now() - tB; };
   // drop the cars that stood on the new aprons / lanes (records and the fab.parked snapshot stay in step)
-  if (S.carsDropped) { const P0 = fab.parked; const live = []; let i = 0;
-    for (const ch of fab.chunks.values()) { const I = ch.I; if (!I) continue; const keep = []; for (const p of I.car) { const k = P0 ? P0[i * 4 + 3] : 0; i++; if (p.dead) continue; keep.push(p); live.push(p[0], p[1], p[2], k); } I.car = keep; }
-    if (P0) fab.parked = Float32Array.from(live); }
+  if (S.carsDropped) { const P0 = fab.parked; let nc = 0; for (const ch of fab.chunks.values()) if (ch.I) nc += ch.I.car.length; const live = new Float32Array(nc * 4); let i = 0, m = 0;
+    for (const ch of fab.chunks.values()) { const I = ch.I; if (!I) continue; const keep = []; for (const p of I.car) { const k = P0 ? P0[i * 4 + 3] : 0; i++; if (p.dead) continue; keep.push(p); live[m++] = p[0]; live[m++] = p[1]; live[m++] = p[2]; live[m++] = k; } I.car = keep; }
+    if (P0) fab.parked = live.slice(0, m); }
   // lot-shader zones (aprons, lanes): the lot quad is polygon-offset toward the camera, so paint on it rather than boxes over it
   { let i = 0; for (const Z of K.zones) { if (i >= 28) break; LOTZ.a.set([Z.x, Z.z, Math.cos(Z.a), Math.sin(Z.a)], i * 4); LOTZ.b.set([Z.hl, Z.hw, Z.kind, Z.dash || 0], i * 4); i++; } if (i < 28) LOTZ.b[i * 4 + 2] = 0; S.zones = i; }
   // pack
-  for (const u of K.units) { u.S = new Float32Array(u.S); u.S1 = new Float32Array(u.S1); u.F = new Float32Array(u.F); u.F1 = new Float32Array(u.F1); K.ug.add(u, u.x, u.z, u.x, u.z); }
-  for (const s of K.signs) S.rects = (S.rects || 0) + s.n;
-  S.units = K.units.length; S.colliders = K.cols.length; S.ms = Math.round(performance.now() - T0);
-  if (AUDIT) K.audit = auditStrip(K, G, blocked);
+  // lazily built bands: a 128 m grid of band boxes; ensureNear(x, z, r) builds every band whose box comes within r (camera,
+  // collision queries), ensureAll() builds the rest in band order (audit / tools). Totals below read the bands built so far.
+  K.built = 0; K.allBuilt = false; K.msBuild = 0; const BG = new Map(), BC = 128;
+  fab.strips.forEach((SB, bi) => { const bb = SB._bb; for (let i = Math.floor(bb[0] / BC); i <= Math.floor(bb[2] / BC); i++) for (let j = Math.floor(bb[1] / BC); j <= Math.floor(bb[3] / BC); j++) { const k = i * 65536 + j; let l = BG.get(k); if (!l) BG.set(k, l = []); l.push(bi); } });
+  K.ensureNear = (x, z, r) => { if (K.allBuilt) return; for (let i = Math.floor((x - r) / BC); i <= Math.floor((x + r) / BC); i++) for (let j = Math.floor((z - r) / BC); j <= Math.floor((z + r) / BC); j++) { const l = BG.get(i * 65536 + j); if (!l) continue;
+      for (const bi of l) { const SB = fab.strips[bi]; if (SB._built) continue; const bb = SB._bb; if (x + r < bb[0] || x - r > bb[2] || z + r < bb[1] || z - r > bb[3]) continue; buildBand(bi); } } };
+  K.ensureAll = () => { for (let bi = 0; bi < fab.strips.length; bi++) buildBand(bi); };
+  Object.defineProperty(S, 'rects', { enumerable: true, configurable: true, get: () => { let n = 0; for (const s of K.signs) n += s.n; return n; } });
+  Object.defineProperty(S, 'units', { enumerable: true, configurable: true, get: () => K.units.length });
+  Object.defineProperty(S, 'colliders', { enumerable: true, configurable: true, get: () => K.cols.length });
+  S.ms = Math.round(performance.now() - T0);
+  if (AUDIT) { K.ensureAll(); K.audit = auditStrip(K, G, blocked); }
   return K; }
 
 // a_stripfix: raised front walks (0.12 m) for city.groundH -> people stand on them instead of sinking 12 cm, cars ride up the kerb
@@ -271,7 +365,10 @@ function auditStrip(K, G, blocked) { const R = { cols: K.cols.length, byKind: {}
 
 // ---------------------------------------------------------------- colliders (all at load: ~3k boxes) ----
 export function attachStripColliders(city) { const fab = city.fabric || (city.region && city.region.fabric); const K = fab && fab.stripKit; const col = city.col; if (!K || !col || K.colDone) return null;
-  for (const c of K.cols) { const [u] = axes(c.a); col.addOBB(c.x, c.z, u[0], u[1], c.hl, c.hw, c.h, 'skit'); } K.colDone = true; return { n: K.cols.length }; }
+  for (const c of K.cols) addColTo(col, c); K.colDone = true; K.col = col; // a_stripfix: bands built later add theirs on build
+  const q0 = col.query; const REACH = 40; col.query = function (x, z, r, out = []) { if (!K.allBuilt) K.ensureNear(x, z, r + REACH); return q0.call(this, x, z, r, out); };
+  return { n: K.cols.length, lazy: true }; }
+function addColTo(col, c) { const [u] = axes(c.a); col.addOBB(c.x, c.z, u[0], u[1], c.hl, c.hw, c.h, 'skit'); }
 
 // ---------------------------------------------------------------- meshes ----
 function quadGeo() { const g = new THREE.PlaneGeometry(1, 1).toNonIndexed(); const n = g.attributes.position.count; const c = new Float32Array(n * 3).fill(1); g.setAttribute('color', new THREE.BufferAttribute(c, 3)); g.deleteAttribute('uv'); return g; }
@@ -296,7 +393,7 @@ export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam &
   if ((m.userData.warm & 3) !== 3) return;
   if (p.y > 140) { if (m.visible) { m.visible = false; tm.visible = false; K.last = null; K.lastT = null; } return; }
   // text decals (no dissolve; signs inside their own radius)
-  if (!K.lastT || Math.hypot(p.x - K.lastT[0], p.z - K.lastT[1]) > 3) { K.lastT = [p.x, p.z]; const M = tm.instanceMatrix.array, Cc = tm.instanceColor.array; let n = 0; const list = [];
+  if (!K.lastT || Math.hypot(p.x - K.lastT[0], p.z - K.lastT[1]) > 3) { K.lastT = [p.x, p.z]; K.ensureNear(p.x, p.z, Math.max(RAD, TXT_RL) + 5); // a_stripfix: bands built on approach const M = tm.instanceMatrix.array, Cc = tm.instanceColor.array; let n = 0; const list = [];
     K.sg.near(p.x - TXT_RL, p.z - TXT_RL, p.x + TXT_RL, p.z + TXT_RL, (s) => { const d = Math.hypot(s.x - p.x, s.z - p.z); if (d < s.R) list.push([d, s]); return false; }); list.sort((a, b) => a[0] - b[0]);
     for (const [, s] of list) { if (n + s.n > TCAP) break; for (const it of s.L) { const { rs, o, r, u, n: nn, px, py } = it;
         for (const [x, y, w, h, ci] of rs.rects) { const cx = (x + w / 2 - rs.W / 2) * px, cy = (rs.H / 2 - (y + h / 2)) * py, sw = w * px, sh = h * py, j = n * 16;
