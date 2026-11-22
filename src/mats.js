@@ -329,7 +329,7 @@ if (style == 6.0) {
   if (t == 2.0 || t == 4.0 || t == 5.0) { // painted steel guide rails / door frame (0.07 m) round the opening
     float fr = step(hw, abs(lu)) * step(abs(lu), hw + 0.07) * step(o0 - (t == 4.0 ? 0.07 : 0.0), yb) * step(yb, o1 + (t == 2.0 ? 0.0 : 0.07));
     if (t == 5.0) fr = max(fr, step(abs(lu), hw + 0.07) * step(o1, yb) * step(yb, o1 + 0.07));
-    svcC = mix(svcC, vec3(0.24, 0.25, 0.26) * (0.8 + 0.4 * vnoise(vec2(yb * 3.0, lu))), fr); svcR = mix(svcR, 0.45, fr); svcMet = max(svcMet, 0.5 * fr); svcH += fr * 0.012 * fine; }
+    svcC = mix(svcC, (t == 5.0 ? vec3(0.069, 0.091, 0.117) * 0.9 : vec3(0.24, 0.25, 0.26)) * (0.8 + 0.4 * vnoise(vec2(yb * 3.0, lu))), fr); // b_alleyface2: door frame in the door steel svcR = mix(svcR, 0.45, fr); svcMet = max(svcMet, 0.5 * fr); svcH += fr * 0.012 * fine; }
   if (t == 3.0 || t == 4.0 || t == 1.0) { float b0 = t == 1.0 ? 1.1 : o0 - 0.08; float hw2 = t == 1.0 ? 0.45 : hw;
     float run = step(abs(lu), hw2) * step(yb, b0) * smoothstep(b0 - 1.6, b0, yb) * smoothstep(0.3, 0.75, vnoise(vec2(lu * 6.0, hs * 9.0)));
     svcC = mix(svcC, svcC * vec3(0.55, 0.42, 0.33), run * 0.7); }
@@ -349,14 +349,15 @@ if (style == 6.0) {
     svcC = mix(svcC, sc, inO); svcR = mix(svcR, 0.5 + 0.2 * tag, inO); svcMet = 0.6 * inO * (1.0 - tag);
     svcH += inO * (smoothstep(0.0, 0.5, sl) * smoothstep(1.0, 0.5, sl) - 0.5) * 0.006 * fine;
   } else if (t == 5.0) {
-    vec3 dc = hs < 0.33 ? vec3(0.17, 0.27, 0.22) : (hs < 0.66 ? vec3(0.40, 0.16, 0.12) : vec3(0.28, 0.30, 0.33));
-    dc *= 0.8 + 0.35 * vnoise(vec2(uu * 3.0, yb * 1.3) + seed);
+    // b_alleyface2: one steel-door look with alley.js (its 'door' material 0x4a5560, roughness 0.55, metalness 0.45, frame 0.08 m,
+    // kick plate to 0.3 m, lever at 0.39 m / 1.02 m, hood 1.16 x 0.2 m): the painted door and the fitted door read as the same make
+    vec3 dc = vec3(0.069, 0.091, 0.117) * (0.85 + 0.3 * vnoise(vec2(uu * 3.0, yb * 1.3) + seed));
     float pnl = step(0.06, hw - abs(lu)) * step(abs(abs(lu) - (hw - 0.1)), 0.012) * step(0.3, yb) * step(yb, 2.0);
     float grl = step(abs(lu), hw - 0.14) * step(0.25, yb) * step(yb, 0.55) * step(0.5, fract(yb / 0.04));
-    float kick = step(yb, 0.24); float lever = step(abs(lu - hw * 0.62), 0.07) * step(abs(yb - 1.03), 0.025);
-    vec3 dcol = mix(dc, dc * 0.55, pnl); dcol = mix(dcol, vec3(0.05), grl * fine); dcol = mix(dcol, vec3(0.42, 0.42, 0.40), kick); dcol = mix(dcol, vec3(0.7, 0.7, 0.66), lever);
+    float kick = step(yb, 0.3); float lever = step(abs(lu - 0.39), 0.05) * step(abs(yb - 1.02), 0.02);
+    vec3 dcol = mix(dc, dc * 0.55, pnl); dcol = mix(dcol, vec3(0.03), grl * fine); dcol = mix(dcol, dc * 1.3, kick); dcol = mix(dcol, dc * 1.6, lever);
     dcol *= 1.0 - 0.3 * smoothstep(0.5, 0.0, abs(lu - hw * 0.6)) * smoothstep(0.6, 1.1, yb) * step(yb, 1.5);
-    svcC = mix(svcC, dcol, inO); svcR = mix(svcR, 0.48, inO); svcMet = 0.45 * inO;
+    svcC = mix(svcC, dcol, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.45 * inO;
     float sgn = step(abs(lu), 0.17) * step(abs(yb - 2.49), 0.07);
     float gly = sgn * step(0.5, fract(lu * 9.0 + 0.25)) * step(abs(yb - 2.49), 0.035) * fine;
     svcC = mix(svcC, mix(vec3(0.1, 0.75, 0.35), vec3(0.9), gly), sgn); svcE = vec3(0.15, 1.0, 0.4) * sgn * (1.0 - gly * 0.6) * 2.2;
