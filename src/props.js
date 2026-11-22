@@ -333,14 +333,26 @@ export function updateProps(P, cam, night, phase) {
     P.signal.green.color.setRGB(nsGreen ? 0.1 : 0.01, nsGreen ? 3.0 : 0.06, nsGreen ? 1.2 : 0.03);
   }
 }
+// b_lampfix (霓港 only): the 10 cool-LED street-lamp point lights were 60 / range 30 / decay 1.6 — a lamp head 8.6 m up lit the
+// asphalt under it ~16x brighter than the moon key and turned the stall-street road into white patches. New default: a dimmer,
+// shorter, physically-falling-off pool so the road reads as a lamp pool and the neon practicals stay the key light.
+//   K = [intensity, range m, decay, ground-pool decal gain, wet-streak gain]; ?oldlamp → the old values (for comparison);
+//   ?lampk=I,R,D,pool,streak overrides for tuning; globalThis.__LAMPK = [...] swaps them at runtime (test plans).
+// Map 索拉纳港 (A) keeps 60 / 30 / 1.6 untouched. No new lights, no new shader programs (distance / decay / colours are uniforms).
+const LAMP_OLD = [60, 30, 1.6, 1, 1], LAMP_NEW = [18, 24, 2.0, 0.55, 0.6];
+const LAMP_Q = typeof location !== 'undefined' ? location.search : '';
+const LAMP_K = /[?&]oldlamp\b/.test(LAMP_Q) ? LAMP_OLD : (() => { const m = /[?&]lampk=([0-9.,]+)/.exec(LAMP_Q); if (!m) return LAMP_NEW; const v = m[1].split(',').map(Number); return LAMP_NEW.map((d, i) => (isFinite(v[i]) && v[i] >= 0 && i < v.length ? v[i] : d)); })();
+const POOL_C = [0.45, 0.78, 1.0];
 export function updateLampLights(P, lamps, pos, night) {
+  const K = CYBER ? (globalThis.__LAMPK || LAMP_K) : LAMP_OLD;
+  if (CYBER) { if (P.pools) P.pools.material.uniforms.uCol.value.setRGB(POOL_C[0] * K[3], POOL_C[1] * K[3], POOL_C[2] * K[3]); for (const pl of P.lampLights) { pl.distance = K[1]; pl.decay = K[2]; } }
   if (night < 0.05) { for (const l of P.lampLights) l.intensity = 0; for (const v of U.uLampP.value) v.w = 0; return; }
   // nearest lamps
   const best = [];
   for (const l of lamps) { const d = (l.hx - pos.x) ** 2 + (l.hz - pos.z) ** 2; if (d > 90 * 90) continue; best.push([d, l]); }
   best.sort((a, b) => a[0] - b[0]);
   P.lampLights.forEach((pl, i) => { const e = best[i]; const lp = U.uLampP.value[i]; if (!e) { pl.intensity = 0; lp.w = 0; return; }
-    lp.set(e[1].hx, e[1].hy + 0.05, e[1].hz, night); U.uLampC.value[i].setRGB(...(CYBER ? (e[1].mag ? [1.0, 0.35, 0.85] : [0.5, 0.85, 1.0]) : (e[1].led ? [1.0, 0.86, 0.7] : [1.0, 0.64, 0.34]))); pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = 60 * night; if (CYBER) pl.color.setRGB(...(e[1].mag ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); else pl.color.setRGB(...(e[1].led ? [1.0, 0.82, 0.62] : [1.0, 0.62, 0.34])); });
+    lp.set(e[1].hx, e[1].hy + 0.05, e[1].hz, night * K[4]); U.uLampC.value[i].setRGB(...(CYBER ? (e[1].mag ? [1.0, 0.35, 0.85] : [0.5, 0.85, 1.0]) : (e[1].led ? [1.0, 0.86, 0.7] : [1.0, 0.64, 0.34]))); pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = K[0] * night; if (CYBER) pl.color.setRGB(...(e[1].mag ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); else pl.color.setRGB(...(e[1].led ? [1.0, 0.82, 0.62] : [1.0, 0.62, 0.34])); });
 }
 
 // ---------- street furniture: café terraces on Tideline Drive, benches, bins, hydrants, parking spots
