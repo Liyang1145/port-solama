@@ -123,7 +123,15 @@ function shoreTexture() {
   const px = new Uint8Array(nx * nz * 4); for (let k = 0; k < nx * nz; k++) { const v = Math.round(255 * Math.min(1, Math.max(0, D[k] - 4) / 90)); px[k * 4] = v; px[k * 4 + 1] = v; px[k * 4 + 2] = v; px[k * 4 + 3] = 255; }
   const t = new THREE.DataTexture(px, nx, nz, THREE.RGBAFormat); t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t;
 }
+// perf_debug3 (?oldrefl = old): the mirror pass drew the whole visible city (1855 calls / 9.1 M tris at the gta spawn, more than
+// the main pass). Now: 0.7x texture size, every 2nd frame (the water samples the last mirror with its own texture matrix, so
+// it stays consistent), and before the mirror render meshes are hidden when they are > MIR_D m away, subtend < MIR_K rad,
+// or sit entirely below waterY + MIR_FLAT (ground / roads / kerbs: grazing angle, invisible in the ripple-distorted mirror).
+// The sky and anything frustumCulled = false (terrain caps, big planes) are always drawn.
+const OLDREFL = new URLSearchParams(location.search).has('oldrefl');
+const MIR_D = 650, MIR_K = 0.02, MIR_FLAT = 1.6, MIR_EVERY = 2;
 export function buildWater(scene, T, size = 0.5) {
+  if (!OLDREFL) size *= 0.7;
   const tn = T.waternormals; tn.wrapS = tn.wrapT = THREE.RepeatWrapping; tn.colorSpace = THREE.NoColorSpace;
   const geo = new THREE.PlaneGeometry(9000, 9000);
   const w = window.innerWidth * size, h = window.innerHeight * size;
@@ -154,11 +162,20 @@ export function buildWater(scene, T, size = 0.5) {
   // pass (scene.overrideMaterial = normals) and overwrote the mirror with view-space normals -> the blue/purple wet-road bug.
   const ob = refl.onBeforeRender;
   refl.onBeforeRender = function () {};
+  let mirN = 0, mirDone = false; const hid = []; const bsW = new THREE.Sphere(); const camP = new THREE.Vector3();
+  const mirCull = (scene, camera) => { camP.setFromMatrixPosition(camera.matrixWorld); const wy = LAYOUT.waterY + MIR_FLAT;
+    scene.traverseVisible((o) => { if (!o.isMesh || o === refl || o.frustumCulled === false || o.isSkinnedMesh) return;
+      let bs; if (o.isInstancedMesh) { if (!o.boundingSphere) o.computeBoundingSphere(); bs = o.boundingSphere; } else { const g = o.geometry; if (!g) return; if (!g.boundingSphere) g.computeBoundingSphere(); bs = g.boundingSphere; }
+      if (!bs || !Number.isFinite(bs.radius)) return; bsW.copy(bs).applyMatrix4(o.matrixWorld); const d = bsW.center.distanceTo(camP) - bsW.radius;
+      if (d > MIR_D || bsW.radius < d * MIR_K || bsW.center.y + bsW.radius < wy) { o.visible = false; hid.push(o); } }); };
   const renderRefl = (renderer, scene, camera) => {
     if (!refl.visible) return;
+    if (!OLDREFL) { mirN++; if (mirDone && mirN % MIR_EVERY !== 0) return; } // reuse last frame's mirror + its texture matrix
     shared.on.value = 0; shared.tex.value = dummy;
+    const smU = renderer.shadowMap.needsUpdate; if (!OLDREFL) { mirCull(scene, camera); renderer.shadowMap.needsUpdate = false; } // the shadow maps render in the main pass (culled meshes would drop out of them)
     if (!OLD.mirror && refl.getReflectionCamera) refl.getReflectionCamera(camera).layers.disable(CHAR_LAYER); // perf_debug1: no characters in the mirror (the clone copied the main camera's layers)
     ob.call(refl, renderer, scene, camera);
+    for (const o of hid) o.visible = true; hid.length = 0; mirDone = true; if (!OLDREFL) renderer.shadowMap.needsUpdate = smU;
     shared.tex.value = refl.getRenderTarget().texture; shared.on.value = 1;
     refl.updateMatrixWorld(); inv.copy(refl.matrixWorld).invert();
     shared.mat.value.copy(u.textureMatrix.value).multiply(inv);

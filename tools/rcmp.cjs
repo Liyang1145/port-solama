@@ -7,7 +7,7 @@ srv.listen(0, async () => {
   const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || '/workspace/work/pw-browsers/chromium_headless_shell-1248/chrome-headless-shell-linux-arm64/chrome-headless-shell', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100'] });
   BP = require('child_process').execSync(`ps -o pid= --ppid ${process.pid}`).toString().split(/\s+/).filter(Boolean);
   process.on('exit', () => { for (const pid of BP) try { require('child_process').execSync(`for q in $(ps -o pid= --sid ${pid}); do kill -9 $q 2>/dev/null; done; true`); } catch (e) { } });
-  const p = await (await b.newContext({ viewport: { width: 960, height: 540 }, deviceScaleFactor: 1.5 })).newPage(); p.setDefaultTimeout(90000); let perr = 0;
+  const p = await (await b.newContext({ viewport: { width: +(process.env.VW || 960), height: +(process.env.VH || 540) }, deviceScaleFactor: +(process.env.DSF || 1.5) })).newPage(); p.setDefaultTimeout(90000); let perr = 0;
   p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
   await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&prof&map=${MAPN}&hour=${process.env.HOUR || 15}&${process.env.Q || ''}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
   const r = await p.evaluate(`(() => { const G = __G; G.profInit(); for (let i = 0; i < 20; i++) G.tick(1/30, false); const R = []; for (let i = 0; i < ${+(process.env.N || 5)}; i++) { for (let k = 0; k < 3; k++) G.tick(1/30, false); const f = G.tick(1/30, true); R.push(f); }
