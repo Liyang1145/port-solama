@@ -54,12 +54,12 @@ void main(){
   vec3 body = mix(shallow, mid, smoothstep(0.2, 2.2, depth)); body = mix(body, deep, smoothstep(2.0, 7.0, depth));
   float skyL = dot(uSkyCol, vec3(0.3333));
   body *= (0.35 + 0.65 * clamp(dot(uSunCol, vec3(0.33)) * 0.25 + 0.1, 0.0, 1.2)) * (1.0 - uNight * uWN.x);
-  // a_waternight (map A; old: uWN = 0.85, 0.85, 0, 1): no sunlight goes into the water at night -> the lit teal body fades and the
+  // a_waternight (map A; old: uWN = 0.85, 0.85, 0, 0): no sunlight goes into the water at night -> the lit teal body fades and the
   // surface takes the night haze colour (what the sky / street glow scatters back) instead of glowing turquoise
   body = mix(body, fogColor * uWN.z, uNight * step(0.001, uWN.z) * 0.5);
   // sand visible through very shallow water
   body = mix(vec3(0.62, 0.56, 0.44) * (1.0 - uNight * uWN.y) * clamp(dot(uSunCol, vec3(0.33)) * 0.3 + 0.2, 0.0, 1.0), body, smoothstep(0.0, 0.7, depth));
-  vec3 col = mix(body, refl * uWN.w, clamp(fres, 0.0, 1.0));
+  vec3 col = mix(body, refl, clamp(fres, 0.0, 1.0));
   // sun glitter
   vec3 H = normalize(uSunDir + V);
   float spec = pow(max(dot(n, H), 0.0), 900.0) * 30.0 + pow(max(dot(n, H), 0.0), 120.0) * 0.6;
@@ -69,7 +69,8 @@ void main(){
   float foamN = texture2D(tNormal, p * 0.12 + t * 0.02).r;
   // vis-sweep: narrower band that thins with distance (aerials showed a 10 m wide snow-white scalloped rim on every coast)
   float foam = smoothstep(0.42, 0.0, depth + wave * 0.16) * smoothstep(0.35, 0.7, foamN + 0.25) * mix(1.0, 0.45, smoothstep(150.0, 700.0, dist));
-  col = mix(col, vec3(0.95, 0.96, 0.95) * (0.15 + 0.85 * (1.0 - uNight)) * clamp(dot(uSunCol, vec3(0.33)) * 0.35 + 0.25, 0.0, 1.3), foam * 0.85);
+  // a_waternight: uWN.w lowers the night floor of the foam (0.15 -> 0.04): unlit surf read as a grey slab along embankments
+  col = mix(col, vec3(0.95, 0.96, 0.95) * (0.15 + 0.85 * (1.0 - uNight) - uWN.w * uNight) * clamp(dot(uSunCol, vec3(0.33)) * 0.35 + 0.25, 0.0, 1.3), foam * 0.85);
   // height fog (same model as the scene)
   vec3 rd = -V; float k = uFogFalloff; float tt = k * rd.y * dist; float f = abs(tt) > 1e-4 ? (1.0 - exp(-tt)) / tt : 1.0;
   float amt = 1.0 - exp(-fogDensity * dist * exp(-k * max(cameraPosition.y, 0.0)) * f);
@@ -87,9 +88,9 @@ void main(){
 // two-pass chamfer distance -> 0 at the shore .. 1 at >= 90 m out. Sampled by the water shader as the bay floor depth.
 const SB = [-2000, -1640, 520, 1640];
 // a_waternight: night water on map A (?oldwaternight = old values; map B always old). Uniforms only, one program either way.
-const OLD_WN = { bodyNight: 0.85, sandNight: 0.85, haze: 0, refl: 1, sx: 0.035, sy: 0.035, on: 0, streak: 1 };
+const OLD_WN = { bodyNight: 0.85, sandNight: 0.85, haze: 0, foamNight: 0, sx: 0.035, sy: 0.035, on: 0, streak: 1 };
 export const WN = (CYBER || new URLSearchParams(location.search).has('oldwaternight')) ? OLD_WN :
-  { bodyNight: 0.96, sandNight: 0.985, haze: 0.7, refl: 1, sx: 0.03, sy: 0.05, on: 1, streak: 3.0 };
+  { bodyNight: 0.96, sandNight: 0.985, haze: 0.7, foamNight: 0.11, sx: 0.03, sy: 0.05, on: 1, streak: 3.0 };
 function shoreTexture() {
   const C = 8, nx = Math.round((SB[2] - SB[0]) / C), nz = Math.round((SB[3] - SB[1]) / C); const D = new Float32Array(nx * nz);
   const R = buildRegionData(); const sun = R.byId.sun; const pr = REGION.pearl; const q = {};
@@ -115,7 +116,7 @@ export function buildWater(scene, T, size = 0.5) {
       name: 'Water', uniforms: {
         color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null }, tNormal: { value: tn }, uTime: U.uTime,
         uSunDir: U.uSunDir, uSunCol: U.uSunCol, fogColor: { value: new THREE.Color() }, fogDensity: { value: 0.001 }, uFogSunCol: U.uFogSunCol, uFogFalloff: U.uFogFalloff,
-        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, uWN: { value: new THREE.Vector4(WN.bodyNight, WN.sandNight, WN.haze, WN.refl) }, uWS: { value: new THREE.Vector4(WN.sx, WN.sy, WN.on, WN.streak) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: CYBER ? (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.needsUpdate = true; return t; })() : shoreTexture() }, tBed: { value: null }, uBedBox: { value: new THREE.Vector4() }, uBedOn: { value: 0 }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
+        uNight: U.uNight, uSkyCol: { value: new THREE.Color(0.5, 0.5, 0.6) }, uWN: { value: new THREE.Vector4(WN.bodyNight, WN.sandNight, WN.haze, WN.foamNight) }, uWS: { value: new THREE.Vector4(WN.sx, WN.sy, WN.on, WN.streak) }, beachX0: { value: LAYOUT.beachX[0] }, beachX1: { value: LAYOUT.beachX[1] }, tShore: { value: CYBER ? (() => { const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); t.needsUpdate = true; return t; })() : shoreTexture() }, tBed: { value: null }, uBedBox: { value: new THREE.Vector4() }, uBedOn: { value: 0 }, uShoreBox: { value: new THREE.Vector4(SB[0], SB[1], SB[2], SB[3]) },
       }, vertexShader: vs, fragmentShader: fs,
     },
   });
