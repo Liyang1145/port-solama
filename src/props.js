@@ -130,6 +130,32 @@ function beachNight(city) { const posts = [], lenses = [], pools = []; const col
   for (const lg of city.deco.lifeguards) { const y0 = city.groundH(lg.x, lg.z); lenses.push([lg.x + 1.05, y0 + 4.36, lg.z, 0.2, 0.12]); pools.push([lg.x + 3.2, lg.z, 13, 11]); S.towers++; }
   return { posts, lenses, pools, S }; }
 
+// a_portlamps (map A, ?oldaportlamps = off): believable port fixtures at night.
+// Marina piers: the a_nightfix low bollard (same geometry / lampMat / lamp-glow lens) on both deck edges every 12 m, half-way between
+// the edge piles (piles every 4 m from x0+1), 0.25 m in from the edge; a candidate inside a moored yacht's boarding gap (its aft
+// cockpit, x-Lh/2-0.6 .. x-0.3Lh+0.6 on that side) slides +-1/3/5 m (never onto a pile) or is dropped; the last one stays 3 m off the
+// seawall. Each bollard's pool is an ellipse on the deck (7 x 3 m, never past the deck edge). One OBB collider each (half 0.086 m).
+// North-bay shipyard gantry: 2 round high-bay floods under each beam (the bollard body scaled into a drum, lens disc underneath),
+// one big ground pool per flood pair biased into the yard, and a long light cone per flood (instances of the street-light cone).
+// Fixed positions, no random draws.
+function portNight(city) { const posts = [], lenses = [], pools = [], cones = []; const col = city.col; const S = { bollards: 0, slid: 0, dropped: 0, floods: 0, spacing: [] };
+  for (const l of city.lamps) { if (l.kind !== 'dock' || !l.pier) continue; const [x0, x1, pz, hw] = l.pier; const y = l.y;
+    for (const sd of [-1, 1]) { const zb = pz + sd * (hw - 0.25); let last = null;
+      const gaps = (l.berths || []).filter((b) => b[1] === sd).map(([bx, , Lh]) => [bx - Lh / 2 - 0.6, bx - Lh * 0.3 + 0.6]);
+      for (let xc = x0 + 7; xc <= x1 - 3; xc += 12) { let put = null;
+        for (const o of [0, -1, 1, -3, 3, -5, 5]) { const x = xc + o; if (x < x0 + 5 || x > x1 - 3) continue;
+          const pd = Math.abs(((x - x0 - 1) % 4 + 4) % 4); if (Math.min(pd, 4 - pd) < 0.6) continue; // edge pile
+          if (gaps.some(([a, b]) => x > a && x < b)) continue; put = x; if (o) S.slid++; break; }
+        if (put === null) { S.dropped++; continue; }
+        posts.push([put, y, zb, 1, 1]); lenses.push([put, y + 0.875, zb, 0.19, 0.08]); const h = 0.784 * 0.11; col.addOBB(put, zb, 1, 0, h, h, y + 1.05, 'bollard');
+        pools.push([put, pz + sd * 0.25, 7, 3.0, y + 0.045]); S.bollards++; if (last !== null) S.spacing.push(+(put - last).toFixed(1)); last = put; } } }
+  for (const yd of city.yards || []) { if (yd.kind !== 'shipyard') continue; const gx0 = yd.x0 + 3, gx1 = yd.x1 - 3, gz = yd.z0 + 2; const yb = 21.6; // gantry: beams y 22..24 at gz +-3, trolley at the middle
+    const gy = Math.max(0.2, city.groundH((gx0 + gx1) / 2, gz + 4)) + 0.05;
+    for (const t of [0.24, 0.76]) { const fx = gx0 + (gx1 - gx0) * t;
+      for (const dz of [-3, 3]) { posts.push([fx, yb, gz + dz, 2.6, 0.35]); lenses.push([fx, yb - 0.012, gz + dz, 0.62, 0.03]); cones.push([fx, yb - 0.05, gz + dz, 2.4, 1.25]); S.floods++; }
+      pools.push([fx, gz + 4, 26, 21, gy]); } }
+  return { posts, lenses, pools, cones, S }; }
+
 export function buildProps(scene, city, T) {
   const out = { lampLights: [] };
   const r = mulberry(99);
@@ -158,6 +184,8 @@ export function buildProps(scene, city, T) {
   // beach-access ramp foot) and a lamp on each lifeguard tower, each with its pool as more instances of this same pool mesh
   const BN = CYBER || /[?&]oldanight2?\b/.test(typeof location !== 'undefined' ? location.search : '') ? null : beachNight(city);
   if (BN) for (const q of BN.pools) xPools.push(q);
+  const PN = CYBER || /[?&]oldaportlamps\b/.test(typeof location !== 'undefined' ? location.search : '') ? null : portNight(city); // a_portlamps
+  if (PN) for (const q of PN.pools) xPools.push(q);
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length + xPools.length); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   const lampM = [];
@@ -191,15 +219,22 @@ export function buildProps(scene, city, T) {
         a *= smoothstep(220.0, 60.0, vD) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
         gl_FragColor = vec4(vC * a * uK * smoothstep(0.35, 0.9, uNight), 1.0); }`,
   });
-  const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
+  const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length + (PN ? PN.cones.length : 0)); cones.renderOrder = 3;
   { const cA = new THREE.Color(1.0, 0.66, 0.36), cL = new THREE.Color(1.0, 0.86, 0.68), cC = new THREE.Color(0.45, 0.82, 1.0), cM = new THREE.Color(1.0, 0.35, 0.85);
-    lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); }); }
+    lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); });
+    if (PN) PN.cones.forEach(([x, y, z, sy, k], j) => { m4.compose(new THREE.Vector3(x, y - 9.0 * sy, z - 2.95 * k), new THREE.Quaternion(), new THREE.Vector3(k, sy, k)); cones.setMatrixAt(lamps.length + j, m4); cones.setColorAt(lamps.length + j, cA); }); } // a_portlamps: gantry flood cones (apex at the lens)
   if (BN && BN.posts.length) { // a_nightfix: bollard bodies on the street-light material, lenses / tower lamps on the lamp-glow material (same objects -> same programs)
     const bm = new THREE.InstancedMesh(bollardGeo(), lampMat, BN.posts.length); bm.castShadow = true; bm.receiveShadow = true;
     BN.posts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y, z); bm.setMatrixAt(i, m4); }); bm.computeBoundingSphere(); scene.add(bm);
     const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, true); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, BN.lenses.length);
     BN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
     out.beachNight = { posts: BN.posts.length, pools: BN.pools.length, lenses: BN.lenses.length, tris: bm.geometry.index ? bm.geometry.index.count / 3 * BN.posts.length : 0 }; }
+  if (PN && PN.posts.length) { // a_portlamps: pier bollards + gantry flood drums on the street-light material, lenses on the lamp-glow material (same objects -> same programs)
+    const pm = new THREE.InstancedMesh(bollardGeo(), lampMat, PN.posts.length); pm.castShadow = true; pm.receiveShadow = true;
+    PN.posts.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); pm.setMatrixAt(i, m4); }); pm.computeBoundingSphere(); scene.add(pm);
+    const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, false); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, PN.lenses.length);
+    PN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
+    out.portNight = Object.assign({ posts: PN.posts.length, lenses: PN.lenses.length, pools: PN.pools.length, cones: PN.cones.length }, PN.S); }
   for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
   if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港

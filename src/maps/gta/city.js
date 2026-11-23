@@ -922,10 +922,13 @@ function marina(ctx) {
     for (let x = p.x0 + 1; x < p.x1; x += 4) for (const sz of [-1, 1]) box(v, x - 0.15, L.waterY - 2, p.z + sz * (p.hw - 0.15) - 0.15, x + 0.15, 0.5, p.z + sz * (p.hw - 0.15) + 0.15, {}, [0.3, 0.24, 0.18]);
     // dock lamps on the outer end (night practicals)
     // a_portnight: pool = [cx, cz, sx, sz] of the deck this lamp lights (props.js clips the ground light pool to it; no rng)
-    ctx.lamps.push({ x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock', pool: [p.x0 + 5.5, p.z, 11, p.hw * 1.9] });
+    // a_portlamps: pier = deck extent, berths = [x, side, Lh] of the moored yachts (props.js keeps the deck bollards out of each
+    // yacht's boarding gap); plain fields on the same object, no extra random draws
+    const dockLamp = { x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock', pool: [p.x0 + 5.5, p.z, 11, p.hw * 1.9], pier: [p.x0, p.x1, p.z, p.hw], berths: [] };
+    ctx.lamps.push(dockLamp);
     // yachts on both sides
     for (const sz of [-1, 1]) for (let x = p.x0 + 8; x < p.x1 - 8; x += rand(13, 17)) {
-      if (rng() < 0.25) continue; const Lh = rand(9, 14), Bh = rand(3, 3.8); const zc = p.z + sz * (p.hw + Bh / 2 + 0.8);
+      if (rng() < 0.25) continue; const Lh = rand(9, 14), Bh = rand(3, 3.8); const zc = p.z + sz * (p.hw + Bh / 2 + 0.8); dockLamp.berths.push([x, sz, Lh]);
       const hull = new THREE.CylinderGeometry(Bh / 2, Bh / 2 * 0.75, Lh, 14, 1); hull.rotateZ(Math.PI / 2); hull.scale(1, 0.55, 1);
       gput(v, hull, x, L.waterY + 0.7, zc, [0.94, 0.94, 0.92]);
       const bow = new THREE.ConeGeometry(Bh / 2, 3, 14); bow.rotateZ(-Math.PI / 2); bow.scale(1, 0.55, 1); gput(v, bow, x + Lh / 2 + 1.5, L.waterY + 0.7, zc, [0.94, 0.94, 0.92]);
