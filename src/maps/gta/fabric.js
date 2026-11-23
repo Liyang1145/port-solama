@@ -531,13 +531,23 @@ function geos() {
   GEO.tree0 = new THREE.IcosahedronGeometry(1, 0);
   { const g = new THREE.IcosahedronGeometry(1, 1); const P = g.attributes.position; for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i); const k = 0.82 + 0.26 * Math.abs(Math.sin(x * 4.1 + y * 2.7) * Math.cos(z * 3.3 - y)); P.setXYZ(i, x * k, y * k * (y < 0 ? 0.7 : 1), z * k); } g.computeVertexNormals(); GEO.tree1 = g; }
   GEO.trunk = new THREE.CylinderGeometry(0.16, 0.24, 1, 5, 1, true).translate(0, 0.5, 0);
-  { // palm: tapered trunk + 7 drooping fronds (2 quads each), unit = 10 m tall; vertex colour trunk / leaves
-    const parts = []; const tr = new THREE.CylinderGeometry(0.16, 0.24, 9.4, 5, 1, true).translate(0, 4.7, 0); parts.push([tr, [0.48, 0.42, 0.34]]);
-    for (let k = 0; k < 7; k++) { const a = (k / 7) * Math.PI * 2 + 0.3; const ca = Math.cos(a), sa = Math.sin(a); const p = [];
-      const pt = (r, y, w) => [ca * r - sa * w, y, sa * r + ca * w]; const s0 = [pt(0, 9.6, -0.15), pt(0, 9.6, 0.15)], s1 = [pt(1.8, 10.0, -0.55), pt(1.8, 10.0, 0.55)], s2 = [pt(3.4, 9.0, -0.12), pt(3.4, 9.0, 0.12)];
-      for (const [A, B] of [[s0, s1], [s1, s2]]) p.push(...A[0], ...B[0], ...B[1], ...A[0], ...B[1], ...A[1]);
-      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.computeVertexNormals(); parts.push([g, [0.24, 0.34, 0.14]]); }
-    GEO.palm = mergeColored(parts); }
+  { // r6.4 flora_a: mainland palm (unit = 10 m): slightly curved 6-sided trunk, leaf-base knob, 9 arching fronds with drooping
+    // leaflet wings (inverted V cross-section, yellow-green rachis -> darker edges) + 2 dead hanging fronds. ~90 tris (was 38: 7 flat paddles)
+    const parts = []; const tr = new THREE.CylinderGeometry(0.15, 0.25, 9.4, 6, 3, true).translate(0, 4.7, 0); { const P = tr.attributes.position; for (let i = 0; i < P.count; i++) { const y = P.getY(i) / 9.4; P.setX(i, P.getX(i) + Math.sin(y * 1.4) * 0.35); } }
+    parts.push([tr, [0.50, 0.44, 0.36]]); parts.push([new THREE.IcosahedronGeometry(0.34, 0).scale(1, 0.8, 1).translate(0.34, 9.55, 0), [0.40, 0.36, 0.22]]);
+    const frond = (a, L, up, droop, wd, cMid, cEdge) => { const ca = Math.cos(a), sa = Math.sin(a); const p = [], c = [];
+      const P = (t) => { const r = L * t; return [0.34 + ca * r, 9.6 + L * (up * t - droop * t * t), sa * r]; };
+      const S = [0, 0.4, 0.75, 1]; const rows = S.map((t) => { const q = P(t); const w = wd * Math.sin(Math.min(1, t * 1.1 + 0.08) * Math.PI) * (1 - 0.35 * t) + 0.04; const dr = w * (0.45 + 0.4 * t);
+        return [[q[0] + sa * w, q[1] - dr, q[2] - ca * w], q, [q[0] - sa * w, q[1] - dr, q[2] + ca * w]]; });
+      for (let k = 0; k < 3; k++) for (let j = 0; j < 2; j++) { const A = rows[k][j], B = rows[k][j + 1], C = rows[k + 1][j], D = rows[k + 1][j + 1];
+        p.push(...A, ...C, ...B, ...B, ...C, ...D); const e0 = j === 0 ? cEdge : cMid, e1 = j === 0 ? cMid : cEdge; c.push(...e0, ...e0, ...e1, ...e1, ...e0, ...e1); }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.computeVertexNormals(); g.userData.cols = c; return g; };
+    const pal = []; for (let k = 0; k < 11; k++) { const dead = k >= 9; const a = k * 2.39996 + 0.3;
+      const g = dead ? frond(a, 2.2, -1.1, 0.2, 0.32, [0.55, 0.42, 0.24], [0.45, 0.34, 0.2]) : frond(a, 3.3 + (k % 3) * 0.35, 0.75 - (k / 9) * 0.6, 1.1 + (k % 2) * 0.3, 0.85, [0.36, 0.44, 0.17], [0.17, 0.27, 0.10]);
+      pal.push(g); }
+    const P0 = [], N0 = [], C0 = []; for (const [g0, col] of parts) { const g = g0.index ? g0.toNonIndexed() : g0; g.computeVertexNormals(); const P = g.attributes.position, Nn = g.attributes.normal; for (let i = 0; i < P.count; i++) { P0.push(P.getX(i), P.getY(i), P.getZ(i)); N0.push(Nn.getX(i), Nn.getY(i), Nn.getZ(i)); C0.push(...col); } }
+    for (const g of pal) { const P = g.attributes.position, Nn = g.attributes.normal; for (let i = 0; i < P.count; i++) { P0.push(P.getX(i), P.getY(i), P.getZ(i)); N0.push(Nn.getX(i) * 0.4, Math.abs(Nn.getY(i)) * 0.6 + 0.6, Nn.getZ(i) * 0.4); } C0.push(...g.userData.cols); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P0, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N0, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C0, 3)); GEO.palm = g; }
   { const body = new THREE.BoxGeometry(4.4, 0.62, 1.78).translate(0, 0.68, 0); const skirt = new THREE.BoxGeometry(3.7, 0.42, 1.66).translate(0, 0.21, 0);
     const cab = new THREE.CylinderGeometry(0.62, 1.0, 0.55, 4, 1).rotateY(Math.PI / 4).scale(1.75, 1, 1.1).translate(-0.25, 1.265, 0);
     GEO.car = mergeColored([[body, [1, 1, 1]], [skirt, [0.07, 0.07, 0.08]], [cab, [0.16, 0.18, 0.2]]]); }
@@ -723,7 +733,10 @@ function mats(M) {
     } else if (fk < 5.5) { // parking garage: open decks between slab edges, columns every 8 m
       float wy = mod(fy, 3.0); float open = step(1.0, wy) * step(wy, 2.6) * step(0.1, fract(fu / 8.0)) * step(fy, vIH - 1.0);
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.08, 0.085, 0.09), open);
-    } else if (fk < 6.5) { diffuseColor.rgb *= 0.75 + 0.45 * fnoise(vec2(fu, fy) * 2.3); } // hedge
+    } else if (fk < 6.5) { // hedge (r6.4 flora_a): leaf clumps at two scales, shaded base, sunlit clipped crown edge, a few gaps
+      float lc = fnoise(vec2(fu, fy) * 3.1 + fsd * 5.0) * 0.6 + fnoise(vec2(fu, fy) * 9.0) * 0.4; diffuseColor.rgb *= 0.62 + 0.62 * lc;
+      diffuseColor.rgb *= 0.7 + 0.35 * smoothstep(0.0, vIH, fy); diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.15, 1.2, 0.95), smoothstep(vIH - 0.25, vIH, fy) * 0.6);
+      diffuseColor.rgb *= 1.0 - 0.45 * smoothstep(0.78, 0.86, fnoise(vec2(fu, fy) * 1.3 + 7.0)); }
   }
   float dtCov = -1.0; // a_downtown: downtown podium coverage for the far-view average (-1 = not a podium pixel)
   if (fn.y > -0.5 && fn.y < 0.5) {

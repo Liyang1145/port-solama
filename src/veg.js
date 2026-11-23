@@ -5,6 +5,8 @@ import { U } from './env.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
 import { OLDENV } from './envprog.js'; // b_envprog
+import { buildFloraA, floraExtras } from './maps/gta/flora.js';
+import { buildPalmsA, pickVariantA } from './maps/gta/palms.js';
 
 function trunkTexture() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 512; const g = c.getContext('2d');
@@ -15,7 +17,42 @@ function trunkTexture() {
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
 }
 
-export const foliagePatch = (s, strength = 0.6, transK = 1) => {
+// r6.4 flora_a: the sway displacement is shared with the swaying shadow-depth material (A map) so moving fronds cast moving
+// shadows. windK = 1 reproduces the original r6.3 code exactly (map 霓港 / nature.js stay byte-identical).
+export function swayGLSL(windK = 1) {
+  const base = `
+  float sw = aSway;
+  transformed.x += sin(uTime * 1.3 + ph) * 0.12 * sw + sin(uTime * 3.1 + ph * 2.0 + position.y) * 0.04 * sw;
+  transformed.z += cos(uTime * 1.1 + ph) * 0.10 * sw;
+  transformed.y += sin(uTime * 2.3 + ph + position.x) * 0.05 * sw;`;
+  if (windK === 1) return base;
+  // A map: sea-breeze gusts (slow envelope), fronds stream downwind (+x, onshore from the ocean side is -x: breeze blows inland),
+  // leaflet flutter at the tips; amplitude grows with aSway (0 at the crown -> ~1.2 at the frond tip)
+  const k = windK.toFixed(2);
+  return `
+  float sw = aSway;
+  float gust = 0.55 + 0.45 * sin(uTime * 0.37 + ph * 0.05) * sin(uTime * 0.23 + 1.7 + ph * 0.031);
+  transformed.x += (sin(uTime * 1.3 + ph) * 0.12 + sin(uTime * 3.1 + ph * 2.0 + position.y) * 0.04) * sw * ${k} * (0.6 + gust) - 0.10 * sw * sw * ${k} * gust;
+  transformed.z += cos(uTime * 1.1 + ph) * 0.10 * sw * ${k} * (0.6 + gust) + sin(uTime * 7.3 + ph * 3.0 + position.x * 2.1) * 0.025 * sw * ${k};
+  transformed.y += sin(uTime * 2.3 + ph + position.x) * 0.05 * sw * ${k} - 0.06 * sw * sw * gust * ${k};`;
+}
+// swaying shadow caster for alpha-tested foliage (A map): same displacement as the visible mesh
+export function swayDepth(mat, windK = 1, key = 'sd') {
+  const d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mat.map, alphaTest: mat.alphaTest || 0, side: THREE.DoubleSide });
+  d.onBeforeCompile = (s) => {
+    s.uniforms.uTime = U.uTime;
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aSway;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+#ifdef USE_INSTANCING
+  float ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.23;
+#else
+  float ph = 0.0;
+#endif` + swayGLSL(windK));
+  };
+  d.customProgramCacheKey = () => 'swayD_' + key + windK.toFixed(2) + (mat.map ? 'm' : '');
+  return d;
+}
+export const foliagePatch = (s, strength = 0.6, transK = 1, windK = 1) => {
   s.uniforms.uTime = U.uTime; s.uniforms.uSunCol = U.uSunCol; s.uniforms.uNightF = U.uNight;
   // b_envprog: strength / transmission as uniforms -> every foliage material shares one program (?oldenvmat: baked constants)
   const tk = strength > 0 ? transK : 0; let cS = strength.toFixed(2), cT = tk.toFixed(2);
@@ -26,11 +63,7 @@ export const foliagePatch = (s, strength = 0.6, transK = 1) => {
   float ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.23;
 #else
   float ph = 0.0;
-#endif
-  float sw = aSway;
-  transformed.x += sin(uTime * 1.3 + ph) * 0.12 * sw + sin(uTime * 3.1 + ph * 2.0 + position.y) * 0.04 * sw;
-  transformed.z += cos(uTime * 1.1 + ph) * 0.10 * sw;
-  transformed.y += sin(uTime * 2.3 + ph + position.x) * 0.05 * sw;`)
+#endif` + swayGLSL(windK))
     .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
   objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), ${cS}));`);
   s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uSunCol; uniform float uNightF;' + (OLDENV ? '' : ' uniform float uFTr;'))
@@ -118,7 +151,7 @@ export function pinnateTex() {
   });
 }
 // costapalmate fan (sabal): polar layout, centre at bottom middle, split tips at the rim
-function fanTex() {
+export function fanTex() {
   const r = mulberry(17);
   return canvasTex(512, 512, (g, W, H) => {
     g.clearRect(0, 0, W, H); const cx = W / 2, cy = H - 6; const R = H - 14; const N = 46;
@@ -171,12 +204,12 @@ export function addFrond(F, top, az, L, up, droop, S, tint, opts = {}) {
   }
 }
 // costapalmate fan leaf on a petiole
-function addFan(F, top, az, L, up, R, S, tint) {
+export function addFan(F, top, az, L, up, R, S, tint, NA = 14) {
   const dir = new THREE.Vector3(Math.cos(az), 0, Math.sin(az)); const side = new THREE.Vector3(-dir.z, 0, dir.x);
   const c = top.clone().addScaledVector(dir, L).add(new THREE.Vector3(0, L * up, 0));
   const fdir = dir.clone().add(new THREE.Vector3(0, up * 0.6 + 0.35, 0)).normalize(); // fan "forward" (radial axis)
   const fnrm = new THREE.Vector3().crossVectors(side, fdir).normalize(); if (fnrm.y < 0) fnrm.negate();
-  const base = F.p.length / 3; const NA = 14, NR = S;
+  const base = F.p.length / 3; const NR = S;
   for (let ir = 0; ir <= NR; ir++) for (let ia = 0; ia <= NA; ia++) {
     const rr = ir / NR; const a = (ia / NA - 0.5) * Math.PI * 0.88;
     const fold = (ia % 2 ? 1 : -1) * 0.07 * R * rr; const sag = -rr * rr * R * (0.35 + Math.abs(a) * 0.5); // costapalmate curl + droop
@@ -327,41 +360,57 @@ export function mergeSimple(gs) {
 
 export function buildVegetation(scene, city, T) {
   T.frond.colorSpace = THREE.SRGBColorSpace; T.leafcluster.colorSpace = THREE.SRGBColorSpace; T.frond.anisotropy = 4;
-  const leafMat = prep(new THREE.MeshStandardMaterial({ map: T.leafcluster, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, vertexColors: true, color: new THREE.Color().setRGB(1.6, 1.65, 1.35) }), 'leaf', (s) => foliagePatch(s, 0.55));
+  const A = !CYBER; // r6.4 flora_a: map A gets wind gusts + swaying shadows + the coastal flora layer; map 霓港 unchanged
+  const leafMat = prep(new THREE.MeshStandardMaterial({ map: T.leafcluster, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, vertexColors: true, color: new THREE.Color().setRGB(1.6, 1.65, 1.35) }), A ? 'leafA' : 'leaf', (s) => foliagePatch(s, 0.55, 1, A ? 1.4 : 1));
   const barkMat = prep(new THREE.MeshStandardMaterial({ map: T.bark_d, roughness: 0.95, color: 0x9a8f80 }), 'tbark', (s) => foliagePatch(s, 0.0));
   // v3.5 palms: species by location (beach/promenade -> coconut, streets -> royal / sabal mix, parks mixed); near/far LOD
   const frondTex = pinnateTex(), fanT = fanTex();
-  const mkFrondMat = (map) => prep(new THREE.MeshStandardMaterial({ map, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, vertexColors: true, color: new THREE.Color().setRGB(1.25, 1.22, 1.05) }), 'frond', (s) => foliagePatch(s, 0.35));
+  const mkFrondMat = (map) => prep(new THREE.MeshStandardMaterial({ map, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, vertexColors: true, color: new THREE.Color().setRGB(1.25, 1.22, 1.05) }), A ? 'frondA' : 'frond', (s) => foliagePatch(s, 0.35, 1, A ? 2.3 : 1));
   const frondMat = mkFrondMat(frondTex), fanMat = mkFrondMat(fanT);
+  const depthFor = (mat) => A ? swayDepth(mat, mat === leafMat ? 1.4 : 2.3, mat === leafMat ? 'leaf' : 'frond') : new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mat.map, alphaTest: 0.42, side: THREE.DoubleSide });
+  // A map: trunks/crowns sway too (aSway > 0 near the top) -> their shadows follow (opaque depth, no alpha map)
+  const trunkDepth = A ? swayDepth({ map: null, alphaTest: 0 }, 1, 'trunk') : null;
+  const XT = A ? floraExtras(city) : { palms: [], trees: [] }; // hammock palms / trees on the natural island ends (not added to city.*)
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
+  const out = []; const lodSets = [];
+  const palmList = A ? city.palms.concat(XT.palms) : city.palms;
+  let palmsA = null;
+  if (A) { // r6.5 a_palms: 7 height/species variants, dead-frond skirt, coconut clusters, tree pits, 3 LODs (src/maps/gta/palms.js)
+    for (const p of palmList) {
+      const hsh = Math.abs(Math.sin(p.x * 12.9 + p.z * 78.2)) * 1000 % 1; const hsh2 = Math.abs(Math.sin(p.x * 3.3 + p.z * 9.1)) * 1000 % 1;
+      const beach = p.x > 300 || p.lean > 0.04 || p.lean < -0.04 && !p.street;
+      const sp = beach ? 0 : p.street ? (hsh < 0.55 ? 1 : hsh < 0.85 ? 2 : 0) : Math.floor(hsh * 5) % 5 < 2 ? 0 : Math.floor(hsh * 5) % 5 < 4 ? 1 : 2;
+      p.vi = pickVariantA(sp, p.h, hsh2); p.hA = p.h * (sp === 1 ? 1.3 : 1);
+    }
+    palmsA = buildPalmsA(scene, city, palmList, { depthFor, trunkDepth, out });
+  } else {
   const barks = { coco: barkTextures('coco'), royal: barkTextures('royal'), sabal: barkTextures('sabal') };
   const trunkMats = {}; for (const k in barks) trunkMats[k] = prep(new THREE.MeshStandardMaterial({ map: barks[k].map, normalMap: barks[k].normalMap, normalScale: new THREE.Vector2(1, 1), roughness: 0.92, color: 0xffffff }), 'ptrunk', (s) => foliagePatch(s, 0.0));
   const crownMats = { coco: prep(new THREE.MeshStandardMaterial({ color: 0x6f6236, roughness: 0.75 }), 'pcrown', (s) => foliagePatch(s, 0.0)),
     royal: prep(new THREE.MeshStandardMaterial({ color: 0x5f8a3a, roughness: 0.35 }), 'pcrown', (s) => foliagePatch(s, 0.0)),
     sabal: prep(new THREE.MeshStandardMaterial({ color: 0x5a4c34, roughness: 0.9 }), 'pcrown', (s) => foliagePatch(s, 0.0)) };
-  const depthFor = (mat) => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mat.map, alphaTest: 0.42, side: THREE.DoubleSide });
   const kinds = [['coco', 11], ['coco', 23], ['royal', 37], ['royal', 41], ['sabal', 53]];
   const variants = kinds.map(([k, sd]) => ({ k, near: palmGeometry(k, sd, false), far: palmGeometry(k, sd, true) }));
   const groups = variants.map(() => []);
-  for (const p of city.palms) {
+  for (const p of palmList) {
     const hsh = Math.abs(Math.sin(p.x * 12.9 + p.z * 78.2)) * 1000 % 1;
     const beach = p.x > 300 || p.lean > 0.04 || p.lean < -0.04 && !p.street;
     let vi; if (beach) vi = hsh < 0.5 ? 0 : 1; else if (p.street) vi = hsh < 0.55 ? (hsh < 0.27 ? 2 : 3) : hsh < 0.85 ? 4 : 1; else vi = Math.floor(hsh * 5) % 5;
     groups[vi].push(p);
   }
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
-  const out = []; const lodSets = [];
   variants.forEach((v, vi) => {
     const list = groups[vi]; if (!list.length) return;
     const fm = v.k === 'sabal' ? fanMat : frondMat;
-    const mk = (geo, mat, cast = true) => { const im = new THREE.InstancedMesh(geo, mat, list.length); im.castShadow = cast; im.receiveShadow = true; if (mat.alphaTest) im.customDepthMaterial = depthFor(mat); im.frustumCulled = false; scene.add(im); out.push(im); return im; };
+    const mk = (geo, mat, cast = true) => { const im = new THREE.InstancedMesh(geo, mat, list.length); im.castShadow = cast; im.receiveShadow = true; if (mat.alphaTest) im.customDepthMaterial = depthFor(mat); else if (trunkDepth) im.customDepthMaterial = trunkDepth; im.frustumCulled = false; scene.add(im); out.push(im); return im; };
     const set = { near: [mk(v.near.trunk, trunkMats[v.k]), mk(v.near.fronds, fm), mk(v.near.crown, crownMats[v.k])], far: [mk(v.far.trunk, trunkMats[v.k]), mk(v.far.fronds, fm), mk(v.far.crown, crownMats[v.k], false)], mats: [], pos: [] };
     list.forEach((p) => {
       const s = p.h / v.near.H;
       q.setFromEuler(new THREE.Euler(p.lean * (v.k === 'coco' ? 1.6 : 0.4), p.rot, 0)); sc.set(s * 0.95 * (p.s || 1), s, s * 0.95 * (p.s || 1));
-      pos.set(p.x, city.groundH(p.x, p.z) - 0.05, p.z); m4.compose(pos, q, sc); set.mats.push(m4.clone()); set.pos.push([p.x, p.z]);
+      pos.set(p.x, city.groundH(p.x, p.z) - 0.05, p.z); m4.compose(pos, q, sc); set.mats.push(m4.clone()); set.pos.push([p.x, p.z, p.far2 || 0]);
     });
     lodSets.push(set);
   });
+  }
   // distribute instances to near/far meshes around the camera (cheap: a few thousand matrix copies, every ~0.4 s)
   const NEAR2 = 75 * 75, FAR2 = CYBER ? 900 * 900 : Infinity; // r6.0: far cull only on map 霓港 (thousands of palms) let lastX = 1e9, lastZ = 1e9;
   const updateLod = (cx, cz, force) => {
@@ -369,7 +418,7 @@ export function buildVegetation(scene, city, T) {
     for (const set of lodSets) {
       let nn = 0, nf = 0;
       for (let i = 0; i < set.mats.length; i++) {
-        const d = (set.pos[i][0] - cx) ** 2 + (set.pos[i][1] - cz) ** 2; if (d > FAR2) continue; const arr = d < NEAR2 ? set.near : set.far; const idx = d < NEAR2 ? nn++ : nf++;
+        const d = (set.pos[i][0] - cx) ** 2 + (set.pos[i][1] - cz) ** 2; if (d > FAR2 || (set.pos[i][2] && d > set.pos[i][2])) continue; const arr = d < NEAR2 ? set.near : set.far; const idx = d < NEAR2 ? nn++ : nf++;
         for (const im of arr) im.setMatrixAt(idx, set.mats[i]);
       }
       for (const im of set.near) { im.count = nn; im.instanceMatrix.needsUpdate = true; }
@@ -377,26 +426,32 @@ export function buildVegetation(scene, city, T) {
     }
   };
   updateLod(280, 30, true);
-  out.update = (camPos) => updateLod(camPos.x, camPos.z, false);
+  out.update = palmsA ? (camPos) => { updateLod(camPos.x, camPos.z, false); palmsA.update(camPos.x, camPos.z, false); } : (camPos) => updateLod(camPos.x, camPos.z, false);
+  if (palmsA) out.palmsA = palmsA;
   // trees
   const seeds = [[5, 'oak'], [9, 'grape'], [13, 'oak'], [21, 'grape']];
   const tv = seeds.map(([sd, k]) => ({ near: treeGeometry(sd, k, false), far: treeGeometry(sd, k, true) }));
-  const tg = [[], [], [], []]; city.trees.forEach((t) => tg[Math.floor(Math.abs(Math.sin(t.x * 3.7 + t.z * 1.3)) * 997) % 4].push(t));
+  const tg = [[], [], [], []]; (A ? city.trees.concat(XT.trees) : city.trees).forEach((t) => tg[Math.floor(Math.abs(Math.sin(t.x * 3.7 + t.z * 1.3)) * 997) % 4].push(t));
   tv.forEach((v, vi) => {
     const list = tg[vi]; if (!list.length) return;
-    const mk = (geo, mat, alpha) => { const im = new THREE.InstancedMesh(geo, mat, list.length); if (alpha) im.customDepthMaterial = depthFor(mat); im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; scene.add(im); out.push(im); return im; };
+    const mk = (geo, mat, alpha) => { const im = new THREE.InstancedMesh(geo, mat, list.length); if (alpha) im.customDepthMaterial = depthFor(mat); else if (trunkDepth) im.customDepthMaterial = trunkDepth; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; scene.add(im); out.push(im); return im; };
     const set = { near: [mk(v.near.trunk, barkMat), mk(v.near.leaves, leafMat, true)], far: [mk(v.far.trunk, barkMat), mk(v.far.leaves, leafMat, true)], mats: [], pos: [] };
-    list.forEach((t) => { q.setFromEuler(new THREE.Euler(0, t.x * 3.1, 0)); sc.setScalar(t.s); pos.set(t.x, city.groundH(t.x, t.z), t.z); m4.compose(pos, q, sc); set.mats.push(m4.clone()); set.pos.push([t.x, t.z]); });
+    list.forEach((t) => { q.setFromEuler(new THREE.Euler(0, t.x * 3.1, 0)); sc.setScalar(t.s); pos.set(t.x, city.groundH(t.x, t.z), t.z); m4.compose(pos, q, sc); set.mats.push(m4.clone()); set.pos.push([t.x, t.z, t.far2 || 0]); });
     lodSets.push(set);
   });
   updateLod(280, 30, true);
   // shrubs
-  if (city.shrubs.length) {
+  const shrubList = A ? city.shrubs.filter((t) => !t.mangrove) : city.shrubs; // A: bay-edge mangrove thickets are real mangroves now (flora.js)
+  if (shrubList.length) {
     const sv = [shrubGeometry(3, 0), shrubGeometry(7, 1), shrubGeometry(11, 0), shrubGeometry(19, 2)]; const sg = [[], [], [], []];
-    city.shrubs.forEach((t) => sg[Math.floor(Math.abs(Math.sin(t.x * 5.1 + t.z * 2.3)) * 991) % 4].push(t));
+    shrubList.forEach((t) => sg[Math.floor(Math.abs(Math.sin(t.x * 5.1 + t.z * 2.3)) * 991) % 4].push(t));
     sv.forEach((g, vi) => { const list = sg[vi]; if (!list.length) return; const im = new THREE.InstancedMesh(g, leafMat, list.length); im.receiveShadow = true; im.castShadow = true; im.customDepthMaterial = depthFor(leafMat);
       list.forEach((t, i) => { q.setFromEuler(new THREE.Euler(0, t.x, 0)); sc.set(t.s * 1.3, t.s, t.s * 1.3); pos.set(t.x, city.groundH(t.x, t.z), t.z); m4.compose(pos, q, sc); im.setMatrixAt(i, m4); });
       im.computeBoundingSphere(); scene.add(im); out.push(im); });
+  }
+  if (A) { // r6.4 flora_a: coastal layer (dune grass + hummocks, sea grape, saw palmetto, mangroves + marsh, hedges, coastal rock)
+    const fl = buildFloraA(scene, city, { T, leafMat, frondMat, fanMat, fanT, mangroves: city.shrubs.filter((t) => t.mangrove) });
+    out.flora = fl; const upd = out.update; out.update = (camPos) => { upd(camPos); fl.update(camPos); };
   }
   return out;
 }
