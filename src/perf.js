@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim'), sprobe: Q.has('oldsprobe') };
+export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim'), sprobe: Q.has('oldsprobe'), sprobeLod: Q.has('oldsprobelod'), tpwarm: Q.has('oldtpwarm') };
 // ?oldmirror: characters (skinned, the costliest meshes) were drawn into the water mirror and both reflection probes too;
 // now they live on CHAR_LAYER only, which the main camera and the shadow cameras see
 export const CHAR_LAYER = 3;
@@ -34,6 +34,13 @@ export function cullSmall(scene, camPos, o_, hid) { const { D, K, flatY, flatNea
     if (!bs || !Number.isFinite(bs.radius)) return; _bs.copy(bs).applyMatrix4(o.matrixWorld); const d = _bs.center.distanceTo(_cp) - _bs.radius;
     if (d > D || _bs.radius < d * K || (d > flatNear && _bs.center.y + _bs.radius < flatY)) { o.visible = false; hid.push(o); } });
   return hid; }
+
+// perf_debug5 (?oldsprobelod = old): the street probe drew the DETAILED mesh of every loaded region chunk (within 300 m);
+// beyond lodD from the probe a chunk now shows its far LOD volume (plain building shells) for the face instead. Returns the
+// far meshes it made visible (hide them again after the face); detailed meshes go into hid (made visible again by the caller).
+export function probeLod(region, camPos, lodD, hid, shown) { if (!region || !region.chunks) return;
+  for (const c of region.chunks.values()) { if (!c.det || !c.far.length) continue; if (Math.hypot(camPos.x - c.x, camPos.z - c.z) - c.r < lodD) continue;
+    for (const m of c.det) if (m.visible) { m.visible = false; hid.push(m); } for (const m of c.far) if (!m.visible) { m.visible = true; shown.push(m); } } }
 
 // ---- amortized cube capture: start(pos) then step() once per frame; returns true on the frame the cube is complete
 export function cubeStepper(renderer, scene, cubeCam) {
