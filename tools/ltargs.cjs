@@ -1,5 +1,6 @@
 // fix_pt4: load-time vs browser launch args (ptS harness args vs shot args). usage: node tools/ltargs.cjs <map> <variant>
 // variants: pts = ptS.cjs args exactly (single-process, old-space 900, optimize-for-size, gpu-mem 256); pts1400 = same with old-space 1400;
+// ptshide = pts + --disable-gpu-compositing (ptS HIDECANVAS); env INIT=1 adds ptS's rAF hook
 // ptsmulti = ptS args without --single-process; shot = shotcmp args (old-space 1000, multi-process)
 const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
 const root = path.resolve(__dirname, '..'); const MAPN = process.argv[2] || 'cyber'; const VAR = process.argv[3] || 'pts';
@@ -11,11 +12,12 @@ const A = {
   pts1400: [...base, '--js-flags=--max-old-space-size=1400', '--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'],
   pts1400s: [...base, '--js-flags=--max-old-space-size=1400 --max-semi-space-size=2 --optimize-for-size', '--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'],
   ptsmulti: [...base, '--js-flags=--max-old-space-size=900 --max-semi-space-size=2 --optimize-for-size'],
+  ptshide: [...base, '--disable-gpu-compositing', '--js-flags=--max-old-space-size=900 --max-semi-space-size=2 --optimize-for-size', '--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'],
   shot: [...base, '--js-flags=--max-old-space-size=1000 --max-semi-space-size=2 --optimize-for-size'],
 }[VAR];
 srv.listen(0, async () => {
   const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: A });
-  const ctx = await b.newContext({ viewport: { width: +(process.env.VW || 480), height: +(process.env.VH || 270) }, deviceScaleFactor: 1 }); const p = await ctx.newPage(); p.setDefaultTimeout(400000);
+  const ctx = await b.newContext({ viewport: { width: +(process.env.VW || 480), height: +(process.env.VH || 270) }, deviceScaleFactor: 1 }); if (process.env.INIT) await ctx.addInitScript(`(() => { window.__FT = []; const raf = window.requestAnimationFrame.bind(window); let last = 0; window.requestAnimationFrame = (cb) => raf((ts) => { const n = performance.now(); if (last) window.__FT.push(n - last); last = n; cb(ts); }); })();`); const p = await ctx.newPage(); p.setDefaultTimeout(400000);
   let perr = 0; p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
   const lt = []; p.on('console', (m) => { const t = m.text(); if (/loadtime/.test(t)) lt.push(t.slice(0, 160)); });
   const T0 = Date.now(); const hs = []; const iv = setInterval(async () => { try { hs.push([((Date.now() - T0) / 1000) | 0, await p.evaluate('Math.round(performance.memory.usedJSHeapSize/1048576)+"/"+Math.round(performance.memory.jsHeapSizeLimit/1048576)')]); } catch (e) { } }, 5000);
