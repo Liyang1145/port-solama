@@ -11,6 +11,7 @@ import { CYBER } from './mapsel.js';
 import { OLDENV2 } from './envprog.js'; // b_envprog2
 import { SHOPS } from './maps/gta/shoppools.js'; // a_shopnight2
 import { furnMat, PB, stampAO, signalMastA, signalMastFarA, pedPoleA, hydrantA, bikeRackA, recycleBinA } from './streetkit.js';
+import { buildBeachKit } from './maps/gta/beachkit.js';
 
 // a_props (map 索拉纳港): fine-detail parts (bolts, chains, buttons, cables, louvres) go into 160 m chunk meshes that are only
 // drawn within ~120 m of the camera; coarse parts merge into one always-on mesh per prop family.
@@ -352,7 +353,9 @@ export function buildProps(scene, city, T) {
   // ---------- lifeguard towers, umbrellas, loungers
   {
     const g = new GeoBucket();
-    for (const lg of city.deco.lifeguards) {
+    // a_beach: map 索拉纳港 builds its own lifeguard towers / showers / dune fences (maps/gta/beachkit.js); old stands stay on map 霓港
+    if (!CYBER) out.beach = buildBeachKit(scene, city);
+    for (const lg of (CYBER ? city.deco.lifeguards : [])) {
       const y0 = city.groundH(lg.x, lg.z);
       const m = new THREE.Matrix4().makeTranslation(lg.x, y0, lg.z);
       const add = (geo, c) => g.geom(geo, m, {}, c);
@@ -457,6 +460,7 @@ export function updateProps(P, cam, night, phase) {
   if (P.shopPools) shopPools(P.shopPools, cam.position);
   if (FINE_MESHES.length) { const cx = cam.position.x, cz = cam.position.z; // a_props: fine-detail chunks within ~120 m
     for (const f of FINE_MESHES) { const dx = Math.max(f.x0 - cx, 0, cx - f.x0 - f.s), dz = Math.max(f.z0 - cz, 0, cz - f.z0 - f.s); const v = dx * dx + dz * dz < f.r * f.r; f.m.visible = v; if (f.far) f.far.visible = !v; } }
+  if (P.beach) P.beach.update(cam);
   { const L = P.lampCull, cx = cam.position.x, cz = cam.position.z; if (L && Math.hypot(cx - L.lx, cz - L.lz) > 25) { L.lx = cx; L.lz = cz; let k = 0;
     for (const [a, b, x, z, ci] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); L.cones.setMatrixAt(k, a); L.cones.setColorAt(k, ci); k++; }
     for (const m of [L.im, L.glow, L.pools, L.cones]) { m.count = k; m.instanceMatrix.needsUpdate = true; } L.cones.instanceColor.needsUpdate = true; } }

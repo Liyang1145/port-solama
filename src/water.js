@@ -68,7 +68,7 @@ void main(){
   float wave = sin(p.x * 0.35 - t * 1.2 + sin(p.y * 0.05) * 2.0) * 0.5 + 0.5;
   float foamN = texture2D(tNormal, p * 0.12 + t * 0.02).r;
   // vis-sweep: narrower band that thins with distance (aerials showed a 10 m wide snow-white scalloped rim on every coast)
-  float foam = smoothstep(0.42, 0.0, depth + wave * 0.16) * smoothstep(0.35, 0.7, foamN + 0.25) * mix(1.0, 0.45, smoothstep(150.0, 700.0, dist));
+  float foam = (1.0 - smoothstep(0.0, 0.42, depth + wave * 0.16)) * smoothstep(0.35, 0.7, foamN + 0.25) * mix(1.0, 0.45, smoothstep(150.0, 700.0, dist));
   // a_waternight: uWN.w lowers the night floor of the foam (0.15 -> 0.04): unlit surf read as a grey slab along embankments
   col = mix(col, vec3(0.95, 0.96, 0.95) * (0.15 + 0.85 * (1.0 - uNight) - uWN.w * uNight) * clamp(dot(uSunCol, vec3(0.33)) * 0.35 + 0.25, 0.0, 1.3), foam * 0.85);
   // height fog (same model as the scene)
