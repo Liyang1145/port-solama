@@ -24,6 +24,7 @@ const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one
 const HOSPITAL = POI.hospital;
 const PRECINCT = POI.precinct;
 
+const OLD_DEADCAR = typeof location !== 'undefined' && /[?&]olddeadcar/.test(location.search); // fix_pt2
 export class Game {
   constructor(o) {
     Object.assign(this, o);
@@ -123,6 +124,10 @@ export class Game {
       return;
     }
     const v = this.nearestCar(); if (!v) return;
+    // fix_pt2 (?olddeadcar = old): a wrecked car (health <= 0: throttle is forced to 0 in Vehicle.update) could be entered and then never
+    // moved, with no hint (PLAYTEST_1H #1 / #4 / #24: the 'stuck' stolen cruisers were wrecked chase cars; the wanted-0 branch of
+    // updatePolice also flipped their ai.mode 'dead' back to 'flee'). Refuse with a HUD line; smoke / fire / explosion stays GPT's #1.
+    if (v.health <= 0 && !OLD_DEADCAR) { this.hud.msg('这辆车已经报废了', 2); return; }
     if (v.ai && v.ai.mode !== 'dead' && v.health > 0) { // carjack: pull the driver out
       const kind = v.type === 'police' ? 'cop' : pick(['woman', 'man']);
       const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw);
@@ -188,7 +193,7 @@ export class Game {
     for (const v of this.policeCars) {
       if (!v.ai) continue;
       const tx = searching ? this.lastSeen.x + Math.sin(this.lostT * 0.3 + v.x) * 20 : px, tz = searching ? this.lastSeen.z + Math.cos(this.lostT * 0.3 + v.z) * 20 : pz; const d = Math.hypot(tx - v.x, tz - v.z);
-      if (this.wanted === 0) { v.siren = false; v.ai.mode = 'lane'; v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - tx, 0, v.z * 2 - tz); continue; }
+      if (this.wanted === 0) { v.siren = false; if (v.ai.mode === 'dead' && !OLD_DEADCAR) continue; v.ai.mode = 'lane'; v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - tx, 0, v.z * 2 - tz); continue; }
       // route: follow the road grid towards the player (aim at the nearest road point beyond 40 m), direct pursuit when close
       v.ai.target = d < 45 ? new THREE.Vector3(tx, 0, tz) : this.roadWaypoint(v, tx, tz);
       v.ai.chaseSpeed = d < 30 ? (P.car ? 26 : 9) : 22 + this.wanted * 3;
