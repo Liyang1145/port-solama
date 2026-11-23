@@ -18,6 +18,7 @@ import { POI } from './mapdata.js';
 import { CYBER } from './mapsel.js';
 import { routeWaypoint } from './roadroute.js';
 import { ActionPose } from './actionpose.js';
+const OLDMANAGE = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmanage'); // perf_debug6
 const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one save per map (positions differ)
 
 const HOSPITAL = POI.hospital;
@@ -433,11 +434,17 @@ export class Game {
     for (const v of civ) { const d = Math.hypot(v.x - P.pos.x, v.z - P.pos.z); if (d > 330 && v !== P.car && v !== this.parked) this.traffic.removeCar(v); }
     if (civ.length < 27) this.traffic.spawnCar(pick(['sedan', 'sedan', 'suv', 'pickup', 'van', 'taxi', 'sport2', 'sedan']), P.pos, 110, 260, fwd);
     // parked cars (Tideline curb lane)
+    // perf_debug6 (?oldmanage = old: every empty slot in 25-115 m got its car in the same call): walking or driving into a new block
+    // created several parked Vehicles (model clone + materials) in one frame (g:manage up to ~57 ms in the worst 1 % frames of a
+    // 60 s drive); now at most one per call (manage runs every 0.5 s; the slots start 25 m out, so the fill-in is out of view)
+    // (the first call and a jump of > 60 m since the last call, i.e. start / teleport / respawn, still fill every slot at once)
+    const jump = !this._mgPos || Math.hypot(P.pos.x - this._mgPos.x, P.pos.z - this._mgPos.z) > 60; this._mgPos = { x: P.pos.x, z: P.pos.z };
+    let parkNew = OLDMANAGE || jump ? 1e9 : 1;
     for (const s of this.city.parking || []) {
       const d = Math.hypot(s.x - P.pos.x, s.z - P.pos.z);
       if (s.car && !this.traffic.cars.includes(s.car)) s.car = null;
       if (s.car && (s.car.driver === 'player' || Math.hypot(s.car.x - s.x, s.car.z - s.z) > 3)) { s.car = null; continue; }
-      if (!s.car && s.fill && d < 115 && d > 25) { const v = new Vehicle(this.scene, pick(['sedan', 'suv', 'sport2', 'pickup', 'van', 'taxi'])); v.place(s.x, s.z, s.yaw); v.ai = null; v.parked = true; this.traffic.cars.push(v); s.car = v; }
+      if (!s.car && s.fill && d < 115 && d > 25 && parkNew > 0) { parkNew--; const v = new Vehicle(this.scene, pick(['sedan', 'suv', 'sport2', 'pickup', 'van', 'taxi'])); v.place(s.x, s.z, s.yaw); v.ai = null; v.parked = true; this.traffic.cars.push(v); s.car = v; }
       else if (s.car && d > 150 && s.car !== P.car) { this.traffic.removeCar(s.car); s.car = null; }
     }
     // pedestrians
