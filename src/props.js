@@ -187,9 +187,9 @@ export function buildProps(scene, city, T) {
   if (BN) for (const q of BN.pools) xPools.push(q);
   const PN = CYBER || /[?&]oldaportlamps\b/.test(typeof location !== 'undefined' ? location.search : '') ? null : portNight(city); // a_portlamps
   if (PN) for (const q of PN.pools) xPools.push(q);
-  // a_shopnight2 (map A; ?oldashop2 = none): island storefront pools (open shops only, from shoppools.js) as SHOP_CAP more instances
+  // a_shopnight2 (map A; ?oldashop2 = none): island storefront pools (open shops only, from shoppools.js) as SHOP_CAP (640) more instances
   // of this same pool mesh (same draw, same program), refilled by updateProps with the open shops within 200 m of the camera
-  const SHOP_CAP = !CYBER && SHOPS.isl.length ? 384 : 0, nFix = lamps.length + xPools.length;
+  const SHOP_CAP = !CYBER && SHOPS.isl.length ? 640 : 0, nFix = lamps.length + xPools.length;
   const pools = new THREE.InstancedMesh(poolGeo, poolMat, nFix + SHOP_CAP); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   const lampM = [];
@@ -243,7 +243,7 @@ export function buildProps(scene, city, T) {
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
   if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
   out.lampGlow = glowMat; out.pools = pools;
-  if (SHOP_CAP) { pools.count = nFix; pools.computeBoundingSphere(); out.shopPools = { m: pools, nFix, cap: SHOP_CAP, at: null, n: 0 }; } // a_shopnight2
+  if (SHOP_CAP) { pools.count = nFix; pools.computeBoundingSphere(); out.shopPools = SHOPS.islPools = { m: pools, nFix, cap: SHOP_CAP, at: null, n: 0 }; } // a_shopnight2
   // a pool of real point lights that follow the nearest lamps at night
   for (let i = 0; i < 10; i++) { const pl = new THREE.PointLight(0xffa860, 0, 30, 1.6); pl.castShadow = false; scene.add(pl); out.lampLights.push(pl); }
   // v4.1 neon practicals: 6 coloured point lights follow the nearest hotel neon signs at night (pink / cyan pools on the pavement)
@@ -438,7 +438,9 @@ export function buildProps(scene, city, T) {
 // refilled every 25 m moved; the fixed lamp / bollard instances stay in front, so the lamp pools are untouched
 const SHOP_R = 200, _sq = new THREE.Quaternion(), _sY = new THREE.Vector3(0, 1, 0), _sv = new THREE.Vector3(), _ss = new THREE.Vector3(), _sm = new THREE.Matrix4();
 function shopPools(S, p) { const L = SHOPS.isl; if (S.at && S.at[2] === L.length && Math.hypot(p.x - S.at[0], p.z - S.at[1]) <= 25) return; S.at = [p.x, p.z, L.length];
-  let k = 0; for (let i = 0; i + 5 < L.length && k < S.cap; i += 6) { if (Math.hypot(L[i] - p.x, L[i + 1] - p.z) >= SHOP_R) continue;
+  const C = []; for (let i = 0; i + 5 < L.length; i += 6) { const d = Math.hypot(L[i] - p.x, L[i + 1] - p.z); if (d < SHOP_R) C.push(d, i); }
+  const ord = []; for (let j = 0; j < C.length; j += 2) ord.push(j); if (ord.length > S.cap) ord.sort((a, b) => C[a] - C[b]); // nearest first when over capacity
+  let k = 0; for (const j of ord) { if (k >= S.cap) break; const i = C[j + 1];
     _sm.compose(_sv.set(L[i], L[i + 5], L[i + 1]), _sq.setFromAxisAngle(_sY, L[i + 2]), _ss.set(L[i + 3] / 16, 1, L[i + 4] / 16)); S.m.setMatrixAt(S.nFix + k++, _sm); }
   S.n = k; S.m.count = S.nFix + k; S.m.instanceMatrix.needsUpdate = true; S.m.computeBoundingSphere(); }
 export function updateProps(P, cam, night, phase) {

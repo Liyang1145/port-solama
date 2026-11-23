@@ -24,8 +24,13 @@ export function shopEdge(style, p, q, len, nBays, seed, e, y0) {
   let mask = 0; const dx = (q[0] - p[0]) / len, dz = (q[1] - p[1]) / len, ox = -dz, oz = dx; // outward (prismWalls CCW)
   for (let u = 0; u < nU; u++) { const on = h99(seed, e, u) < SHOP_OPEN_P; if (on) mask += 2 ** u;
     if (!fresh) continue; const b0 = 2 * u, b1 = Math.min(nBays, 2 * u + 2), w = (b1 - b0) * ww, ac = (b0 + b1) / 2 * ww;
-    const D = 4.0, cx = p[0] + dx * ac + ox * (0.22 + D / 2), cz = p[1] + dz * ac + oz * (0.22 + D / 2);
-    const isl = isIsland(cx, cz); SHOPS.units.push([cx, cz, on ? 1 : 0, isl ? 1 : 0, +w.toFixed(2)]);
+    // pool ellipse centred 0.8 m inside the shop (hidden by the facade), 2 x 4.8 m deep -> the light is brightest at the window and
+    // fades out ~4 m across the sidewalk (both pool shaders peak at their centre; this keeps the peak behind the glass)
+    // (mainland K.pm / fabGlow, pow 1.4 falloff: centre 0.8 m inside, 9.6 m; island lamp-pool shader, softer pow 2.2: centre at the
+    // glass line, 8.4 m -> about the same visible spill)
+    const isl = isIsland(p[0] + dx * ac, p[1] + dz * ac), off = isl ? 0.2 : -0.8, D = isl ? 8.4 : 9.6;
+    const cx = p[0] + dx * ac + ox * off, cz = p[1] + dz * ac + oz * off; SHOPS.units.push([cx, cz, on ? 1 : 0, isl ? 1 : 0, +w.toFixed(2), Math.atan2(-dz, dx), y0]);
     if (on) { SHOPS.stats.open++; (isl ? SHOPS.isl : SHOPS.ml).push(cx, cz, Math.atan2(-dz, dx), w * 0.9, D, Math.max(y0, 0.15) + 0.04); } else SHOPS.stats.closed++; }
   return style + 8 * (1 + mask);
 }
+if (typeof window !== 'undefined' && !OLD_ASHOP2) window.__SHOPS2 = SHOPS; // read-only, for the shop-night tests
