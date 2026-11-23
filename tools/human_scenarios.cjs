@@ -7,7 +7,7 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
   const face = async (x, z) => { for (let i = 0; i < 6; i++) { const s = await pose(); const want = Math.atan2(x - s.x, z - s.z); let d = want - (s.camYaw + Math.PI); d = Math.atan2(Math.sin(d), Math.cos(d)); if (Math.abs(d) < 0.05) return; const px = -d / 0.0024; await look(Math.max(-40, Math.min(40, px / 6)), 0, 6); } };
   // walk to (x,z) like a player: aim the camera, hold W (+Shift), re-aim every half second
   const walkTo = async (x, z, { sprint = false, maxF = 900, stop = 1.2 } = {}) => { let f = 0; let s = await pose(); let last = [s.x, s.z]; let stuck = 0; let side = 0;
-    while (f < maxF) { s = await pose(); if (Math.hypot(x - s.x, z - s.z) < stop) break; await face(x, z); await key.down('KeyW'); if (sprint) await key.down('ShiftLeft'); await run(15); f += 15;
+    while (f < maxF) { s = await pose(); const dd = Math.hypot(x - s.x, z - s.z); if (dd < stop) break; await face(x, z); await key.down('KeyW'); const near = dd < 6; if (sprint && !near) await key.down('ShiftLeft'); else await key.up('ShiftLeft'); const nf = near ? 3 : 15; await run(nf); f += nf;
       const n = await pose(); if (Math.hypot(n.x - last[0], n.z - last[1]) < 0.2) stuck++; else stuck = 0; last = [n.x, n.z];
       if (stuck >= 2 && side < 6) { side++; const k = side % 2 ? 'KeyD' : 'KeyA'; await key.down(k); await run(12 + side * 4); await key.up(k); f += 12 + side * 4; stuck = 0; } // blocked: sidestep like a player
       if (stuck > 4) break; }

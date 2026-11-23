@@ -172,7 +172,7 @@ async function load() {
   const W = window.__G = {
     game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, poi: POI, missionStarts: MISSION_STARTS, stream, nature, neon,
     streamSync(x, z) { if (!stream) return 0; const p = x === undefined ? camera.position : { x, z }; return stream.sync(p); },
-    setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(SNAP); sprobe.t = 99; },
+    setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(SNAP && !PROF); sprobe.t = 99; }, // ?prof harness: the player path (amortized)
     photo(on = true, focus = 0, ap = 1.2) { post.dof = on ? 1 : 0; post.focus = focus || 6; post.aperture = ap; document.body.classList.toggle('photo', !!on); },
     get hour() { return hour; },
     // perf_debug1: one real frame (game + optional render) at the given dt; with ?prof returns the frame record

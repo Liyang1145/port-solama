@@ -77,7 +77,7 @@ srv.listen(0, async () => {
   const key = { down: (k) => p.keyboard.down(k), up: (k) => p.keyboard.up(k), tap: async (k, n = 2) => { await p.keyboard.down(k); await run(n); await p.keyboard.up(k); } };
   const hold = async (keys, frames, re) => { for (const k of keys) await p.keyboard.down(k); await run(frames, re); for (const k of keys) await p.keyboard.up(k); };
   // continuous mouse look: dx pixels per frame for n frames (real mousemove events with movementX)
-  let mx = W / 2, my = H / 2; const look = async (dx, dy, n, re) => { for (let i = 0; i < n; i += 3) { mx += dx * 3; my += dy * 3; await p.mouse.move(mx, my); await run(3, re); if (Math.abs(mx - W / 2) > W * 0.4 || Math.abs(my - H / 2) > H * 0.4) { mx = W / 2; my = H / 2; await p.mouse.move(mx, my, { steps: 1 }); } } };
+  let mx = W / 2, my = H / 2; const look = async (dx, dy, n, re) => { for (let i = 0; i < n; i += 3) { mx += dx * 3; my += dy * 3; await p.mouse.move(mx, my); await run(3, re); } }; // no re-centring: under pointer lock that jump is a real (huge) movementX };
   const ev = (js) => p.evaluate(js);
   const shot = async (name) => { const t = Date.now(); await ev('__G.render()'); const url = await ev(() => document.getElementById('c').toDataURL('image/jpeg', 0.85)); fs.writeFileSync(path.join(out, name + '.jpg'), Buffer.from(url.split(',')[1], 'base64')); log('shot', name, ((Date.now() - t) / 1000).toFixed(0) + 's'); };
   const st = () => ev('__G.game.state()');
