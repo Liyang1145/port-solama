@@ -270,6 +270,7 @@ export class PortQuay {
     for (const c of CRANES) for (const du of [-9, 9]) for (const v of RAIL_V) add(c.u + du - 0.9, v - 1.4, c.u + du + 0.9, v + 1.4, 46, 'crane');
     for (const bu of BLOCKS) for (const ln of [LINE_A, LINE_B]) add(bu, ln.v0, Math.min(QUAY.u1, bu + 5 * BAYP), ln.v0 + ln.rows * ROWP, 5.2, 'container');
     add(SHIP.u0, SHIP.vC - SHIP.B / 2, SHIP.u0 + SHIP.L, SHIP.vC + SHIP.B / 2, 30, 'ship');
+    if (!QL_OLD) for (const { u } of quayLampPos()) { const [x, z] = quayToWorld(u, QL.v); col.addOBB(x, z, cT, -sT, 0.25, 0.25, QL.H, 'pole'); } // b_quaylamps
   }
   // ------------------------------------------------------------- per frame ----
   sync() {
@@ -287,7 +288,7 @@ export class PortQuay {
     const t0 = performance.now(); const boxes = []; const W = new World(CH);
     withSeed(0xb0a7, () => { yardBoxes(boxes); shipBoxes(boxes); quayBoxes(boxes); });
     withSeed(0x5417, () => { hull(W); superstructure(W); });
-    const GL = new Glows(); withSeed(0x9a17, () => nightLights(W, GL));
+    const GL = new Glows(); withSeed(0x9a17, () => nightLights(W, GL)); if (!QL_OLD) quayLampLights(W, GL); // b_quaylamps
     const ms = W.build(this.group, this.mats, { neon: { cast: false }, hull: { cast: true }, cone: { cast: false, receive: false }, pool: { cast: false, receive: false } }); this.baseMeshes = ms;
     this.glow = GL.mesh(); this.group.add(this.glow);
     // crane proxies (far): portal + boom + A-frame boxes in the crane colour
@@ -309,6 +310,7 @@ export class PortQuay {
     withSeed(0x3c11, () => { quayGround(W); });
     withSeed(0x6d02, () => { shipGear(W); mooring(W); });
     withSeed(0x2f9e, () => { props(W); lightMasts(W); });
+    if (!QL_OLD) this.stats.quayLamps = quayLampPoles(W); // b_quaylamps (no rng)
     this.near = W.build(this.group, this.mats, { neon: { cast: false }, cone: { cast: false, receive: false }, pool: { cast: false, receive: false }, qpuddle: { cast: false }, mark: { cast: false } });
     this.dmeshes = this.near.filter((m) => m.name.startsWith('vcolD|'));
     for (const m of this.dmeshes) { const bs = m.geometry.boundingSphere; m.userData.ws = this.group.localToWorld(bs.center.clone()); m.userData.r = bs.radius; }
@@ -753,4 +755,65 @@ function nightLights(W, GL) {
     GL.add(S.u0 + S.L - 14, S.deck + 2.6 + 11.3, S.vC, 0.5, [1, 0.95, 0.85]); GL.add(S.u0 + 0.5, S.deck + 3, S.vC, 0.45, [1, 0.95, 0.85]);
     const f0 = S.u0 + 7; washV(pl, f0 + 3.5, top + 4, S.vC + 4.1, 4.5, 5, sc(CYAN, 0.35)); // funnel emblem glow spilling on the casing
     washV(pl, S.u0 + S.L * 0.5, 4.5, S.vC + S.B / 2 + 0.1, 30, 2.4, sc(WARM, 0.3)); } // hull name lit from the quay
+}
+
+// ============================================================ quay edge lamps ====
+// b_quaylamps: the 530 m quay apron was only lit under the working cranes (the yard masts' pools end ~10 m short of the edge, the
+// amber edge beacons are 3 m specks): 22:00 bottom-40 % ≈ 9–15 / 255, the coping, bollards and mooring lines read as one dark band.
+// New: 12 m quay flood poles on the edge (v = 0.85, seaward of the crane rail sill beams at v ≈ 2.1), ~32 m apart, kept clear of the
+// crane portals (|u − crane| ≥ 15, where the crane floods already light the quay) and of the mooring lines (≥ 4 m).
+// Each pole: concrete plinth with a hazard band, steel pole, crossarm with two LED flood heads aimed inland (cool white lenses),
+// a thin cyan / magenta ring at 3.2 m (the only cyber accent), junction box. Light = existing materials only: lens 'neon', glow
+// sprites (Glows), a faint 'cone' under each head, ground pools on the existing 'pool' material (clipped at the edge so nothing
+// floats over the water), a small accent pool at the plinth and a soft wash on the ship's side where a pole faces the hull.
+// No point lights, no new materials / programs. Poles in the near LOD (with the yard masts), light in the base layer.
+// One OBB collider per pole (plinth 0.5 m, tag 'pole'). ?oldquay → none of this (b_canopycol 8f945dc behaviour).
+export const QL_OLD = /[?&]oldquay\b/.test(PK_Q);
+const QL = { v: 0.85, H: 12, step: 32, gap: 24, crane: 15, line: 4, pool: [7.5, 15, 0.4], edge: [1.6, 5.5, 0.35], acc: 0.32, cone: 0.35, hull: 0.22 };
+{ const m = /[?&]qlk=([0-9.,]+)/.exec(PK_Q); if (m) { const v = m[1].split(',').map(Number); const set = (i, f) => { if (isFinite(v[i]) && i < v.length) f(v[i]); };
+  set(0, (x) => { QL.pool[2] = x; }); set(1, (x) => { QL.pool[1] = x; }); set(2, (x) => { QL.edge[2] = x; }); set(3, (x) => { QL.hull = x; }); set(4, (x) => { QL.cone = x; }); } }
+// ?qlk=poolGain,poolRadius,edgeGain,hullWash,cone (build time, for tuning)
+const QL_COOL = [0.8, 0.88, 1.0];
+let QL_POS = null;
+export function quayLampPos() {
+  if (QL_POS) return QL_POS; const S = SHIP; const out = [];
+  const lines = [S.u0 - 22, S.u0 + 8, S.u0 + 40, S.u0 + S.L - 40, S.u0 + S.L + 4, S.u0 + S.L + 24]; // mooring line ends on the quay (mooring())
+  const md = (u, p) => { const m = (((u - (QUAY.u0 + 6)) % p) + p) % p; return Math.min(m, p - m); };
+  const free = (u) => u > QUAY.u0 + 3 && u < QUAY.u1 - 3 && lines.every((q) => Math.abs(u - q) >= QL.line) && md(u, 24) > 2 && md(u, 12) > 1.2; // beacons / bollards
+  const slide = (u, ok) => { for (const d of [0, 2, -2, 3, -3, 4, -4, 6, -6, 8, -8]) if (free(u + d) && ok(u + d)) return u + d; return null; };
+  // 1) midway between two neighbouring working cranes (the gap their floods leave), 2) under each parked crane, between its sill
+  //    beams (they end 4 m from the centre and sit at v 2.1–3.9, the pole stands at v 0.85), 3) fill the rest ~32 m apart
+  const W = CRANES.filter((c) => c.work).map((c) => c.u).sort((a, b) => a - b);
+  for (let i = 0; i + 1 < W.length; i++) { const u = slide((W[i] + W[i + 1]) / 2, () => true); if (u !== null) out.push(u); }
+  for (const c of CRANES) if (c.up) { const u = slide(c.u, (x) => Math.abs(x - c.u) <= 3.5); if (u !== null) out.push(u); }
+  for (let u = QUAY.u0 + 10; u < QUAY.u1; u += QL.step) { const g = slide(u, (x) => CRANES.every((c) => Math.abs(x - c.u) >= QL.crane) && out.every((p) => Math.abs(p - x) > QL.gap)); if (g !== null) out.push(g); }
+  out.sort((a, b) => a - b); return (QL_POS = out.map((u, k) => ({ u, k })));
+}
+// ground pool clipped to v >= vmin (uv keeps the full-radius falloff)
+function poolClip(b, x, y, z, r, col, vmin) { const z0 = Math.max(vmin, z - r); const t = (z + r - z0) / (2 * r);
+  b.quad(new THREE.Vector3(x - r, y, z + r), new THREE.Vector3(x + r, y, z + r), new THREE.Vector3(x + r, y, z0), new THREE.Vector3(x - r, y, z0), [0, 0, 1, 0, 1, t, 0, t], {}, col); }
+function quayLampLights(W, GL) {
+  const S = SHIP, H = QL.H, v0 = QL.v;
+  for (const { u, k } of quayLampPos()) { const pl = W.b('pool', u, 0), cb = W.b('cone', u, 0); const acc = k % 2 ? MAG : CYAN;
+    for (const o of [-0.75, 0.75]) { GL.add(u + o, H - 0.42, v0 + 0.55, 0.55, sc(QL_COOL, 1.15)); cone(cb, u + o, H - 0.45, v0 + 0.7, H - 0.5, 4.2, sc(QL_COOL, QL.cone)); }
+    poolClip(pl, u, 0.065, QL.pool[0], QL.pool[1], sc(QL_COOL, QL.pool[2]), 0.08);          // apron pool, inland of the edge
+    poolClip(pl, u, 0.25, QL.edge[0], QL.edge[1], sc(QL_COOL, QL.edge[2]), 0.08);           // coping / bollard strip
+    pool(pl, u, 0.27, v0 + 0.35, 1.5, sc(acc, QL.acc));                                      // accent ring spill at the plinth
+    GL.add(u, 3.2, v0, 0.22, sc(acc, 0.7));
+    const t = (u - S.u0) / S.L; if (t > 0.12 && t < 0.88) { const w = hbAt(t, 0.75); washV(pl, u, S.deck * 0.55, S.vC + w + 0.07, 9, S.deck * 0.45, sc(QL_COOL, QL.hull)); } }
+}
+function quayLampPoles(W) {
+  const H = QL.H, v0 = QL.v, G = kg(); let n = 0;
+  for (const { u, k } of quayLampPos()) { const v = W.b('vcol', u, 0), nb = W.b('neon', u, 0), d = W.b('vcolD', u, 0); const acc = k % 2 ? MAG : CYAN;
+    box(v, u - 0.25, 0.0, v0 - 0.25, u + 0.25, 0.55, v0 + 0.25, {}, [0.36, 0.36, 0.37]);                         // plinth
+    for (let i = 0; i < 3; i++) box(v, u - 0.255, 0.12 + i * 0.14, v0 - 0.255, u + 0.255, 0.19 + i * 0.14, v0 + 0.255, {}, i % 2 ? [0.06, 0.06, 0.06] : [0.85, 0.62, 0.08]);
+    put(v, G.cyl8, u, 0.55 + (H - 0.55) / 2, v0, 0.13, H - 0.55, 0.13, STEEL); put(v, G.cyl8, u, 0.75, v0, 0.17, 0.4, 0.17, STEEL);   // pole + base flange
+    put(v, G.box, u, 1.35, v0 + 0.2, 0.28, 0.42, 0.14, [0.3, 0.32, 0.34]);                                         // junction box
+    put(nb, G.cyl8, u, 3.2, v0, 0.145, 0.09, 0.145, sc(acc, 0.55));                                                 // LED ring
+    box(v, u - 1.15, H - 0.12, v0 - 0.07, u + 1.15, H + 0.02, v0 + 0.07, {}, DARK);                                // crossarm
+    for (const o of [-0.75, 0.75]) { box(v, u + o - 0.3, H - 0.4, v0 + 0.15, u + o + 0.3, H - 0.1, v0 + 0.85, {}, [0.2, 0.21, 0.23]); // flood head
+      put(nb, G.box, u + o, H - 0.415, v0 + 0.52, 0.5, 0.03, 0.55, sc(QL_COOL, 1.4));                              // lens
+      put(d, G.box, u + o, H - 0.05, v0 + 0.5, 0.06, 0.1, 0.5, DARK); }                                             // bracket
+    n++; }
+  return n;
 }
