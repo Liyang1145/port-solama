@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Env, U } from './env.js';
 import { setCSM, buildingMaterial, roadMaterial, simpleMats, M } from './mats.js';
-import { buildCity } from './city.js';
+import { buildCity, LAYOUT } from './city.js';
 import { buildVegetation } from './veg.js';
 import { buildWater } from './water.js';
 import { buildPromenade } from './maps/gta/promenade.js';
@@ -30,7 +30,7 @@ import { rolledLights, precompile } from './loadfast.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
-import { OLD, cubeStepper, makeDRS, releaseCpuAttrs, releasedMB } from './perf.js';
+import { OLD, cubeStepper, cullSmall, makeDRS, releaseCpuAttrs, releasedMB } from './perf.js';
 import { prof, PROF, wrap, profRenderer, profPasses, setScope } from './prof.js'; // perf_debug1: ?prof frame profiler
 import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_verify: test-only ?shotfast (screenshot first frame)
 
@@ -139,17 +139,20 @@ async function load() {
   };
   // v4.0 street probe: a low cube capture near the camera (every ~2 s of game time, or on demand) -> car paint / glass / chrome
   // reflect the real street (palms, hotels, neon at night) instead of only the sky.
-  const sprobe = { rt: new THREE.WebGLCubeRenderTarget(SNAP ? 128 : 128, { type: THREE.HalfFloatType }), pm: probe.pm, tex: null, t: 99, pos: new THREE.Vector3(1e9, 0, 0) };
+  // perf_debug4 (?oldsprobe = old): one face drew up to 1877 calls / 9 M tris. Now: 64 px faces, meshes culled per face
+  // (cullSmall: > 380 m, < 0.03 rad, low flat ground/kerbs beyond 35 m, instanced sets of < 8 m props: furniture, palms, parked cars), a face every 2nd frame, refresh every 6 s (15 s if moved < 60 m).
+  const SPN = OLD.sprobe ? null : { D: 380, K: 0.03, flatY: LAYOUT.waterY + 1.4, flatNear: 35, instR: 8, every: 2, t0: 6, t1: 15, r: 60 };
+  const sprobe = { rt: new THREE.WebGLCubeRenderTarget(SPN ? 64 : 128, { type: THREE.HalfFloatType }), pm: probe.pm, tex: null, t: 99, pos: new THREE.Vector3(1e9, 0, 0), n: 0 };
   sprobe.cam = new THREE.CubeCamera(0.5, 900, sprobe.rt); scene.add(sprobe.cam);
   sprobe.step = OLD.probe ? null : cubeStepper(renderer, scene, sprobe.cam);
   sprobe.update = (force) => {
     if (Q.get('probe') === '0') return;
     if (sprobe.step && !force) { // perf_debug1: amortized (1 face / frame, PMREM on the 7th frame), at most every 3 s
       if (sprobe.pending) { sprobe.pending = false; const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0); return; }
-      if (sprobe.step.busy) { const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; let vis = null;
-        if (sprobe.step.step(() => { if (pl) { vis = pl.visible; pl.visible = false; } }, () => { if (pl) pl.visible = vis; })) sprobe.pending = true; return; }
+      if (sprobe.step.busy) { if (SPN && (++sprobe.n % SPN.every)) return; const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; let vis = null; const hid = [];
+        if (sprobe.step.step(() => { if (pl) { vis = pl.visible; pl.visible = false; } if (SPN) cullSmall(scene, sprobe.cam.position, SPN, hid); }, () => { if (pl) pl.visible = vis; for (const o of hid) o.visible = true; })) sprobe.pending = true; return; }
       if (probe.step && probe.step.busy) { if (probe.step.step()) probe.finish(); return; } // the city probe takes the same slot
-      const p = camera.position; if (sprobe.t < 3 || (sprobe.t < 8 && sprobe.pos.distanceTo(p) < 40)) return;
+      const p = camera.position; if (SPN ? (sprobe.t < SPN.t0 || (sprobe.t < SPN.t1 && sprobe.pos.distanceTo(p) < SPN.r)) : (sprobe.t < 3 || (sprobe.t < 8 && sprobe.pos.distanceTo(p) < 40))) return;
       sprobe.t = 0; sprobe.pos.copy(p); sprobe.cam.position.set(p.x, 2.2, p.z); sprobe.step.start(); return;
     }
     const p = camera.position; if (!force && sprobe.t < 2 && sprobe.pos.distanceTo(p) < 25) return;

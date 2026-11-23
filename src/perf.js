@@ -15,10 +15,25 @@
 import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim') };
+export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim'), sprobe: Q.has('oldsprobe') };
 // ?oldmirror: characters (skinned, the costliest meshes) were drawn into the water mirror and both reflection probes too;
 // now they live on CHAR_LAYER only, which the main camera and the shadow cameras see
 export const CHAR_LAYER = 3;
+
+// perf_debug4: hide meshes a low-res capture can't resolve (same idea as the water mirror cull). Returns the hidden list; the
+// caller restores visible = true. Kept: sky / frustumCulled = false planes, skinned meshes. Hidden: farther than D (bounding-sphere
+// surface), subtending < K rad, or low flat stuff (top below flatY) farther than flatNear; with instR, any InstancedMesh whose
+// single instance is smaller than instR m (its whole-set sphere spans the city, so the distance test can't cull it).
+const _bs = new THREE.Sphere(), _cp = new THREE.Vector3();
+export function cullSmall(scene, camPos, o_, hid) { const { D, K, flatY, flatNear } = o_; _cp.copy(camPos);
+  scene.traverseVisible((o) => { if (!o.isMesh || o.isSkinnedMesh) return;
+    if (o_.instR && o.isInstancedMesh && o.geometry) { const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere(); // city-wide instanced props: a whole-set sphere never culls,
+      if (g.boundingSphere.radius < o_.instR) { o.visible = false; hid.push(o); return; } } // so drop small-instance sets (street furniture, plants, kerb clutter) outright
+    if (o.frustumCulled === false) return;
+    let bs; if (o.isInstancedMesh) { if (!o.boundingSphere) o.computeBoundingSphere(); bs = o.boundingSphere; } else { const g = o.geometry; if (!g) return; if (!g.boundingSphere) g.computeBoundingSphere(); bs = g.boundingSphere; }
+    if (!bs || !Number.isFinite(bs.radius)) return; _bs.copy(bs).applyMatrix4(o.matrixWorld); const d = _bs.center.distanceTo(_cp) - _bs.radius;
+    if (d > D || _bs.radius < d * K || (d > flatNear && _bs.center.y + _bs.radius < flatY)) { o.visible = false; hid.push(o); } });
+  return hid; }
 
 // ---- amortized cube capture: start(pos) then step() once per frame; returns true on the frame the cube is complete
 export function cubeStepper(renderer, scene, cubeCam) {
