@@ -33,6 +33,8 @@ function makeLods(geo) {
   LODG.set(geo, out);
 }
 import { prep } from './mats.js';
+import { U } from './env.js';
+import { CYBER } from './mapsel.js';
 import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
 const PROTOS = {};
@@ -51,6 +53,10 @@ const PROTOS = {};
 // What still splits: face meshes with morph targets vs without (LOD1/2 + clothes), and shadow depth (back / double side).
 // ?oldnpcmat restores the old per-combination materials.
 export const OLDNPC = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldnpcmat');
+// people3_port: the people3 per-role look (skin / hair / fabric shading, per-character costumes, sunglasses) rides on the same single
+// npc program: role and costume are uniforms (uLook / uRole / uCost ...), no new shader programs. ?oldpeople3 = the r6.4 look
+// (b_corenpc tint only, old dress()); ?oldnpcmat implies it (the look needs the shared npc program).
+export const OLDP3 = OLDNPC || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldpeople3'));
 const TINT_GLSL = `
 uniform float uHue, uVal, uSat, uSkin, uTint, uOpq;
 vec3 rgb2hsv(vec3 c){ vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g)); vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10; return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x); }
@@ -59,6 +65,108 @@ const TINT_APPLY = `{ vec3 hsv = rgb2hsv(diffuseColor.rgb);
   float skin = uSkin * smoothstep(0.13, 0.08, hsv.x) * smoothstep(0.12, 0.25, hsv.y) * smoothstep(0.7, 0.5, hsv.y) * smoothstep(0.15, 0.3, hsv.z);
   vec3 t = hsv2rgb(vec3(fract(hsv.x + uHue), clamp(hsv.y * uSat, 0.0, 1.0), clamp(hsv.z * uVal, 0.0, 1.0)));
   diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`;
+
+const LOOK_GLSL = `
+uniform vec3 uLSun; uniform float uLook, uRole, uAniso, uGarm; uniform vec4 uBN, uCost, uCol1, uCol2, uGlow; uniform vec3 uSkinC; varying vec3 vBP; varying vec3 vBN;
+float lh3(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float lnoise(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(lh3(i), lh3(i + vec3(1,0,0)), f.x), mix(lh3(i + vec3(0,1,0)), lh3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(lh3(i + vec3(0,0,1)), lh3(i + vec3(1,0,1)), f.x), mix(lh3(i + vec3(0,1,1)), lh3(i + vec3(1,1,1)), f.x), f.y), f.z); }
+float band(float v, float c, float w){ float fw = fwidth(v) * 1.2 + 1e-5; return 1.0 - smoothstep(w, w + fw, abs(v - c)); }
+float lum3(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// costume region masks in bind space: s = bare skin, b = bikini, k = sheer cover-up, top = upper-body fabric
+void costume(out float s, out float b, out float k, out float top){
+  float h = vBP.y, ax = abs(vBP.x), tw = uBN.w, front = smoothstep(-0.05, 0.35, vBN.z);
+  top = smoothstep(0.565, 0.6, h);
+  s = 0.0; b = 0.0; k = 0.0;
+  if (uGarm > 0.5) return;
+  float armX = mix(tw + 0.012, 0.074, smoothstep(0.715, 0.785, h)); float arm = smoothstep(armX, armX + 0.008, ax) * smoothstep(0.43, 0.47, h);
+  if (uCost.x > 0.5) {
+    float scoop = front * smoothstep(0.0, 0.006, h - (0.765 + 0.55 * ax)) * step(ax, 0.07);
+    float neck = smoothstep(0.80, 0.81, h);
+    s = max(s, max(arm, max(scoop, neck)) * top);
+  }
+  if (uCost.y > 0.0) s = max(s, 1.0 - smoothstep(uCost.y - 0.004, uCost.y + 0.004, h));
+  if (uCost.z > 0.5) {
+    float cup = smoothstep(0.688, 0.695, h) * (1.0 - smoothstep(0.742, 0.75, h)) * (1.0 - arm);
+    float strap = band(ax, 0.052, 0.0055) * smoothstep(0.74, 0.75, h) * (1.0 - smoothstep(0.815, 0.825, h));
+    b = max(cup, strap * front);
+    if (uCost.z < 1.5) { k = top * (1.0 - b); b *= top; }
+  }
+}`;
+// role: 0 skin, 1 skin details, 2 hair, 4 cloth (3 = eyes / teeth: look off). One branch per role, all dynamic (uniform-driven).
+const LOOK_MAP = `float cS = 0.0, cB = 0.0, cK = 0.0, cTop = 0.0, skinW = 0.0; float lkR = uLook > 0.5 ? uRole : -1.0;
+if (lkR < -0.5) { if (uTint > 0.5) TINT_APPLY_HERE }
+else {
+  if (lkR > 3.5 || lkR < 0.5) costume(cS, cB, cK, cTop);
+  if (lkR < 0.5) { cS = 0.0; cK = 0.0; if (uCost.z < 1.5) cB = 0.0; }
+  vec3 hsv = rgb2hsv(diffuseColor.rgb);
+  diffuseColor.rgb = hsv2rgb(vec3(fract(hsv.x + uHue), clamp(hsv.y * uSat, 0.0, 1.0), clamp(hsv.z * uVal, 0.0, 1.0)));
+  float det = clamp(mix(1.0, lum3(diffuseColor.rgb) * 2.4, 0.35), 0.72, 1.18);
+  if (abs(lkR - 2.0) < 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uCol1.rgb * clamp(lum3(diffuseColor.rgb) * 4.0, 0.35, 1.6), uCol1.a);
+  if (lkR > 3.5) {
+    float gm = 1.0 - step(0.5, uGarm);
+    diffuseColor.rgb = mix(diffuseColor.rgb, uCol1.rgb * det, uCol1.a * cTop * gm);
+    diffuseColor.rgb = mix(diffuseColor.rgb, uCol2.rgb * det, uCol2.a * (1.0 - cTop) * (1.0 - cS) * gm);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(uSkinC, uCol2.rgb, 0.42) * mix(1.0, det, 0.5), cK);
+    if (uCost.w > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, uCol1.rgb * mix(1.0, det, 0.4), cTop * gm);
+  }
+  diffuseColor.rgb = mix(diffuseColor.rgb, uSkinC * (0.93 + 0.1 * lnoise(vBP * 55.0) + 0.04 * lnoise(vBP * 260.0)), cS);
+  diffuseColor.rgb = mix(diffuseColor.rgb, uCol1.rgb * mix(1.0, det, lkR < 0.5 ? 0.0 : 0.5), cB * step(0.5, uCost.z));
+  skinW = lkR < 0.5 ? 1.0 - cB : lkR < 1.5 ? 1.0 : cS;
+}`;
+const LOOK_ROUGH = `float nearF = 1.0 - smoothstep(2.5, 9.0, length(vViewPosition));
+if (lkR > -0.5) { float pn = lnoise(vBP * 900.0), bn = lnoise(vBP * 70.0);
+  float tz = (1.0 - smoothstep(0.0, 0.03, abs(vBP.x))) * smoothstep(0.85, 0.87, vBP.y) * step(0.0, vBN.z);
+  float rs = clamp(0.5 + 0.12 * (bn - 0.5) + 0.1 * (pn - 0.5) * nearF - 0.14 * tz, 0.3, 0.75);
+  roughnessFactor = mix(roughnessFactor, rs, skinW);
+  if (lkR > 3.5) { roughnessFactor = mix(roughnessFactor, 0.17 + 0.12 * bn, step(0.5, uCost.w) * step(uGarm, 0.5) * cTop * (1.0 - cS)); roughnessFactor = mix(roughnessFactor, 0.55, cB); }
+  if (abs(lkR - 2.0) < 0.5) roughnessFactor = max(roughnessFactor, 0.55);
+}`;
+const LOOK_NORMAL = `if (lkR > 3.5) normal = normalize(mix(normal, nonPerturbedNormal, cS * 0.8));
+if (skinW > 0.01 && nearF > 0.0) { vec3 q = vBP * 1400.0; float e = 0.6;
+  vec3 g = vec3(lnoise(q + vec3(e,0,0)) - lnoise(q - vec3(e,0,0)), lnoise(q + vec3(0,e,0)) - lnoise(q - vec3(0,e,0)), lnoise(q + vec3(0,0,e)) - lnoise(q - vec3(0,0,e)));
+  normal = normalize(normal - (g - normal * dot(g, normal)) * 0.08 * nearF * skinW); }`;
+const LOOK_EMIS = `if (lkR > 3.5 && uGlow.w > 0.0) { float h = vBP.y, ax = abs(vBP.x), front = smoothstep(0.1, 0.4, vBN.z);
+  float armX = mix(uBN.w + 0.012, 0.074, smoothstep(0.715, 0.785, h)); float arm = smoothstep(armX, armX + 0.008, ax) * smoothstep(0.43, 0.47, h);
+  float tr = 0.0;
+  if (uGarm < 0.5) {
+    tr += band(vBP.x, 0.0, 0.0028) * front * smoothstep(0.56, 0.58, h) * (1.0 - smoothstep(0.79, 0.8, h)) * (1.0 - arm);
+    tr += band(h, 0.578, 0.0032) * (1.0 - arm);
+    tr += band(h, 0.792, 0.0028) * (1.0 - arm) * step(ax, 0.09);
+    tr += band(h, 0.585, 0.004) * arm;
+    tr += band(h, 0.70, 0.0026) * arm;
+    tr += band(h, 0.30, 0.0028) * (1.0 - smoothstep(0.56, 0.58, h));
+  } else if (uGarm < 1.5) tr += 1.0 - smoothstep(0.012, 0.016, h);
+  totalEmissiveRadiance += uGlow.rgb * uGlow.w * clamp(tr, 0.0, 1.0); }`;
+const LOOK_LIGHT = `if (lkR > -0.5) {
+  vec3 Ld = normalize((viewMatrix * vec4(uLSun, 0.0)).xyz); vec3 V = normalize(vViewPosition); float nl = dot(normal, Ld);
+  vec3 sunC = vec3(0.0);
+  #if NUM_DIR_LIGHTS > 0
+    sunC = directionalLights[0].color;
+  #endif
+  if (skinW > 0.01) {
+    float wrap = max(0.0, (nl + 0.4) / 1.4) - max(0.0, nl);
+    vec3 scat = diffuseColor.rgb * vec3(0.9, 0.42, 0.32);
+    reflectedLight.directDiffuse += wrap * scat * sunC * 0.22 * skinW;
+    reflectedLight.directDiffuse *= mix(vec3(1.0), vec3(1.0, 0.97, 0.95), skinW * smoothstep(0.2, 0.9, nl));
+    reflectedLight.indirectDiffuse *= mix(vec3(1.0), vec3(1.03, 0.99, 0.97), skinW);
+    float rim = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 3.0);
+    reflectedLight.directDiffuse += rim * scat * sunC * max(0.0, -nl + 0.2) * 0.12 * skinW;
+  }
+  #ifdef USE_MAP
+  if (uAniso > 0.5) { vec3 dp1 = dFdx(-vViewPosition), dp2 = dFdy(-vViewPosition); vec2 du1 = dFdx(vMapUv), du2 = dFdy(vMapUv);
+    vec3 T = -dp1 * du2.x + dp2 * du1.x; T = T - normal * dot(T, normal); float tl = length(T);
+    if (tl > 1e-6) { T /= tl; vec3 Hh = normalize(Ld + V); float sh = (lnoise(vec3(vMapUv * vec2(160.0, 8.0), 0.0)) - 0.5) * 0.35;
+      vec3 T1 = normalize(T + normal * (0.08 + sh)), T2 = normalize(T - normal * (0.12 - sh));
+      float d1 = dot(T1, Hh), d2 = dot(T2, Hh); float s1 = pow(sqrt(max(0.0, 1.0 - d1 * d1)), 110.0), s2 = pow(sqrt(max(0.0, 1.0 - d2 * d2)), 26.0);
+      float vis = smoothstep(-0.2, 0.4, nl);
+      reflectedLight.directSpecular += sunC * vis * (s1 * 0.05 * mix(vec3(1.0), diffuseColor.rgb * 3.0, 0.4) + s2 * 0.1 * diffuseColor.rgb) * (1.0 - nearF * 0.3);
+      float sv = dot(T1, V); reflectedLight.indirectSpecular += reflectedLight.indirectDiffuse * pow(sqrt(max(0.0, 1.0 - sv * sv)), 40.0) * 0.12; } }
+  #endif
+  if (lkR > 3.5) { float rimc = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), 4.0) * (1.0 - cS) * (1.0 - step(0.5, uCost.w) * step(uGarm, 0.5) * cTop);
+    reflectedLight.indirectDiffuse += rimc * diffuseColor.rgb * (reflectedLight.indirectDiffuse + sunC * 0.15) * 0.6; }
+}`;
 
 function hueMat(src, key) {
   if (!OLDNPC && src.userData.nu) { // b_corenpc: same program, tint switched on by uniform
@@ -108,12 +216,18 @@ function npcMat(m) {
   const dm = new THREE.MeshDepthMaterial(); dm.onBeforeCompile = (s, r) => npcCullWrap(r); dm.customProgramCacheKey = NPC_DKEY; m.__npcDepth = dm;
   if (m.side !== THREE.DoubleSide) { m.side = THREE.DoubleSide; m.userData.npcCull = 1; dm.userData.npcCull = 2; npcMatStats.cull++; }
   m.shadowSide = THREE.DoubleSide;
-  m.userData.nu = { uTint: { value: 0 }, uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: 0 }, uOpq: { value: opq ? 1 : 0 } };
+  m.userData.nu = { uTint: { value: 0 }, uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: 0 }, uOpq: { value: opq ? 1 : 0 }, ...lookUniforms() };
   prep(m, 'npc'); const base = m.onBeforeCompile;
   m.onBeforeCompile = function (s, r) {
-    base.call(this, s, r); npcCullWrap(r); Object.assign(s.uniforms, this.userData.nu);
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>' + TINT_GLSL)
-      .replace('#include <map_fragment>', '#include <map_fragment>\nif (uTint > 0.5) ' + TINT_APPLY)
+    base.call(this, s, r); npcCullWrap(r); Object.assign(s.uniforms, this.userData.nu); s.uniforms.uLSun = U.uSunDir;
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 uBN; varying vec3 vBP; varying vec3 vBN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBP = vec3((position.x - uBN.z) * uBN.y, (position.y - uBN.x) * uBN.y, position.z * uBN.y); vBN = normalize(vec3(normal));');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>' + TINT_GLSL + LOOK_GLSL)
+      .replace('#include <map_fragment>', '#include <map_fragment>\n' + LOOK_MAP.replace('TINT_APPLY_HERE', TINT_APPLY))
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n' + LOOK_ROUGH)
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + LOOK_NORMAL)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + LOOK_EMIS)
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n' + LOOK_LIGHT)
       .replace('#include <alphatest_fragment>', '#ifdef USE_ALPHATEST\nif ( alphaTest > 0.0015 && diffuseColor.a < alphaTest ) discard;\n#endif')
       .replace('#include <opaque_fragment>', 'if (uOpq > 0.5) diffuseColor.a = 1.0;\n#include <opaque_fragment>');
   };
@@ -122,7 +236,121 @@ function npcMat(m) {
 // Material.clone() does not carry onBeforeCompile / customProgramCacheKey: a plain clone (the tint, world.js tintPlayer) would fall
 // back to a stock program. The hook reads its uniforms from this.userData.nu (deep-copied by clone), so sharing the function is safe.
 const NPC_KEY = () => 'npc', NPC_DKEY = () => 'npcd';
-function npcClone() { const c = THREE.MeshStandardMaterial.prototype.clone.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = NPC_KEY; c.clone = npcClone; return c; }
+function npcClone() { const c = THREE.MeshStandardMaterial.prototype.clone.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = NPC_KEY; c.clone = npcClone;
+  c.userData.nu = THREE.UniformsUtils.clone(this.userData.nu); c.__npcDepth = this.__npcDepth; return c; } // people3_port: vector uniforms survive (userData is JSON-copied)
+
+// ---------------------------------------------------------------- people3 look (ported onto the npc program) ----
+// Skin (wrap-lit subsurface approximation, pore / roughness breakup, T-zone sheen), hair (two-lobe Kajiya-Kay highlight along the
+// strand direction from the UV gradient), fabric (sheen rim) and per-character costumes painted in BIND space (pre-skinning position,
+// normalised to body height): map A 索拉纳港 = Florida waterfront (tank tops, shorts, bikini + sheer cover-up, sunglasses), map B 霓港 =
+// street techwear (glossy rain shells, emissive piping / zipper / cuffs / soles, LED visor glasses, dyed hair). Everything is a uniform
+// on the shared npc program; sunglasses are skinned meshes on the head bone with npc materials (same program as the clothes).
+// Dropped from people3: alphaToCoverage on hair cards (a program define).
+const ROLE = (n) => /^(Skin|Mouth)$/.test(n) ? 'skin' : /^Skin details/.test(n) ? 'detail' : /^(Hair|Beard|Buzz|Eyebrows|Eyelashes)/.test(n) ? 'hair'
+  : /^(Eyes|Teeth|Tongue|Palette)/.test(n) ? 'eye' : 'cloth';
+const ROLE_ID = { skin: 0, detail: 1, hair: 2, eye: 3, cloth: 4 };
+const GARM_FOOT = /shoe|sole|heel|loafer|oxford|sneaker|slide|flip|boot/i, GARM_HAT = /hat|cap\b|^cap/i, GARM_GEAR = /belt|pouch/i;
+function lookUniforms() {
+  return {
+    uLook: { value: 0 }, uRole: { value: 3 }, uAniso: { value: 0 }, uGarm: { value: 0 }, // uGarm: 0 garment, 1 footwear, 2 hat / gear
+    uBN: { value: new THREE.Vector4(-1, 0.5, 0, 0.1) }, // yFoot, 1/H, x centre, torso half width (all /H)
+    uSkinC: { value: new THREE.Vector3(0.5, 0.33, 0.25) },
+    uCost: { value: new THREE.Vector4() }, // x tank top, y shorts cut height (0 = none), z 1 bikini + cover-up / 2 bikini top on skin, w rain shell
+    uCol1: { value: new THREE.Vector4() }, uCol2: { value: new THREE.Vector4() }, uGlow: { value: new THREE.Vector4() },
+  };
+}
+function bodyFrame(P) {
+  let mn = 1e9, mx = -1e9, xs = 0, xn = 0; const V = []; const v = new THREE.Vector3();
+  P.scene.traverse((o) => {
+    if (!o.isMesh || Array.isArray(o.material) || ROLE(o.material.name) === 'eye') return; const a = o.geometry.attributes.position;
+    for (let i = 0; i < a.count; i++) { v.fromBufferAttribute(a, i); if (!isFinite(v.y)) continue; mn = Math.min(mn, v.y); mx = Math.max(mx, v.y); xs += v.x; xn++; if ((i & 1) === 0) V.push(v.x, v.y); }
+  });
+  const H = Math.max(1e-3, mx - mn), xc = xn ? xs / xn : 0;
+  const bins = new Uint32Array(80);
+  for (let i = 0; i < V.length; i += 2) { const h = (V[i + 1] - mn) / H; if (h > 0.62 && h < 0.69) { const b = Math.floor(Math.abs(V[i] - xc) / H / 0.005); if (b < 80) bins[b]++; } }
+  let tw = 0.1; for (let b = 10; b < 40; b++) if (!bins[b] && !bins[b + 1]) { tw = b * 0.005; break; }
+  P.bn = new THREE.Vector4(mn, 1 / H, xc, tw);
+}
+function skinColour(P) {
+  let mapImg = null; P.scene.traverse((o) => { if (!mapImg && o.isMesh && o.material.name === 'Skin' && o.material.map) mapImg = o.material.map.image; });
+  P.skinC = new THREE.Vector3(0.45, 0.3, 0.22);
+  if (!mapImg || typeof document === 'undefined' || !(mapImg.width > 1)) return;
+  try {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 32; const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(mapImg, 0, 0, 32, 32); const d = cx.getImageData(0, 0, 32, 32).data; let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; if (d[i + 3] < 200 || l < 30 || l > 245 || d[i] < d[i + 2]) continue; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    if (n > 20) { const c = new THREE.Color().setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace); P.skinC.set(c.r, c.g, c.b); }
+  } catch (e) { /* tainted / unsupported: keep the default */ }
+}
+// sunglasses / LED visor: lens + frame pieces in head-bone space (calibrated on the eyes), baked into skinned meshes weighted 100 % to the
+// head bone so they take the npc (no-morph) program; added hidden to each proto, kept only on characters dress() gives glasses to
+function glassesParts() {
+  const lensP = [], frameP = [];
+  for (const sx of [-1, 1]) {
+    const lens = new THREE.CircleGeometry(0.0265, 18); lens.scale(1, 0.78, 1); lens.translate(sx * 0.0325, 0, 0.018); lensP.push(lens);
+    const rim = new THREE.TorusGeometry(0.0268, 0.0024, 4, 18); rim.scale(1, 0.8, 1); rim.translate(sx * 0.0325, 0, 0.018); frameP.push(rim);
+    const arm = new THREE.BoxGeometry(0.004, 0.006, 0.105); arm.translate(sx * 0.066, 0.004, -0.034); frameP.push(arm);
+  }
+  const br = new THREE.BoxGeometry(0.014, 0.004, 0.004); br.translate(0, 0.008, 0.019); frameP.push(br);
+  return [lensP, frameP];
+}
+function glassesMeshes(P) {
+  P.scene.updateMatrixWorld(true); let eyes = null; P.scene.traverse((o) => { if (!eyes && o.isSkinnedMesh && o.material.name === 'Eyes') eyes = o; });
+  if (!eyes) return; const sk = eyes.skeleton; const hi = sk.bones.findIndex((b) => b.name === 'Head'); if (hi < 0) return; const head = sk.bones[hi];
+  const ec = eyes.geometry.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(eyes.matrixWorld);
+  const o = head.worldToLocal(ec.clone()); const ax = (d) => head.worldToLocal(ec.clone().add(d)).sub(o);
+  const glM = new THREE.Matrix4().makeBasis(ax(new THREE.Vector3(1, 0, 0)), ax(new THREE.Vector3(0, 1, 0)), ax(new THREE.Vector3(0, 0, 1))).setPosition(o);
+  // skinned position p with weight 1 on the head lands at world = Mt * p (Mt = matrixWorld * bindMatrixInverse * head.matrixWorld * boneInverse * bindMatrix)
+  const Mt = new THREE.Matrix4().copy(eyes.matrixWorld).multiply(eyes.bindMatrixInverse).multiply(head.matrixWorld).multiply(sk.boneInverses[hi]).multiply(eyes.bindMatrix);
+  const X = Mt.clone().invert().multiply(head.matrixWorld).multiply(glM); if (!X.elements.every(isFinite)) return;
+  const out = [];
+  glassesParts().forEach((parts, k) => {
+    const gs = parts.map((g) => { const n = g.index ? g.toNonIndexed() : g; for (const a of Object.keys(n.attributes)) if (!['position', 'normal', 'uv'].includes(a)) n.deleteAttribute(a); return n; });
+    const pos = [], nor = [], uv = []; gs.forEach((g) => { pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array); uv.push(...g.attributes.uv.array); });
+    const G = new THREE.BufferGeometry(); G.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); G.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); G.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    G.applyMatrix4(X); const n = pos.length / 3; const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4); for (let i = 0; i < n; i++) { si[i * 4] = hi; sw[i * 4] = 1; }
+    G.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4)); G.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4)); G.computeBoundingSphere();
+    for (const a in eyes.geometry.attributes) if (!G.attributes[a]) { const s0 = eyes.geometry.attributes[a]; G.setAttribute(a, new THREE.BufferAttribute(new s0.array.constructor(n * s0.itemSize), s0.itemSize, s0.normalized)); } // same attribute set as the cast (same program)
+    const m = new THREE.SkinnedMesh(G, glassesMat(k ? 'black' : 'lensdark', k)); m.name = k ? 'Sunglasses frame' : 'Sunglasses lens'; m.userData.glass = k + 1;
+    m.bind(sk, eyes.bindMatrix); m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false; m.visible = false; eyes.parent.add(m); out.push(m);
+  });
+  // bind() copies the mesh's own world matrix as bindMatrix in 'attached' mode unless given; keep the eyes' bind space exactly
+  for (const m of out) { m.position.copy(eyes.position); m.quaternion.copy(eyes.quaternion); m.scale.copy(eyes.scale); m.updateMatrixWorld(true); m.bindMatrix.copy(eyes.bindMatrix); m.bindMatrixInverse.copy(eyes.bindMatrixInverse); }
+}
+const GL_MAT = {};
+function glassesMat(kind, frame) {
+  const key = kind + '|' + frame; if (GL_MAT[key]) return GL_MAT[key];
+  const m = frame
+    ? new THREE.MeshStandardMaterial({ name: 'Sunglasses frame', color: kind === 'tort' ? 0x3a2416 : kind === 'gold' ? 0xb08a4a : 0x111114, roughness: kind === 'gold' ? 0.3 : 0.35, metalness: kind === 'gold' ? 1 : 0 })
+    : new THREE.MeshStandardMaterial({ name: 'Sunglasses lens', color: /^led/.test(kind) ? 0x05060a : kind === 'gold' ? 0x2a3a2a : 0x0b0d10, roughness: 0.06, metalness: 0.5, side: THREE.DoubleSide });
+  if (/^led/.test(kind) && !frame) { m.emissive.setHex(+kind.slice(3) || 0x22e6ff); m.emissiveIntensity = 2.2; }
+  npcMat(m); return (GL_MAT[key] = m);
+}
+const SRGB = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
+const PAL = {
+  aTop: [0xf2efe8, 0xe9e4d8, 0xd9665a, 0x4fb3b0, 0x7fb4d9, 0xa7a9ac, 0x1d1f22, 0xe8b84a, 0x2f5d8a, 0xf0a7a0, 0x6f8f5e],
+  aBottom: [0xc8b48c, 0x4a6a92, 0x2f3e5a, 0xece8de, 0x6d7253, 0xd88a6a, 0x8aa4b8, 0x3a3a3c],
+  bikini: [0xc8262d, 0x111111, 0x1f9fa3, 0xe36a8a, 0xf0c03a, 0x2b4f9e, 0xffffff],
+  cover: [0xfaf7f0, 0xf3e6d0, 0xf6d2d4, 0xd2ecea, 0xe8e2f2],
+  shell: [0x0d0f12, 0x1b1f24, 0x123a3e, 0x3a1218, 0x2a2d33, 0x6a5a1a, 0x1a1530],
+  bBottom: [0x0c0d10, 0x1a1c20, 0x23262c, 0x2b2620],
+  glow: [0x22e6ff, 0xff2bd6, 0xffb020, 0x7dff4a, 0xff3355, 0x9a6bff],
+  dye: [0xd8dde2, 0x2ab3b3, 0xb3307a, 0x6a52c8, 0xe0e0e0],
+};
+// per proto: role uniforms on the shared proto materials (hero / unstyled peds get the skin / hair / fabric shading too)
+function lookProto(P) {
+  bodyFrame(P); skinColour(P); P.hasTop = false;
+  P.scene.traverse((o) => {
+    if (!o.isMesh || Array.isArray(o.material) || !o.material.userData.nu) return; const m = o.material, n = m.name, r = ROLE(n); if (r === 'eye') return;
+    if (r === 'cloth' && !GARM_FOOT.test(n) && !GARM_HAT.test(n) && !GARM_GEAR.test(n)) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); if ((o.geometry.boundingBox.max.y - P.bn.x) * P.bn.y > 0.66) P.hasTop = true; }
+    if (m.userData.role) return; m.userData.role = r; const u = m.userData.nu;
+    u.uLook.value = 1; u.uRole.value = ROLE_ID[r]; u.uAniso.value = r === 'hair' && /^Hair/.test(n) ? 1 : 0; u.uBN.value.copy(P.bn); u.uSkinC.value.copy(P.skinC);
+    if (r === 'cloth') u.uGarm.value = GARM_FOOT.test(n) ? 1 : GARM_HAT.test(n) || GARM_GEAR.test(n) ? 2 : 0;
+    if (r === 'skin') { m.roughness = 0.62; m.metalness = 0; }
+    if (r === 'cloth' && !/leather|loafer|oxford|heel|belt/i.test(n)) { m.roughness = Math.max(m.roughness, 0.82); m.metalness = 0; }
+  });
+  if (!P.cop) glassesMeshes(P);
+}
 
 // Cast: MakeHuman-based realistic people (CC0 bodies, CMU mocap clips) exported with ara3d at medium detail; each GLB carries
 // its own retargeted clip set (r6.2: 20 clips — locomotion in 4 directions, idle variations, swim, jump, hit, two deaths, aim).
@@ -199,6 +427,7 @@ export function prepareCharacters(G) {
     clips.aimU = upper(clips.aim, 'aimUpper'); clips.raimU = upper(clips.raim || clips.aim, 'rifleUpper');
     const C = CAST[key]; const P = PROTOS[key] = { scene: g.scene, scale: C.hT && C.h ? C.hT / C.h : 1, sex: C.sex, cop: !!C.cop, clips };
     P.cal = calibrate(P);
+    if (!OLDP3) lookProto(P); // people3_port
   }
 }
 const pickKind = (kind, opt) => {
@@ -234,6 +463,7 @@ export class Character {
     shareSkeleton(this.model); // r6.2: one Skeleton (one bone texture upload / matrix pass) per character instead of one per sub-mesh
     this.root = new THREE.Group(); this.root.add(this.model); scene.add(this.root); this.scene = scene;
     if (!opt.player && !opt.player2) this.dress(kind);
+    { const gl = []; this.model.traverse((o) => { if (o.userData.glass && !this.glassKind) gl.push(o); }); for (const o of gl) o.parent.remove(o); } // people3_port: only worn glasses stay
     this.mixer = new THREE.AnimationMixer(this.model);
     this.A = {};
     for (const k of [...LOOPED, 'jland', 'hitF', 'hitB']) {
@@ -260,10 +490,57 @@ export class Character {
     this.root.scale.setScalar(opt.player ? 1 : rand(0.96, 1.04));
     this.lod = 0; this.lodAcc = 0; this.lodMeshes = [];
     this.model.traverse((o) => { if (o.isMesh && o.material.__npcDepth) o.customDepthMaterial = o.material.__npcDepth; }); // b_corenpc (dress() keeps the map)
-    this.model.traverse((o) => { if (o.isMesh) this.lodMeshes.push({ m: o, g: LODG.get(o.geometry), small: /Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name), cast: o.castShadow }); });
+    this.model.traverse((o) => { if (o.isMesh) this.lodMeshes.push({ m: o, g: LODG.get(o.geometry), small: !!o.userData.glass || /Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name), cast: o.castShadow }); });
   }
-  // wardrobe variety: clothing hue / value shifts (never skin), natural hair shades, and a range of skin tones
+  // wardrobe (people3_port): per-character look on top of the role uniforms. Tint shifts as before (realistic fabric, natural hair,
+  // skin-tone range) plus a map style: A Florida waterfront (tank tops, shorts, bikini + sheer cover-up, sunglasses), B street techwear
+  // (glossy rain shells, emissive trims, LED visors, dyed hair). Cops keep their uniforms (skin / hair only). ?oldpeople3: dressOld()
   dress(kind) {
+    if (OLDP3) return this.dressOld(kind);
+    const P = this.P, cop = kind === 'cop' || P.cop, fem = P.sex === 'f';
+    const cloth = !cop && rng() < 0.75 ? pick([[rand(-0.5, 0.5), rand(0.55, 0.95), rand(0.75, 1.08)], [0, rand(0.15, 0.5), rand(0.95, 1.25)], [rand(-0.08, 0.08), rand(0.8, 1.05), rand(0.45, 0.75)]]) : null;
+    const hair = rng() < 0.7 ? pick([[0, 0.9, 0.35], [0, 1, 0.55], [0.01, 1.05, 0.8], [0.02, 0.8, 1.25], [0, 0.3, 0.9]]) : null;
+    const tone = rng() < 0.6 ? [rand(-0.012, 0.008), rand(1.0, 1.15), pick([rand(0.5, 0.65), rand(0.68, 0.85), rand(0.86, 1.04)])] : null;
+    const L = { cost: [0, 0, 0, 0], c1: [0, 0, 0, 0], c2: [0, 0, 0, 0], glow: [0, 0, 0, 0], dye: [0, 0, 0, 0], skinTop: null, glasses: null };
+    const col = (list, a = 1) => [...SRGB(pick(list)), a];
+    if (!cop && !CYBER) {
+      if (fem && rng() < 0.42) { L.cost[2] = 1; L.c1 = col(PAL.bikini); L.c2 = col(PAL.cover); L.cost[1] = rng() < 0.55 ? rand(0.37, 0.43) : 0; }
+      else {
+        if (rng() < (fem ? 0.4 : 0.5)) { L.cost[0] = 1; L.c1 = col(PAL.aTop); } else if (rng() < 0.5) L.c1 = col(PAL.aTop, 0.85);
+        if (rng() < 0.7) { L.cost[1] = fem ? rand(0.37, 0.43) : rand(0.32, 0.37); L.c2 = col(PAL.aBottom); }
+      }
+      if (rng() < 0.45) L.glasses = pick(['black', 'black', 'tort', 'gold']);
+    } else if (!cop) {
+      if (rng() < 0.55) { L.cost[3] = 1; L.c1 = col(PAL.shell); }
+      if (rng() < 0.5) L.c2 = col(PAL.bBottom);
+      if (rng() < 0.7) { const g = new THREE.Color(pick(PAL.glow)); L.glow = [g.r, g.g, g.b, rand(2.2, 3.6)]; }
+      if (rng() < 0.22) L.dye = col(PAL.dye, rand(0.7, 0.95));
+      if (rng() < 0.18) L.glasses = 'led';
+    }
+    if (fem && !P.hasTop) L.skinTop = L.cost[2] ? L.c1 : col(PAL.bikini); // bikini-only rigs always get a painted top
+    const sc = new THREE.Color(P.skinC.x, P.skinC.y, P.skinC.z);
+    if (tone) { const hs = {}; sc.getHSL(hs); sc.setHSL((hs.h + tone[0] + 1) % 1, Math.min(1, hs.s * tone[1]), hs.l * (0.35 + 0.65 * tone[2])); }
+    this.model.traverse((o) => {
+      if (!o.isMesh || Array.isArray(o.material) || o.userData.glass) return; const base = o.material, r = base.userData.role; if (!r || !base.userData.nu) return;
+      let t = null; if (r === 'hair') t = hair; else if (r === 'skin' || r === 'detail') t = tone; else if (r === 'cloth' && !base.transparent && rng() >= 0.35) t = cloth;
+      const styled = r === 'cloth' ? !cop : r === 'hair' ? L.dye[3] > 0 : r === 'skin' ? !!L.skinTop : false;
+      if (!t && !styled) return;
+      const m = base.clone(); m.userData.role = r; o.material = m; const u = m.userData.nu; // npcClone: same program, own uniforms, same depth material
+      if (t) { u.uHue.value = t[0]; u.uSat.value = t[1]; u.uVal.value = t[2]; }
+      u.uSkinC.value.set(sc.r, sc.g, sc.b);
+      if (r === 'cloth' && !cop) { u.uCost.value.fromArray(L.cost); u.uCol1.value.fromArray(L.c1); u.uCol2.value.fromArray(L.c2); u.uGlow.value.fromArray(L.glow);
+        if (L.cost[3] && /leather|loafer|oxford|heel/i.test(base.name)) u.uCost.value.w = 0; }
+      if (r === 'hair') u.uCol1.value.fromArray(L.dye);
+      if (r === 'skin' && L.skinTop && base.name === 'Skin') { u.uCost.value.set(0, 0, 2, 0); u.uCol1.value.fromArray(L.skinTop); }
+    });
+    if (L.glasses) {
+      const kind2 = L.glasses === 'led' ? 'led' + (L.glow[3] ? new THREE.Color(L.glow[0], L.glow[1], L.glow[2]).getHex() : 0x22e6ff) : L.glasses;
+      let n = 0; this.model.traverse((o) => { if (o.userData.glass) { o.material = glassesMat(kind2, o.userData.glass - 1); o.visible = true; n++; } });
+      if (n) this.glassKind = kind2;
+    }
+  }
+  // r6.4 wardrobe (b_corenpc tint only): clothing hue / value shifts (never skin), natural hair shades, and a range of skin tones
+  dressOld(kind) {
     // realistic fabric shifts only (r6.2): moderate hue turns at reduced saturation, washed / faded, or darker dyes — no acid colours
     const cloth = kind !== 'cop' && rng() < 0.75 ? pick([[rand(-0.5, 0.5), rand(0.55, 0.95), rand(0.75, 1.08)], [0, rand(0.15, 0.5), rand(0.95, 1.25)], [rand(-0.08, 0.08), rand(0.8, 1.05), rand(0.45, 0.75)]]) : null;
     const hair = rng() < 0.7 ? pick([[0, 0.9, 0.35], [0, 1, 0.55], [0.01, 1.05, 0.8], [0.02, 0.8, 1.25], [0, 0.3, 0.9]]) : null; // black / dark brown / brown / dark blond / greying
