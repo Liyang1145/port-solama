@@ -1,0 +1,11 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&shopnoavoid",
+ "reset": false,
+ "shots": [
+  {
+   "name": "shop_stat",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(166.2,516,0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=600; c.position.set(166.2,1.7,518); c.lookAt(159,3.2,600); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.info.autoReset=false; R.info.reset(); __G.render(); const rc=R.info.render.calls, rt=R.info.render.triangles; R.info.autoReset=true; const B=__G.neon&&__G.neon.bldg; const L=B&&B.shops; const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; JSON.stringify({frameCalls:rc, frameTris:rt, programs:R.info.programs.length, keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey)), cam:c.position.toArray(), stream:__G.stream.tris(), shopTris:L?L.tris():0, shopCalls:L?L.calls():0, stats:L?L.stats:null})"
+  }
+ ]
+}

@@ -1,5 +1,6 @@
 // PORT SOLANA — entry: renderer, asset loading, world assembly, main loop, test hooks (window.__G)
 import * as THREE from 'three';
+import { envInstall } from './envprog.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { Env, U } from './env.js';
@@ -21,6 +22,7 @@ import { rolledLights, precompile } from './loadfast.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
+import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_verify: test-only ?shotfast (screenshot first frame)
 
 // loadtime: staged boot timing (ms since navigation start) -> window.__LT, shown on the load screen and in the console
 const LT = window.__LT = { marks: [], t: {} };
@@ -29,10 +31,12 @@ function mark(name) { const n = performance.now(); LT.marks.push([name, Math.rou
 mark('html+bundle');
 const Q = new URLSearchParams(location.search);
 const SNAP = Q.has('snap');
+if (SHOTFAST) window.__SF = shotfastShaders();
 if (SNAP) document.body.classList.add('snap');
 if (!Q.has('unrolled')) rolledLights(); // loadtime: lit shaders keep a real light loop (A/B: ?unrolled)
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SNAP });
+envInstall(renderer); // b_envprog: merged environment shader programs (?oldenvmat: off)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.has('dpr') ? +Q.get('dpr') : 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 // r6.1: 索拉纳港 uses the Khronos PBR-Neutral curve (hue-true, no ACES over-saturated sky / clipped sidewalks); 霓港 keeps ACES for neon punch
@@ -137,6 +141,7 @@ async function load() {
     get hour() { return hour; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
     render() { renderFrame(0); },
+    finish() { return shotfastFinish(renderer); }, // b_verify: ms until the GPU queue (SwiftShader pipeline JIT) is done
     reset() { game.testReset(); if (Q.has('hour')) { this.setHour(+Q.get('hour')); } return game.state(); }, // r6.2 per-test isolation (shot.cjs)
     // vis-sweep debug: what is under screen pixel (px,py) of a w×h frame -> [{name, path, mat, dist, point, instanceId}]
     pick(px, py, w = 1280, h = 720, n = 3) { const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(px / w * 2 - 1, 1 - py / h * 2), camera);

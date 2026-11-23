@@ -37,7 +37,33 @@ import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
 const PROTOS = {};
 
+// b_corenpc: one shader program for every character material (shared people.js, both maps). The cast GLBs mix materials with /
+// without base colour, normal and metal-rough maps, opaque / alpha-blend / alpha-mask, single / double sided, plus the per-character
+// tint patch (key 'tint') vs plain ('ch'): each combination was its own program (~25 extra programs around a crowd, each a full
+// lit + skinned shader to compile). Now every character material is normalised to the same program parameters with identical pixels:
+// - missing maps -> shared 1x1 placeholders (white base colour / white metal-rough: x1; flat normal map with normalScale 0: the
+//   geometry normal exactly);
+// - opaque materials keep blending off (NoBlending: same GL state as opaque) and force alpha = 1 by uniform (OPAQUE define);
+// - every material has alphaTest > 0 (opaque / blend 0.001, a dead threshold in the main pass; masks keep 0.5);
+// - every material is DoubleSide in the program; originally single-sided ones keep back-face culling through a WebGLState
+//   setMaterial wrap (userData.npcCull), and blended ones render in one pass (forceSinglePass);
+// - the clothing / hair / skin-tone tint is always in the shader, off by uniform (uTint 0) on untinted materials.
+// What still splits: face meshes with morph targets vs without (LOD1/2 + clothes), and shadow depth (back / double side).
+// ?oldnpcmat restores the old per-combination materials.
+export const OLDNPC = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldnpcmat');
+const TINT_GLSL = `
+uniform float uHue, uVal, uSat, uSkin, uTint, uOpq;
+vec3 rgb2hsv(vec3 c){ vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g)); vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10; return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x); }
+vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www); return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y); }`;
+const TINT_APPLY = `{ vec3 hsv = rgb2hsv(diffuseColor.rgb);
+  float skin = uSkin * smoothstep(0.13, 0.08, hsv.x) * smoothstep(0.12, 0.25, hsv.y) * smoothstep(0.7, 0.5, hsv.y) * smoothstep(0.15, 0.3, hsv.z);
+  vec3 t = hsv2rgb(vec3(fract(hsv.x + uHue), clamp(hsv.y * uSat, 0.0, 1.0), clamp(hsv.z * uVal, 0.0, 1.0)));
+  diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`;
+
 function hueMat(src, key) {
+  if (!OLDNPC && src.userData.nu) { // b_corenpc: same program, tint switched on by uniform
+    const m = src.clone(); m.__npcDepth = src.__npcDepth; const u = m.userData.nu; u.uTint.value = 1; u.uSkin.value = /Outfit/.test(src.name) ? 0 : 1; m.userData.tint = u; return m; // clone() keeps the shared hooks (npcClone)
+  }
   // clothing / hair / skin-tone tint: rotates hue / scales saturation + value (per-character uniforms)
   const m = src.clone();
   m.userData.tint = { uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: /Outfit/.test(src.name) ? 0 : 1 } };
@@ -54,6 +80,49 @@ vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fr
   diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`);
   });
 }
+
+let PH = null; // shared 1x1 placeholders
+const px1 = (r, g, b, srgb) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true; return t; };
+function npcCullWrap(renderer) { // originally single-sided character materials: back-face culling restored after three's setMaterial
+  const st = renderer.state; if (st.__npcCull) return; st.__npcCull = true; const gl = renderer.getContext(); const orig = st.setMaterial;
+  st.setMaterial = function (material, frontFaceCW, ...rest) {
+    orig.call(this, material, frontFaceCW, ...rest); const c = material.userData.npcCull;
+    if (c === 1) { st.enable(gl.CULL_FACE); st.setFlipSided(!!frontFaceCW); } // main pass: FrontSide
+    else if (c === 2) { st.enable(gl.CULL_FACE); st.setFlipSided(!frontFaceCW); } // shadow depth: BackSide (three's default for FrontSide)
+  };
+}
+export const npcMatStats = { mats: 0, ph: 0, cull: 0, blend: 0 };
+function npcMat(m) {
+  if (!m.isMeshStandardMaterial) { prep(m, 'ch'); return; }
+  if (m.userData.nu) return; // shared by several sub-meshes: already normalised
+  if (!PH) PH = { white: px1(255, 255, 255, true), lin: px1(255, 255, 255, false), flat: px1(128, 128, 255, false) };
+  npcMatStats.mats++;
+  if (!m.map) { m.map = PH.white; npcMatStats.ph++; }
+  if (!m.normalMap) { m.normalMap = PH.flat; m.normalScale.set(0, 0); npcMatStats.ph++; }
+  if (!m.roughnessMap) { m.roughnessMap = PH.lin; npcMatStats.ph++; }
+  if (!m.metalnessMap) { m.metalnessMap = PH.lin; npcMatStats.ph++; }
+  const opq = !m.transparent; if (opq) m.blending = THREE.NoBlending; else { m.forceSinglePass = true; npcMatStats.blend++; }
+  if (!(m.alphaTest > 0)) m.alphaTest = 0.001;
+  // shadow depth: one program too. Each source material gets its own MeshDepthMaterial (Object3D.customDepthMaterial, set per mesh in
+  // Character; three copies map / alphaTest onto it every pass), drawn DoubleSide in the program with the old culling restored.
+  const dm = new THREE.MeshDepthMaterial(); dm.onBeforeCompile = (s, r) => npcCullWrap(r); dm.customProgramCacheKey = NPC_DKEY; m.__npcDepth = dm;
+  if (m.side !== THREE.DoubleSide) { m.side = THREE.DoubleSide; m.userData.npcCull = 1; dm.userData.npcCull = 2; npcMatStats.cull++; }
+  m.shadowSide = THREE.DoubleSide;
+  m.userData.nu = { uTint: { value: 0 }, uHue: { value: 0 }, uVal: { value: 1 }, uSat: { value: 1 }, uSkin: { value: 0 }, uOpq: { value: opq ? 1 : 0 } };
+  prep(m, 'npc'); const base = m.onBeforeCompile;
+  m.onBeforeCompile = function (s, r) {
+    base.call(this, s, r); npcCullWrap(r); Object.assign(s.uniforms, this.userData.nu);
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>' + TINT_GLSL)
+      .replace('#include <map_fragment>', '#include <map_fragment>\nif (uTint > 0.5) ' + TINT_APPLY)
+      .replace('#include <alphatest_fragment>', '#ifdef USE_ALPHATEST\nif ( alphaTest > 0.0015 && diffuseColor.a < alphaTest ) discard;\n#endif')
+      .replace('#include <opaque_fragment>', 'if (uOpq > 0.5) diffuseColor.a = 1.0;\n#include <opaque_fragment>');
+  };
+  m.customProgramCacheKey = NPC_KEY; m.clone = npcClone;
+}
+// Material.clone() does not carry onBeforeCompile / customProgramCacheKey: a plain clone (the tint, world.js tintPlayer) would fall
+// back to a stock program. The hook reads its uniforms from this.userData.nu (deep-copied by clone), so sharing the function is safe.
+const NPC_KEY = () => 'npc', NPC_DKEY = () => 'npcd';
+function npcClone() { const c = THREE.MeshStandardMaterial.prototype.clone.call(this); c.onBeforeCompile = this.onBeforeCompile; c.customProgramCacheKey = NPC_KEY; c.clone = npcClone; return c; }
 
 // Cast: MakeHuman-based realistic people (CC0 bodies, CMU mocap clips) exported with ara3d at medium detail; each GLB carries
 // its own retargeted clip set (r6.2: 20 clips — locomotion in 4 directions, idle variations, swim, jump, hit, two deaths, aim).
@@ -117,7 +186,7 @@ export function prepareCharacters(G) {
     g.scene.traverse((o) => {
       if (!o.isMesh) return; o.castShadow = !/Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name); o.receiveShadow = true; o.frustumCulled = false;
       const mm = Array.isArray(o.material) ? o.material : [o.material];
-      mm.forEach((m) => { if (m.transparent && m.map === null) m.depthWrite = false; prep(m, 'ch'); });
+      mm.forEach((m) => { if (m.transparent && m.map === null) m.depthWrite = false; if (OLDNPC) prep(m, 'ch'); else npcMat(m); });
       if (o.isSkinnedMesh) dropDeadMorphs(o.geometry);
       if (o.isSkinnedMesh && key !== 'hero') makeLods(o.geometry);
     });
@@ -190,6 +259,7 @@ export class Character {
     this.mixer.update(0);
     this.root.scale.setScalar(opt.player ? 1 : rand(0.96, 1.04));
     this.lod = 0; this.lodAcc = 0; this.lodMeshes = [];
+    this.model.traverse((o) => { if (o.isMesh && o.material.__npcDepth) o.customDepthMaterial = o.material.__npcDepth; }); // b_corenpc (dress() keeps the map)
     this.model.traverse((o) => { if (o.isMesh) this.lodMeshes.push({ m: o, g: LODG.get(o.geometry), small: /Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name), cast: o.castShadow }); });
   }
   // wardrobe variety: clothing hue / value shifts (never skin), natural hair shades, and a range of skin tones
@@ -395,18 +465,22 @@ const _wa = new THREE.Vector3(), _wb = new THREE.Vector3(), _wf = new THREE.Vect
 export class Pedestrians {
   constructor(scene, city) {
     this.scene = scene; this.city = city; this.list = []; this.loops = city.blocks.filter((b) => b.area !== 'promenade' || true);
+    if (city.pedInit) city.pedInit(); // map 霓港 (b_palmloop): loop lanes off the palm / tree pits + colliders for bare sidewalk props
     // r6.0 (from v4.4, map 霓港): sidewalk paths along every road-graph edge (both sides), as polylines in the sidewalk middle
     this.paths = [];
     if (city.graph) for (const e of city.graph.edges) {
       if (e.legacy || !e.sw || e.L < 30) continue;
       for (const sg of [1, -1]) {
-        const pts = []; const off = (e.hw + e.sw * 0.55) * sg; const s0 = e.n0.trim + 2, s1 = e.L - e.n1.trim - 2; if (s1 - s0 < 20) continue;
-        for (let s = s0; s <= s1; s += 3) { const q = pointAt(e, s); const x = q.x - q.tz * off, z = q.z + q.tx * off; if (!city.isLand(x, z) || city.groundH(x, z) < 0.1) { if (pts.length > 6) break; pts.length = 0; continue; } pts.push([x, z]); }
+        const pts = [], ss = []; const off = (e.hw + e.sw * 0.55) * sg; const s0 = e.n0.trim + 2, s1 = e.L - e.n1.trim - 2; if (s1 - s0 < 20) continue;
+        for (let s = s0; s <= s1; s += 3) { const q = pointAt(e, s); const x = q.x - q.tz * off, z = q.z + q.tx * off; if (!city.isLand(x, z) || city.groundH(x, z) < 0.1) { if (pts.length > 6) break; pts.length = 0; ss.length = 0; continue; } pts.push([x, z]); ss.push(s); }
         if (pts.length < 6) continue; const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-        this.paths.push({ pts, cum, L: cum[cum.length - 1], mx: pts[pts.length >> 1][0], mz: pts[pts.length >> 1][1] });
+        this.paths.push({ pts, cum, L: cum[cum.length - 1], mx: pts[pts.length >> 1][0], mz: pts[pts.length >> 1][1], e, sg, ss }); // e / sg / ss: 霓港 lane (b_streetpeds)
       }
     }
   }
+  // 霓港 lane of a block loop / sidewalk path: ready -> lane; not yet -> null and queued first for the per-frame solver (b_streetpeds).
+  // Without the per-frame solver (?nostreetpeds) loops are solved on the spot as in b_palmloop and paths keep the old polyline.
+  laneOf(o, isPath) { const C = this.city; if (C.pedWarm) { if (o._lane) return o._lane; C.pedWant(o, isPath); return null; } return isPath ? null : C.pedLoop ? C.pedLoop(o) : null; }
   pathPoint(path, u) { u = Math.max(0, Math.min(path.L, u)); const C = path.cum; let lo = 0, hi = C.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (C[m] <= u) lo = m; else hi = m; } const a = path.pts[lo], b = path.pts[hi]; const t = (u - C[lo]) / (C[hi] - C[lo] || 1); return { x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t }; }
   spawn(near, minD = 25, maxD = 110, kinds = ['woman', 'man', 'man']) {
     // r5.0: on the mainland / causeway / island ends people walk the ribbon sidewalks (mode 'line')
@@ -427,11 +501,12 @@ export class Pedestrians {
       const nearLoops = this.loops.filter((b) => Math.hypot((b.x0 + b.x1) / 2 - near.x, (b.z0 + b.z1) / 2 - near.z) < maxD + 150);
       for (let t = 0; t < 24 && nearPaths.length; t++) {
         if (nearLoops.length && rng() >= nearPaths.length / (nearPaths.length + nearLoops.length * 2)) break;
-        const path = pick(nearPaths); const u = rng() * path.L; const p = this.pathPoint(path, u);
+        const path = pick(nearPaths); const u = rng() * path.L; let p = this.pathPoint(path, u);
         const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
         if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
+        const LP = this.laneOf(path, true); if (LP) p = this.city.pathLanePoint(LP, path, u); // 霓港 (b_streetpeds): same accept / reject as the old polyline (rng stream), then stand on the lane when it is solved
         const c = new Character(this.scene, pick(kinds)); c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
-        c.ai = { mode: 'walk', path, u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.25 ? rand(10, 60) : 0 };
+        c.ai = { mode: 'walk', path, u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.25 ? rand(10, 60) : 0 }; c.ai.lw = LP ? 1 : 0;
         this.list.push(c); return c;
       }
       if (!nearLoops.length) return null;
@@ -441,12 +516,15 @@ export class Pedestrians {
       // sidewalk loop rectangle (inset from the curb)
       const x0 = b.x0 + sw, x1 = b.x1 - sw, z0 = b.z0 + sw, z1 = b.z1 - sw;
       const per = 2 * (x1 - x0 + z1 - z0); const u = rng() * per;
-      const p = this.loopPoint(x0, z0, x1, z1, u);
+      let p = this.loopPoint(x0, z0, x1, z1, u);
       const d = Math.hypot(p.x - near.x, p.z - near.z); if (d < minD || d > maxD) continue;
       if (this.city.col.resolve(p.x, p.z, 0.4, 0.5).hit) continue;
+      // 霓港 (b_palmloop): same accept / reject as the old rectangle (keeps the rng stream), then stand on the lane
+      const LN = this.laneOf(b, false); if (LN) p = this.city.lanePoint(LN, u * LN.per / per);
       const c = new Character(this.scene, pick(kinds));
       c.pos.set(p.x, this.city.groundH(p.x, p.z), p.z);
       c.ai = { mode: 'walk', loop: [x0, z0, x1, z1, per], u, dir: rng() < 0.5 ? 1 : -1, speed: rand(1.1, 1.6), wait: rng() < 0.3 ? rand(15, 90) : 0 }; // 30 % loiter (idle, chatting, waiting)
+      if (this.city.pedLoop) { c.ai.blk = b; c.ai.lw = LN ? 1 : 0; } // 霓港: u stays on the old rectangle's parameter, the lane is looked up per frame
       this.list.push(c); return c;
     }
     return null;
@@ -459,6 +537,7 @@ export class Pedestrians {
   update(dt, ctx) {
     const cp = ctx && ctx.camera ? ctx.camera.position : null;
     Character.lookTarget = ctx && ctx.P && ctx.P.onFoot && !ctx.P.car ? ctx.P.pos : null;
+    if (this.city.pedWarm) this.city.pedWarm(this, ctx && ctx.P ? ctx.P.pos : cp); // 霓港 (b_streetpeds): solve lanes near the player a slice per frame
     for (const c of this.list) {
       const a = c.ai;
       if (cp) c.setLod(Math.hypot(c.pos.x - cp.x, c.pos.z - cp.z));
@@ -470,11 +549,20 @@ export class Pedestrians {
           a.u += a.dir * a.speed * dt; let p, p2;
           if (a.path) { if (a.u > a.path.L - 0.5 || a.u < 0.5) { a.dir *= -1; a.u = Math.max(0.5, Math.min(a.path.L - 0.5, a.u)); } p = this.pathPoint(a.path, a.u); p2 = this.pathPoint(a.path, a.u + a.dir * 0.8); }
           else { const [x0, z0, x1, z1] = a.loop; p = this.loopPoint(x0, z0, x1, z1, a.u); p2 = this.loopPoint(x0, z0, x1, z1, a.u + a.dir * 0.8); }
+          // 霓港 (b_palmloop / b_streetpeds): the walker follows its lane (off the palm / tree line) once the lane is solved; a walker
+          // spawned before that walks the old line and eases over to the lane in ~0.7 s. The rng below is still drawn from the old line.
+          const p0 = p; let LN = null;
+          if (a.path ? this.city.pedPath : a.blk) LN = this.laneOf(a.path || a.blk, !!a.path);
+          if (LN) { let q, q2; if (a.path) { q = this.city.pathLanePoint(LN, a.path, a.u); q2 = this.city.pathLanePoint(LN, a.path, a.u + a.dir * 0.8); } else { const f = LN.per / a.loop[4]; q = this.city.lanePoint(LN, a.u * f); q2 = this.city.lanePoint(LN, (a.u + a.dir * 0.8) * f); }
+            a.lw = Math.min(1, (a.lw || 0) + dt * 1.4); const w = a.lw * a.lw * (3 - 2 * a.lw);
+            p = w >= 1 ? q : { x: p0.x + (q.x - p0.x) * w, z: p0.z + (q.z - p0.z) * w }; p2 = w >= 1 ? q2 : { x: p2.x + (q2.x - p2.x) * w, z: p2.z + (q2.z - p2.z) * w }; }
           const nx = p.x, nz = p.z; const yawT = Math.atan2(p2.x - p.x, p2.z - p.z);
           c.yaw += angWrap(yawT - c.yaw) * (1 - Math.exp(-8 * dt));
           // avoid obstacles: if blocked, pause briefly and turn back
           const r = this.city.col.resolve(nx, nz, 0.35, 0.5);
-          c.pos.x = r.x; c.pos.z = r.z; if (r.hit && rng() < 0.02) a.dir *= -1;
+          c.pos.x = r.x; c.pos.z = r.z; let hit = r.hit;
+          if (p !== p0) hit = this.city.col.resolve(p0.x, p0.z, 0.35, 0.5).hit; // 霓港 lane: draw rng as the old line would (shared stream)
+          if (hit && rng() < 0.02) a.dir *= -1;
           sp = a.speed; if (rng() < 0.0015) a.wait = rand(1, 4);
         }
       } else if (a.mode === 'line') {

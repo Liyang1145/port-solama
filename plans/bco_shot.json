@@ -1,0 +1,10 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&nowater",
+ "reset": false,
+ "shots": [
+  {
+   "name": "corner_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(-1640,40,0); __G.step(3); g.player.root.visible=false; __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); __G.streamSync(); const c=__G.camera; c.far=160; const cam={\"p\": [-1672.718046437067, 1.7, 44.2533896349516], \"t\": [-1665.301740764758, 2.2, 51.8690583629676]}; for(let k=0;k<4;k++){ __G.streamSync(); __G.step(2); g.player.root.visible=false; c.position.set(...cam.p); c.lookAt(...cam.t); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.neon.update(__G.U.uNight.value,0); } 0"
+  }
+ ]
+}

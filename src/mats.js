@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
+import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
+import { envReg, envPatch, envFamily, envMerger, envUberWrap, OLDENV, OLDENV2, ENVDBG } from './envprog.js'; // b_envprog: merged environment programs
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
@@ -9,14 +11,26 @@ export function setCSM(csm, aniso) { CSMREF = csm; ANISO = aniso; }
 
 const NODEDUP = typeof location !== 'undefined' && /[?&]nodedup/.test(location.search); // loadtime A/B switch
 export function prep(mat, key = 'std', patch = null) {
-  mat.onBeforeCompile = (s, r) => {
+  const p2 = envUberWrap(patch, key); // b_envprog2: opaque environment families compile into one merged program (?oldenvmat2: off)
+  mat.onBeforeCompile = function (s, r) {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
-    if (patch) patch(s);
+    if (p2) p2(s, this);
+    if (this.userData.envOn) envPatch(s, this, U); // b_envprog: normalised environment material (see envprog.js)
   };
-  // loadtime: without a patch the shader text is the stock one for every key -> one shared program instead of one per name
-  // ('roof', 'bark', 'metal', ... were each a separate, identical compile). Uniforms stay per material.
-  const ck = patch || NODEDUP ? key : 'std'; mat.customProgramCacheKey = () => ck;
+  // b_verify ?shotfast (test only): unpatched names share one program ('std'): same shader text, so the same pixels, fewer SwiftShader JITs
+  // b_envprog: normalised materials share one program per family, 'std' for every unpatched name (?oldenvmat: old keys)
+  const k0 = (SHOTFAST || !NODEDUP) && !patch ? 'std' : key, ke = envFamily(key, !!patch) + '|e'; // loadtime: unpatched names dedup to 'std' even with envOn off (?nodedup: off)
+  mat.customProgramCacheKey = function () { return this.userData.envOn ? (p2 && p2.envKey ? p2.envKey(this) : ke) : k0; }; // envKey: merged patch family
+  envReg(mat, key, !!patch);
   return mat;
+}
+
+// b_envprog2: hand-made environment materials (own onBeforeCompile + cache key) join the merged programs. They never got prep()'s fog
+// uniforms, so their height fog read uSunDir / uFogSunCol / uFogFalloff as 0 -> those stay 0 explicitly (same pixels). ?oldenvmat2: untouched
+const FOG0 = { uSunDir: { value: new THREE.Vector3(0, 0, 0) }, uFogSunCol: { value: new THREE.Color(0, 0, 0) }, uFogFalloff: { value: 0 } };
+export function envAdopt(mat, key) {
+  if (OLDENV2 || ENVDBG.includes('noadopt') || ENVDBG.includes('na_' + key)) return mat; const ob = mat.onBeforeCompile;
+  return prep(mat, key, (s) => { ob(s); Object.assign(s.uniforms, FOG0); });
 }
 
 export function texSet(T, name, rep = 1, opts = {}) {
@@ -299,8 +313,91 @@ vec2 fw = fwidth(cf); float aa = smoothstep(0.18, 0.6, max(fw.x, fw.y));
 float avgG = style == 0.0 ? 0.80 : (style == 1.0 ? 0.76 : (style == 5.0 ? 0.48 : (style == 3.0 ? 0.70 : (style == 2.0 ? 0.22 : 0.0))));
 isGlass = mix(isGlass, avgG, aa); frame = mix(frame, (1.0 - avgG) * (style == 2.0 || style == 5.0 ? 0.15 : 0.7), aa); shade = mix(shade, 1.0, aa); bl *= 1.0 - aa;
 frameCol *= 0.88 + 0.24 * vnoise(vUvM * vec2(13.0, 17.0) + seed); // r6.1 paint wear / dirt on frames
-vec3 col = mix(wallCol, frameCol, frame);
-reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
+${CYBER ? `// b_alleyface (霓港): style 6 = service frontage of the core's ground floor facing an alley / back yard / gap (city.js svcEdges):
+// sooty concrete + glazed tile dado, roller shutters, steel doors with an exit sign, exhaust louvres, delivery hatches, meter
+// conduits, paper notices, rust run-off. Bay plan = svcface.js (v = (7k + ps) mod 11; vGlass = (ps, alley?, band base y)).
+float svcM = 0.0, svcH = 0.0, svcR = 0.8, svcMet = 0.0; vec3 svcC = vec3(0.0), svcE = vec3(0.0);
+if (style == 6.0) {
+  float yb = vUvM.y - vGlass.z; float uu = vUvM.x; float kb = floor(uu / ww); float lu = uu - (kb + 0.5) * ww;
+  float vv = mod(kb * 7.0 + vGlass.x, 11.0);
+  float t = vv < 1.5 ? 0.0 : (vv < 3.5 ? 1.0 : (vv < 5.5 ? 2.0 : (vv < 7.5 ? 3.0 : (vv < 8.5 ? 4.0 : 5.0))));
+  if (ww < 2.4) t = 0.0;
+  float hs = h12(vec2(kb * 1.31 + 0.7, seed * 0.53));
+  float px = max(max(fwidth(uu), fwidth(yb)), 1e-4); float fine = 1.0 - smoothstep(0.012, 0.04, px);
+  vec3 wc = mix(mix(wallCol, vec3(dot(wallCol, vec3(0.3, 0.59, 0.11))), 0.55), concP * vec3(0.6, 0.6, 0.58), 0.62 + 0.15 * vGlass.y) * (0.92 + 0.16 * hs);
+  float dado = step(yb, 1.25);
+  vec2 tg = vec2(uu / 0.2, yb / 0.15); vec2 tq = abs(fract(tg) - 0.5); float tin = 1.0 - smoothstep(0.43, 0.48, max(tq.x, tq.y));
+  tin = mix(tin, 0.88, 1.0 - fine); float tv = h12(floor(tg) + seed);
+  vec3 tileC = mix(vec3(0.74, 0.76, 0.72), vec3(0.36, 0.52, 0.46), step(0.5, fract(seed * 0.37))) * (0.86 + 0.18 * tv);
+  tileC = mix(tileC * 0.45, tileC, tin); tileC = mix(tileC, wc * 0.55, step(0.972, tv) * fine);
+  tileC *= 1.0 - 0.4 * smoothstep(0.7, 0.0, yb) * (0.6 + 0.4 * vnoise(vec2(uu * 1.7, seed)));
+  wc = mix(wc, tileC, dado); wc *= 1.0 - 0.45 * step(abs(yb - 1.26), 0.022);
+  float stk = smoothstep(0.55, 0.9, vnoise(vec2(uu * 2.3, seed * 1.9)) * 0.7 + vnoise(vec2(uu * 7.1, yb * 0.15)) * 0.3);
+  wc *= 1.0 - stk * 0.28 * (1.0 - dado * 0.6);
+  svcC = wc; svcM = 1.0; svcR = mix(0.88, 0.22 + 0.25 * (1.0 - tin), dado); svcH = dado * (tin - 1.0) * 0.004 * fine;
+  float hw = 0.0, o0 = 0.0, o1 = 0.0;
+  if (t == 2.0) { hw = min(ww * 0.5 - 0.45, 1.5); o1 = 2.55; }
+  else if (t == 5.0) { hw = 0.5; o1 = 2.15; }
+  else if (t == 4.0) { hw = min(0.7, ww * 0.5 - 0.5); o0 = 1.0; o1 = 2.05; }
+  else if (t == 3.0) { hw = 0.6; o0 = 1.9; o1 = 2.7; }
+  float inO = step(abs(lu), hw) * step(o0, yb) * step(yb, o1); float oy = yb - o0;
+  if (t == 2.0 || t == 4.0 || t == 5.0) { // painted steel guide rails / door frame (0.07 m) round the opening
+    float fr = step(hw, abs(lu)) * step(abs(lu), hw + 0.07) * step(o0 - (t == 4.0 ? 0.07 : 0.0), yb) * step(yb, o1 + (t == 2.0 ? 0.0 : 0.07));
+    if (t == 5.0) fr = max(fr, step(abs(lu), hw + 0.07) * step(o1, yb) * step(yb, o1 + 0.07));
+    svcC = mix(svcC, (t == 5.0 ? vec3(0.102, 0.124, 0.156) * 0.9 : vec3(0.24, 0.25, 0.26)) * (0.8 + 0.4 * vnoise(vec2(yb * 3.0, lu))), fr); svcR = mix(svcR, 0.45, fr); svcMet = max(svcMet, 0.5 * fr); svcH += fr * 0.012 * fine; } // b_alleyface2: door frame in the door steel
+  if (t == 3.0 || t == 4.0 || t == 1.0) { float b0 = t == 1.0 ? 1.1 : o0 - 0.08; float hw2 = t == 1.0 ? 0.45 : hw;
+    float run = step(abs(lu), hw2) * step(yb, b0) * smoothstep(b0 - 1.6, b0, yb) * smoothstep(0.3, 0.75, vnoise(vec2(lu * 6.0, hs * 9.0)));
+    svcC = mix(svcC, svcC * vec3(0.55, 0.42, 0.33), run * 0.7); }
+  if (t == 2.0 || t == 4.0) {
+    float sl = fract(oy / 0.075);
+    vec3 sc = mix(vec3(0.52, 0.55, 0.57), vec3(0.34, 0.38, 0.42), step(0.5, hs)) * (0.82 + 0.3 * vnoise(vec2(uu * 2.6, yb * 0.9) + seed));
+    sc *= mix(0.86, 0.68 + 0.36 * smoothstep(0.0, 0.55, sl) * smoothstep(1.0, 0.75, sl), fine);
+    sc = mix(sc, vec3(0.30, 0.19, 0.12), smoothstep(0.7, 0.0, oy) * 0.55 * vnoise(vec2(uu * 4.0, 3.0)));
+    // spray tag: a row of wavy letter strokes + an underline in a 1.6 x 0.5 m box at chest height (35 % of shutters)
+    float tx_ = lu - (fract(hs * 5.3) - 0.5) * max(hw - 0.9, 0.0); float ty_ = oy - (t == 4.0 ? 0.55 : 1.05);
+    float tbox = step(abs(tx_), min(0.8, hw - 0.2)) * step(abs(ty_), 0.26);
+    float tstr = 1.0 - smoothstep(0.05, 0.09, abs(fract(tx_ * 2.6 + 0.3 * sin(ty_ * 11.0 + hs * 40.0) + hs * 3.0) - 0.5));
+    float tag = step(hs, 0.35) * max(tbox * tstr * step(abs(ty_), 0.2), tbox * step(abs(ty_ + 0.23 - 0.03 * sin(tx_ * 6.0)), 0.025)) * fine;
+    sc = mix(sc, neonPal(hs * 3.7) * 0.75 + 0.05, tag * 0.85);
+    sc = mix(sc, vec3(0.12, 0.12, 0.13), step(oy, 0.07));
+    sc = mix(sc, vec3(0.05), step(abs(lu), 0.06) * step(abs(oy - 0.16), 0.05) * step(o0, 0.5));
+    svcC = mix(svcC, sc, inO); svcR = mix(svcR, 0.5 + 0.2 * tag, inO); svcMet = 0.6 * inO * (1.0 - tag);
+    svcH += inO * (smoothstep(0.0, 0.5, sl) * smoothstep(1.0, 0.5, sl) - 0.5) * 0.006 * fine;
+  } else if (t == 5.0) {
+    // b_alleyface2: one steel-door look with alley.js (its door material 0x5a636e, roughness 0.55, metalness 0.45, frame 0.08 m,
+    // kick plate to 0.3 m, lever at 0.39 m and 1.02 m, hood 1.16 by 0.2 m): the painted door and the fitted door read as the same make
+    vec3 dc = vec3(0.102, 0.124, 0.156) * (0.85 + 0.3 * vnoise(vec2(uu * 3.0, yb * 1.3) + seed));
+    float pnl = step(0.06, hw - abs(lu)) * step(abs(abs(lu) - (hw - 0.1)), 0.012) * step(0.3, yb) * step(yb, 2.0);
+    float grl = step(abs(lu), hw - 0.14) * step(0.25, yb) * step(yb, 0.55) * step(0.5, fract(yb / 0.04));
+    float kick = step(yb, 0.3); float lever = step(abs(lu - 0.39), 0.05) * step(abs(yb - 1.02), 0.02);
+    vec3 dcol = mix(dc, dc * 0.55, pnl); dcol = mix(dcol, vec3(0.03), grl * fine); dcol = mix(dcol, dc * 1.3, kick); dcol = mix(dcol, dc * 1.6, lever);
+    dcol *= 1.0 - 0.3 * smoothstep(0.5, 0.0, abs(lu - hw * 0.6)) * smoothstep(0.6, 1.1, yb) * step(yb, 1.5);
+    svcC = mix(svcC, dcol, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.45 * inO;
+    float sgn = step(abs(lu), 0.17) * step(abs(yb - 2.49), 0.07);
+    float gly = sgn * step(0.5, fract(lu * 9.0 + 0.25)) * step(abs(yb - 2.49), 0.035) * fine;
+    svcC = mix(svcC, mix(vec3(0.1, 0.75, 0.35), vec3(0.9), gly), sgn); svcE = vec3(0.15, 1.0, 0.4) * sgn * (1.0 - gly * 0.6) * 2.2;
+  } else if (t == 3.0) {
+    float bl_ = fract(oy / 0.07); float fr_ = clamp(step(hw - 0.05, abs(lu)) + step(oy, 0.05) + step(o1 - 0.05, yb), 0.0, 1.0);
+    vec3 lc = mix(vec3(0.05), vec3(0.46, 0.48, 0.49) * (0.7 + 0.5 * smoothstep(0.2, 0.7, bl_)), mix(0.6, step(0.35, bl_), fine));
+    lc = mix(lc, vec3(0.40, 0.42, 0.43), fr_); lc = mix(lc, lc * vec3(0.7, 0.55, 0.42), 0.4 * vnoise(vec2(lu * 5.0, yb * 4.0)));
+    svcC = mix(svcC, lc, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.5 * inO; svcH += inO * (bl_ - 0.5) * 0.008 * fine;
+  } else if (t == 1.0) {
+    float cy = step(2.2, yb) * step(yb, fh - 0.05);
+    float cnd = clamp(cy * (step(abs(lu + 0.24), 0.022) + step(abs(lu), 0.028) + step(abs(lu - 0.24), 0.018)), 0.0, 1.0);
+    float clp = cnd * step(0.85, fract(yb / 0.9));
+    svcC = mix(svcC, vec3(0.16, 0.17, 0.18) + clp * 0.25, cnd); svcH += cnd * 0.01 * fine;
+    float lab = step(abs(lu - 0.66), 0.09) * step(abs(yb - 1.75), 0.06); svcC = mix(svcC, vec3(0.85, 0.7, 0.1), lab);
+  } else {
+    float pw = 0.32 + 0.2 * fract(hs * 7.0); float pcx = (fract(hs * 3.3) - 0.5) * max(ww - 1.2, 0.0);
+    float pp = step(0.55, hs) * step(abs(lu - pcx), pw * 0.5) * step(abs(yb - 1.65), 0.24);
+    vec3 pcol = mix(vec3(0.82, 0.8, 0.72), vec3(0.85, 0.3, 0.25), step(0.8, hs)) * (0.7 + 0.3 * vnoise(vec2(uu * 8.0, yb * 8.0)));
+    pcol = mix(pcol, vec3(0.15), step(0.5, fract(yb * 14.0)) * step(abs(lu - pcx), pw * 0.35) * step(abs(yb - 1.62), 0.12) * fine);
+    svcC = mix(svcC, pcol, pp); svcR = mix(svcR, 0.9, pp);
+  }
+  svcH *= 1.0 - smoothstep(0.08, 0.3, px);
+}
+` : ''}vec3 col = mix(wallCol, frameCol, frame);
+${CYBER ? 'col = mix(col, svcC, svcM); // b_alleyface\n' : ''}reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
 col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
@@ -314,10 +411,10 @@ roughnessFactor *= mix(texelRoughness.g * 0.9 + 0.1, 0.35 + 0.2 * micro, frame);
 roughnessFactor *= 0.9 + 0.2 * micro;
 ${CYBER ? `roughnessFactor = mix(roughnessFactor, 0.32, clamp(streak * 3.0 + roofStreak * 0.5 + plinth * 0.6, 0.0, 1.0) * (0.35 + 0.65 * uNight)); // wet run-off / splash zone` : ``}
 roughnessFactor = mix(roughnessFactor, mix(0.02 + 0.06 * rnd2 + gDirt * 0.25, 0.6, bl), isGlass);
-`)
+${CYBER ? 'roughnessFactor = mix(roughnessFactor, svcR, svcM); // b_alleyface\n' : ''}`)
       .replace('#include <metalnessmap_fragment>', `
 float metalnessFactor = mix(isMetal * 0.7, (style == 0.0 ? 0.9 : (style == 3.0 ? 0.45 : 0.6)) * (1.0 - bl), isGlass);
-`)
+${CYBER ? 'metalnessFactor = max(metalnessFactor, svcMet); // b_alleyface\n' : ''}`)
       .replace('#include <normal_fragment_maps>', `
 #include <normal_fragment_maps>
 normal = normalize(mix(normal, nonPerturbedNormal, max(isGlass, frame)));
@@ -325,7 +422,7 @@ normal = normalize(mix(normal, nonPerturbedNormal, max(isGlass, frame)));
 { float wallOnly = (1.0 - isGlass) * (1.0 - frame) * (1.0 - reveal) * (1.0 - aa);
 ${CYBER ? `  float hb = (vnoise(vUvM * vec2(3.0, 1.2) + seed) * 0.5 + vnoise(vUvM * 9.0) * 0.25) * 0.006 - smoothstep(0.035, 0.0, abs(fract(vUvM.y / 1.2) - 0.5) - 0.465) * 0.004
            - smoothstep(0.06, 0.0, length(fract(vUvM / vec2(0.9, 0.6)) - 0.5)) * 0.003;` : `  float hb = (vnoise(vUvM * vec2(2.3, 2.9) + seed) * 0.55 + vnoise(vUvM * 8.5 + 3.0) * 0.3 + vnoise(vUvM * 23.0) * 0.15) * 0.007;`}
-  hb *= wallOnly;
+${CYBER ? '  hb += svcH; // b_alleyface\n' : ''}  hb *= wallOnly;
   vec2 dH = vec2(dFdx(hb), dFdy(hb));
   vec3 sX = dFdx(-vViewPosition), sY = dFdy(-vViewPosition); vec3 R1 = cross(sY, normal), R2 = cross(normal, sX);
   float fDet = dot(sX, R1) * faceDirection; vec3 vGrad = sign(fDet) * (dH.x * R1 + dH.y * R2);
@@ -463,6 +560,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
   totalEmissiveRadiance += room * inside * k;
 ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner strip on towers, neon fascia over storefronts
   if (n > 0.01) {
+    totalEmissiveRadiance += svcE * n; // b_alleyface: exit signs over the service doors
     vec3 pc = neonPal(seed * 0.137 + 0.05);
     float fl = cid.y;
     if (style == 0.0 || style == 1.0 || (style == 2.0 && vUvM.y > 16.0 && fract(seed * 0.31) < 0.5)) {
@@ -488,7 +586,7 @@ ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner stri
       float fall = exp(-max(dy, 0.0) / 2.2) * step(-0.2, dy) + exp(min(dy, 0.0) / 1.4) * (1.0 - step(-0.2, dy)) * 0.8;
       fall *= smoothstep(13.0, 2.0, vUvM.y);
       vec3 spillC = neonPal(seed * 0.21 + bay * 0.37);
-      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6; }
+      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6 * (style == 6.0 ? 0.25 : 1.0); } // b_alleyface: weak spill on service faces
   }
 ` : ``}  // coloured facade up-lighting on the Art Deco hotels at night
   float wallM = (1.0 - isGlass) * (1.0 - frame * 0.5);
@@ -505,6 +603,8 @@ if (uDbg == 5.0) gl_FragColor = vec4(diffuseColor.rgb, 1.0);
   });
 }
 
+// r6.4 b_ground (霓港 only): ground-detail shader text in the road / sidewalk programs (?noground = old text)
+const BG = CYBER && !(typeof location !== 'undefined' && /[?&]noground\b/.test(location.search));
 // --------------------------------------------------------------------- road surface ----
 // attributes: aRd = (across m, along m, segment length, kind) ; kind 0 = 4-lane two-way, 1 = intersection, 2 = 2-lane, 3 = 6-lane causeway
 export function roadMaterial(T, refl) {
@@ -540,7 +640,13 @@ if (kind == 0.0 || kind == 3.0) {
   // crosswalks + stop lines at both ends
   float e = min(v, L - v);
   float zebra = step(0.5, fract(u / 1.1)) * step(1.0, e) * step(e, 4.2) * step(au, hw - 0.5);
-  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
+${BG ? `  // b_ground: worn zebra — paint gone in the wheel paths, ragged stripe ends, a few stripes faded as a whole
+  { float zs = floor(u / 1.1); float zh = h12(vec2(zs, floor(L * 0.37)));
+    float wp = smoothstep(0.42, 0.2, abs(abs(fract(au / 3.5) - 0.5) - 0.25) * 3.5 / 1.4);
+    float zn = vnoise(vRW.xz * 5.5) * 0.55 + vnoise(vRW.xz * 19.0) * 0.45;
+    float keep = step(wp * 0.62 + (1.0 - smoothstep(0.0, 0.9, min(e - 1.0, 4.2 - e))) * 0.35 + zh * 0.25, zn + 0.18);
+    zebra *= keep * mix(1.0, 0.55, step(0.8, zh)); }
+` : ``}  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
   wpaint = max(wpaint, max(zebra, stopl));
   if (e < 5.4) ypaint *= step(5.4, e);
   // v3.4 lane arrows before the stop line (GTA6_REFERENCE §6 road markings)
@@ -572,12 +678,34 @@ float crk = smoothstep(0.035, 0.0, abs(vnoise(vRW.xz * 0.35) - 0.5)) * smoothste
 float oil = (kind == 1.0 ? 0.0 : smoothstep(0.18, 0.0, abs(lanePos - 0.0))) * smoothstep(0.55, 0.8, vnoise(vRW.xz * vec2(0.9, 0.9) + 3.7)) * 0.5;
 asph = mix(asph, asph * 0.45, max(crk * 0.8, oil));
 asph *= 1.0 + 0.12 * smoothstep(0.7, 0.9, vnoise(vRW.xz * 1.7));
+` : ``}${BG ? `// b_ground: utility-cut patches (darker newer asphalt, sealed seam, paint cut through) + alligator cracking in the wheel paths
+float bgPatch = 0.0;
+if (kind != 1.0) { float li = floor(au / 3.5); float pv = fract(v / 21.0 + li * 0.37) * 21.0; float pc = floor(v / 21.0 + li * 0.37);
+  vec2 hp = vec2(h12(vec2(pc, li + 3.0)), h12(vec2(pc + 7.1, li))); float uu = au - li * 3.5;
+  float a0 = 3.0 + hp.x * 8.0, a1 = a0 + 2.2 + hp.y * 5.0, b0 = 0.3 + hp.y * 0.8, b1 = b0 + 1.4 + hp.x * 1.2;
+  float inP = step(a0, pv) * step(pv, a1) * step(b0, uu) * step(uu, b1) * step(h12(vec2(pc, li + 11.0)), 0.3);
+  float edge = min(min(pv - a0, a1 - pv), min(uu - b0, b1 - uu));
+  bgPatch = inP; asph = mix(asph, asph * vec3(0.66, 0.66, 0.7), inP); asph *= 1.0 - inP * smoothstep(0.06, 0.0, edge) * 0.55;
+  paintMask *= 1.0 - inP * 0.7;
+  float trk = smoothstep(0.3, 0.12, abs(lanePos - 0.25)) * (1.0 - inP);
+  vec2 cq = vRW.xz * 2.2; vec2 ci = floor(cq), cf = fract(cq); float d1 = 9.0, d2 = 9.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { vec2 o = vec2(float(i), float(j)); vec2 pp = o + vec2(h12(ci + o), h12(ci + o + 17.0)) - cf; float dd = dot(pp, pp); if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd; }
+  float net = smoothstep(0.07, 0.0, sqrt(d2) - sqrt(d1)) * trk * smoothstep(0.55, 0.75, vnoise(vRW.xz * 0.08 + 5.0));
+  asph = mix(asph, asph * 0.5, net * 0.85); }
 ` : ``}vec3 col = mix(asph, wpaint > ypaint ? paintW : paintY, paintMask);
 col = mix(col, vec3(0.16, 0.42, 0.20) * (0.8 + 0.3 * wear), bikeG * (0.7 + 0.3 * smoothstep(0.2, 0.7, wear)));
 paintMask = max(paintMask, bikeG * 0.8);
 // wet: darker, puddles
 float pud = smoothstep(${CYBER ? '0.48, 0.62' : '0.56, 0.68'}, vnoise(vRW.xz * 0.11) * 0.7 + vnoise(vRW.xz * 0.6) * 0.3 + tracks * 0.6); // vis-sweep A: fewer puddles (the whole night road read as a flooded mirror)
-float wet = uWet;
+${BG ? `// b_ground: water collects at the drain inlets (positions = ground.js drainAt) and in the gutter along the kerb
+if (kind == 0.0 || kind == 2.0) { float hwd = kind == 0.0 ? 7.0 : 4.5; float sd = step(0.0, u); float vv = v - sd * 15.0; float dc = floor(vv / 30.0);
+  float dh = fract(dc * 0.6180339887 + sd * 0.37 + fract(L * 0.0137)), dh2 = fract(dc * 0.4142135 + sd * 0.71 + fract(L * 0.0291));
+  float vd = (dc + 0.5 + (dh - 0.5) * 0.5) * 30.0; float ed = min(vd + sd * 15.0, L - vd - sd * 15.0);
+  float rq = length(vec2((vv - vd) * 0.5, (au - (hwd - 0.3)) * 0.95)) + (vnoise(vRW.xz * 1.4) - 0.5) * 0.45;
+  float dpud = smoothstep(1.05, 0.6, rq) * step(0.18, dh2) * step(8.0, ed);
+  float gut = smoothstep(hwd - 1.1, hwd - 0.3, au) * smoothstep(0.5, 0.72, vnoise(vRW.xz * 0.32 + 9.0)) * step(5.4, min(v, L - v));
+  pud = max(pud, max(dpud, gut * 0.9)); }
+` : ``}float wet = uWet;
 col *= mix(1.0, 0.45, wet);
 diffuseColor.rgb = col;
 float paintF = paintMask;
@@ -630,11 +758,19 @@ if (wet > 0.01) {
 }
 
 export function simpleMats(T) {
+  // b_envprog: ground materials (sidewalk / sand / lawns / district ground) share one program, branches by uniform (?oldenvmat: off)
+  const GM = OLDENV || !OLDENV2 ? null : envMerger('ground'); /* b_envprog2: by default these join the merged 'envu' program */ const gw = (fn, key) => GM ? GM.wrap(fn, key) : fn;
   const side = texSet(T, 'sidewalk', 1); for (const t of [side.map, side.normalMap, side.roughnessMap]) t.repeat.set(1 / 3, 1 / 3);
-  M.sidewalk = prep(new THREE.MeshStandardMaterial({ map: side.map, normalMap: side.normalMap, roughnessMap: side.roughnessMap, color: 0xffffff, roughness: 1 }), 'sidewalk', (s) => {
+  M.sidewalk = prep(new THREE.MeshStandardMaterial({ map: side.map, normalMap: side.normalMap, roughnessMap: side.roughnessMap, color: 0xffffff, roughness: 1 }), 'sidewalk', gw((s) => {
     s.uniforms.uWet = U.uWet;
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet;')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? '' : `
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet;' + (BG ? HASH : ''))
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? (BG ? `
+{ // r6.4 b_ground 霓港 pavers: slab-to-slab tone, dirtier / wider joints in places, replaced (lighter) and cracked slabs, oily stains
+  vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = h12(cl + 41.0), hs2 = h12(cl + 93.0); vec2 lc = fract(sp / 1.6);
+  diffuseColor.rgb *= 0.9 + 0.2 * hs; diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.17, 1.13), step(0.93, hs2));
+  vec2 g2 = abs(lc - 0.5); float jw = 0.485 - 0.012 * step(0.6, vnoise(sp * 0.7)); float jd = smoothstep(jw, jw + 0.01, max(g2.x, g2.y)); diffuseColor.rgb *= 1.0 - jd * 0.22 * vnoise(sp * 2.3 + 4.0);
+  float ck = step(0.8, hs) * smoothstep(0.014, 0.0, abs(lc.y - 0.5 - 0.22 * sin(lc.x * 5.0 + hs * 30.0))) * step(abs(lc.x - 0.5), 0.25 + 0.25 * hs2); diffuseColor.rgb *= 1.0 - ck * 0.45;
+  float stn = smoothstep(0.62, 0.8, vnoise(sp * 0.45 + 2.0)) * smoothstep(0.4, 0.7, vnoise(sp * 3.1)); diffuseColor.rgb *= 1.0 - stn * 0.25; roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.6, stn); }` : '') : `
 { // r6.3 索拉纳港 pavement wear: dark joint-sealant lines get dirtier, flattened gum spots, drip / coffee stains, a few hairline cracks per slab
   vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = fract(sin(dot(cl, vec2(12.9898, 78.233))) * 43758.5453);
   vec2 gq = sp * 7.0; vec2 gi = floor(gq); float gh = fract(sin(dot(gi, vec2(41.3, 289.1))) * 15731.7); float gum = step(0.993, gh) * smoothstep(0.32, 0.18, length(fract(gq) - 0.5));
@@ -645,7 +781,7 @@ export function simpleMats(T) {
   diffuseColor.rgb *= 1.0 - ck * 0.35; }`))
       .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying vec3 vSWP;');
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSWP;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSWP = (modelMatrix * vec4(position,1.0)).xyz;');
-  });
+  }, 'sidewalk'));
   const pav = texSet(T, 'pavers', 1); for (const t of [pav.map, pav.normalMap, pav.roughnessMap]) t.repeat.set(1 / 2.5, 1 / 2.5);
   M.pavers = prep(new THREE.MeshStandardMaterial({ map: pav.map, normalMap: pav.normalMap, roughnessMap: pav.roughnessMap, color: 0xffffff, roughness: 1, ...(CYBER ? { polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -2 } : {}) }), 'pavers');
   const conc = texSet(T, 'concrete', 1); for (const t of [conc.map, conc.normalMap, conc.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
@@ -654,7 +790,7 @@ export function simpleMats(T) {
   if (CYBER) {
   // v4.5: sand albedo 1.22 -> 0.98 (noon beach no longer glares), dune-scale tone variation, wind ripples (normal), a wrack line
   // of dark debris at the high-water mark, wet sand darker + glossier toward the sea
-  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(0.90, 0.86, 0.78), roughness: 1 }), 'sand', (s) => {
+  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(0.90, 0.86, 0.78), roughness: 1 }), 'sand', gw((s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandW = (modelMatrix*vec4(position,1.0)).xyz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;' + HASH)
       .replace('#include <map_fragment>', `#include <map_fragment>
@@ -667,14 +803,14 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 { float rp = sin(vSandW.x * 2.6 + vnoise(vSandW.xz * 0.3) * 6.0) * (1.0 - wetS) * 0.12; normal = normalize(normal + (viewMatrix * vec4(rp, 0.0, rp * 0.3, 0.0)).xyz); }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
-  });
+  }, 'sand'));
   } else {
-  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(1.22, 1.18, 1.10), roughness: 1 }), 'sand', (s) => {
+  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(1.22, 1.18, 1.10), roughness: 1 }), 'sand', gw((s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vSandY;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandY = (modelMatrix*vec4(position,1.0)).y;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vSandY;')
       .replace('#include <map_fragment>', '#include <map_fragment>\nfloat wetS = smoothstep(-0.55, -0.9, vSandY); diffuseColor.rgb *= mix(1.0, 0.55, wetS);')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
-  });
+  }, 'sand'));
   }
   const grass = texSet(T, 'grass', 1); for (const t of [grass.map, grass.normalMap, grass.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
   // v4.5 lawns: a second texture scale + world-space macro noise (greener swales, sun-dried patches, worn earth) kills the tiling
@@ -688,15 +824,15 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   // vis-sweep (map A, GTA6 Florida look): St. Augustine lawns read olive / sun-bleached, not lime -> 25% desaturate, warmer
   { float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.75) * vec3(1.03, 0.97, 0.88); }`} }`);
   };
-  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', lawn); // vis-sweep: lawn macro-variation on both maps (map A lawns were one flat tiled green, aerials showed the 4 m tile)
+  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', gw(lawn, 'grass')); // vis-sweep: lawn macro-variation on both maps (map A lawns were one flat tiled green, aerials showed the 4 m tile)
   // v4.4 land caps under the open world: pushed back in depth so district pavers / roads drawn just above never z-fight from the air
   const po = { polygonOffset: false }; // v4.5: was 3 / 12 -> at grazing distances the caps fell behind the water plane 1 m below (white 'shallows' instead of land)
-  M.land = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: new THREE.Color().setRGB(0.92, 0.95, 0.86), roughness: 1, ...po }), 'grass', lawn);
+  M.land = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: new THREE.Color().setRGB(0.92, 0.95, 0.86), roughness: 1, ...po }), 'grass', gw(lawn, 'grass'));
   M.landc = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1, ...po }), 'concrete');
   // r5.0 mainland / pearl-island ground: sits 6 cm below the road ribbons (polygonOffset pushed it behind the water at grazing angles)
   // vis-sweep: the district ground showed as hectares of bare grey concrete between the lots (aerials looked unfinished) ->
   // world-space mix of worn concrete, gravel/dirt and patchy lawn (vacant lots / yards), macro tone so the 4 m tile never repeats
-  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc', (s) => {
+  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc', gw((s) => {
     s.uniforms.tG = { value: grass.map };
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvLW = (modelMatrix*vec4(position,1.0)).xyz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tG; varying vec3 vLW;' + HASH).replace('#include <map_fragment>', `#include <map_fragment>
@@ -706,7 +842,7 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   diffuseColor.rgb *= 0.84 + 0.2 * vnoise(vLW.xz * 0.03 + 9.0);
   diffuseColor.rgb = mix(diffuseColor.rgb, dirt, smoothstep(0.36, 0.46, m) * 0.35);
   diffuseColor.rgb = mix(diffuseColor.rgb, g, smoothstep(0.44, 0.56, m)); }`);
-  });
+  }, 'mgc'));
   // r6.3 (ground_a): mainland open ground — big dry-grass / bare-soil swathes break the lawn up from the air, and beyond the modelled
   // city (x < -3600, |z| > 2900) a painted, footprint-anti-aliased city pattern (street grid, arterials, roof speckle, canopy) so the
   // horizon reads as more city instead of a green blanket
@@ -729,13 +865,15 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
     cityC = mix(cityC, avg, smoothstep(5.0, 16.0, fw));
     diffuseColor.rgb = mix(diffuseColor.rgb, cityC, far);
     gFarGlow = far * mix(max(rd, ar * 1.6) * 0.9, 0.22, smoothstep(5.0, 16.0, fw)); } }`).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += gFarGlow * uNight * vec3(1.0, 0.62, 0.3) * 0.5;'); };
-  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg2', lawnA);
+  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg2', gw(lawnA, 'mgg2'));
   M.pool = prep(new THREE.MeshStandardMaterial({ color: 0x2aa9bd, roughness: 0.06, metalness: 0.0, emissive: 0x0a3a44, emissiveIntensity: 0.6 }), 'pool');
   M.roof = prep(new THREE.MeshStandardMaterial({ map: conc.map, color: 0x9a948c, roughness: 0.95 }), 'roof');
   M.white = prep(new THREE.MeshStandardMaterial({ color: 0xeeeae2, roughness: 0.7, map: T.plaster_d }), 'whitep');
   M.metal = prep(new THREE.MeshStandardMaterial({ color: 0x5a5d60, roughness: 0.45, metalness: 0.85 }), 'metal');
   M.darkmetal = prep(new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.5, metalness: 0.6 }), 'dmetal');
   M.glassRail = prep(new THREE.MeshStandardMaterial({ color: 0x8fb4b8, roughness: 0.05, metalness: 0.9, transparent: true, opacity: 0.45 }), 'grail');
+  // b_envprog: the glow term lives in the shared environment program (uEK = 1); ?oldenvmat keeps the 'neon' patch
+  if (!OLDENV) { const nm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, color: 0x222222 }); nm.userData.envEK = 1; M.neon = prep(nm, 'neon'); } else
   M.neon = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, color: 0x222222 }), 'neon', (s) => {
     s.uniforms.uNight = U.uNight;
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')

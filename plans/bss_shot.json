@@ -1,0 +1,10 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&nowater",
+ "reset": false,
+ "shots": [
+  {
+   "name": "street_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(166.2,516,0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=160; c.position.set(166.2,1.7,518); c.lookAt(159,3.2,600); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); 0"
+  }
+ ]
+}

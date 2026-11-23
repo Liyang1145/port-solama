@@ -11,6 +11,7 @@ import { WILD, FALLS, LAKE, STREAM, catmull } from './mapdata.js';
 import { mulberry, clamp, smooth, lerp } from '../../util.js';
 import { prep } from '../../mats.js';
 import { U } from '../../env.js';
+import { OLDENV } from '../../envprog.js'; // b_envprog
 import { foliagePatch, GB, gbBuild, addFrond, mergeSimple, pinnateTex } from '../../veg.js';
 
 const CELL = 5;
@@ -311,12 +312,14 @@ function flowerClump(seed) {
 // wind: travelling gusts across the prairie (world-space waves) + per-blade flutter, weighted by aH²
 const windPatch = (amp) => (s) => {
   s.uniforms.uTime = U.uTime;
-  s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aH;')
+  // b_envprog: amplitude as a uniform -> grass and flowers share one program (?oldenvmat: baked constant)
+  let cA = amp.toFixed(2); if (!OLDENV) { s.uniforms.uWAmp = { value: +cA }; cA = 'uWAmp'; }
+  s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aH;' + (OLDENV ? '' : ' uniform float uWAmp;'))
     .replace('#include <begin_vertex>', `#include <begin_vertex>
   vec2 wp = vec2(instanceMatrix[3].x, instanceMatrix[3].z);
   float gust = sin(dot(wp, vec2(0.055, 0.031)) - uTime * 1.6) * 0.5 + 0.5; gust = gust * gust;
   float fl = sin(uTime * 4.7 + wp.x * 1.3 + wp.y * 0.7 + position.x * 9.0) * 0.06;
-  float k = aH * aH * ${amp.toFixed(2)};
+  float k = aH * aH * ${cA};
   vec3 wd = vec3(0.86, 0.0, 0.5);
   transformed += wd * (0.12 + 0.55 * gust) * k + vec3(fl, 0.0, fl * 0.6) * k;
   transformed.y -= (0.10 + 0.25 * gust) * k * 0.35;`);

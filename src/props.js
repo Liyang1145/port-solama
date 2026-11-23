@@ -7,6 +7,7 @@ import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
 import { CYBER } from './mapsel.js';
+import { OLDENV2 } from './envprog.js'; // b_envprog2
 import { furnMat, PB } from './streetkit.js';
 
 function streetLightGeo() {
@@ -111,7 +112,7 @@ export function buildProps(scene, city, T) {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);
     m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, s1); im.setMatrixAt(i, m4); glow.setMatrixAt(i, m4); const a = m4.clone();
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
-    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
+    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), CYBER ? POOL_S : s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
   // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
   // the lamp head, fading toward its rim (view-facing ratio) and the ground; warm sodium/LED white on 索拉纳港, the cyan/magenta
@@ -134,6 +135,14 @@ export function buildProps(scene, city, T) {
         a *= smoothstep(220.0, 60.0, vD) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
         gl_FragColor = vec4(vC * a * uK * smoothstep(0.35, 0.9, uNight), 1.0); }`,
   });
+  // b_envprog2: light pools and the cones share one program (uniform uPM picks the branch, each branch's code as it
+  // was); the pools get a white instanceColor so both are 'instanced + colour'. ?oldenvmat2: two programs
+  if (!OLDENV2) { const at = (t) => t.indexOf('void main(){'), body = (t) => t.slice(at(t) + 12, t.lastIndexOf('}')), head = (t) => t.slice(0, at(t));
+    const VS = 'uniform float uPM; ' + head(coneMat.vertexShader) + 'varying vec2 vUv;\nvoid main(){ if (uPM > 0.5) {' + body(poolMat.vertexShader) + '} else {' + body(coneMat.vertexShader) + '\n} }';
+    const FS = 'uniform float uPM; uniform vec3 uCol; ' + head(coneMat.fragmentShader) + 'varying vec2 vUv;\nvoid main(){ if (uPM > 0.5) {' + body(poolMat.fragmentShader) + '} else {' + body(coneMat.fragmentShader) + '\n} }';
+    for (const [m, k] of [[poolMat, 1], [coneMat, 0]]) { m.vertexShader = VS; m.fragmentShader = FS; m.uniforms.uPM = { value: k }; }
+    pools.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(lamps.length * 3).fill(1), 3);
+    poolMat.side = THREE.DoubleSide; poolMat.forceSinglePass = true; poolMat.userData.envCull = THREE.FrontSide; } // double-sided in the program like the cones, front-face culling restored after setMaterial (envprog.js)
   const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
   { const cA = new THREE.Color(1.0, 0.66, 0.36), cL = new THREE.Color(1.0, 0.86, 0.68), cC = new THREE.Color(0.45, 0.82, 1.0), cM = new THREE.Color(1.0, 0.35, 0.85);
     lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); }); }
@@ -333,14 +342,28 @@ export function updateProps(P, cam, night, phase) {
     P.signal.green.color.setRGB(nsGreen ? 0.1 : 0.01, nsGreen ? 3.0 : 0.06, nsGreen ? 1.2 : 0.03);
   }
 }
+// b_lampfix (霓港 only): the stall-street road under the cool-LED lamps was a white sheet. Measured (same camera, post on): the
+// additive 16 m ground-pool decal (gain 0.55 × cool white) gave almost all of it; the 10 point lights (60 / range 30 / decay 1.6)
+// added the pink/cyan specular blobs on the wet asphalt. New default: decal 0.45 gain on a 0.7× radius (a pool with an edge),
+// point lights 24 / 24 / 2.0, wet streaks unchanged — the road keeps lamp pools, the neon stays the key light.
+//   K = [intensity, range m, decay, ground-pool decal gain, wet-streak gain, ground-pool radius scale (build time)]; ?oldlamp → the old values (for comparison);
+//   ?lampk=I,R,D,pool,streak,poolscale overrides for tuning; globalThis.__LAMPK = [...] swaps them at runtime (test plans).
+// Map 索拉纳港 (A) keeps 60 / 30 / 1.6 untouched. No new lights, no new shader programs (distance / decay / colours are uniforms).
+const LAMP_OLD = [60, 30, 1.6, 1, 1, 1], LAMP_NEW = [24, 24, 2.0, 0.45, 1.0, 0.7];
+const LAMP_Q = typeof location !== 'undefined' ? location.search : '';
+const LAMP_K = /[?&]oldlamp\b/.test(LAMP_Q) ? LAMP_OLD : (() => { const m = /[?&]lampk=([0-9.,]+)/.exec(LAMP_Q); if (!m) return LAMP_NEW; const v = m[1].split(',').map(Number); return LAMP_NEW.map((d, i) => (isFinite(v[i]) && v[i] >= 0 && i < v.length ? v[i] : d)); })();
+const POOL_C = [0.45, 0.78, 1.0];
+const POOL_S = new THREE.Vector3(LAMP_K[5], 1, LAMP_K[5]); // b_lampfix: 霓港 ground-pool decal radius (16 m quad × K[5]; build time only)
 export function updateLampLights(P, lamps, pos, night) {
+  const K = CYBER ? (globalThis.__LAMPK || LAMP_K) : LAMP_OLD;
+  if (CYBER) { if (P.pools) P.pools.material.uniforms.uCol.value.setRGB(POOL_C[0] * K[3], POOL_C[1] * K[3], POOL_C[2] * K[3]); for (const pl of P.lampLights) { pl.distance = K[1]; pl.decay = K[2]; } }
   if (night < 0.05) { for (const l of P.lampLights) l.intensity = 0; for (const v of U.uLampP.value) v.w = 0; return; }
   // nearest lamps
   const best = [];
   for (const l of lamps) { const d = (l.hx - pos.x) ** 2 + (l.hz - pos.z) ** 2; if (d > 90 * 90) continue; best.push([d, l]); }
   best.sort((a, b) => a[0] - b[0]);
   P.lampLights.forEach((pl, i) => { const e = best[i]; const lp = U.uLampP.value[i]; if (!e) { pl.intensity = 0; lp.w = 0; return; }
-    lp.set(e[1].hx, e[1].hy + 0.05, e[1].hz, night); U.uLampC.value[i].setRGB(...(CYBER ? (e[1].mag ? [1.0, 0.35, 0.85] : [0.5, 0.85, 1.0]) : (e[1].led ? [1.0, 0.86, 0.7] : [1.0, 0.64, 0.34]))); pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = 60 * night; if (CYBER) pl.color.setRGB(...(e[1].mag ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); else pl.color.setRGB(...(e[1].led ? [1.0, 0.82, 0.62] : [1.0, 0.62, 0.34])); });
+    lp.set(e[1].hx, e[1].hy + 0.05, e[1].hz, night * K[4]); U.uLampC.value[i].setRGB(...(CYBER ? (e[1].mag ? [1.0, 0.35, 0.85] : [0.5, 0.85, 1.0]) : (e[1].led ? [1.0, 0.86, 0.7] : [1.0, 0.64, 0.34]))); pl.position.set(e[1].hx, e[1].hy - 0.4, e[1].hz); pl.intensity = K[0] * night; if (CYBER) pl.color.setRGB(...(e[1].mag ? [1.0, 0.35, 0.85] : [0.55, 0.85, 1.0])); else pl.color.setRGB(...(e[1].led ? [1.0, 0.82, 0.62] : [1.0, 0.62, 0.34])); });
 }
 
 // ---------- street furniture: café terraces on Tideline Drive, benches, bins, hydrants, parking spots

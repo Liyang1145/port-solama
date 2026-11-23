@@ -11,18 +11,41 @@ import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { kg, beam, tube, put, cableBundle, NEONC, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
+import { OLDENV2 } from '../../envprog.js'; // b_envprog2
 import { laundryLine } from './dress.js';
 import { shopStreet } from './arch.js';
+import { Viaduct, nearViaduct } from './viaduct.js';
+import { AlleyLayer } from './alley.js';
+import { RoofLayer } from './roofs.js';
+import { ParcelGapLayer } from './parcelgap.js';
+import { StorefrontLayer } from './storefront.js';
+import { ParcelFit } from './parcelfit.js'; // r6.4 b_parcelfit
+import { SvcCol } from './svccol.js'; // b_svccol
+import { ClutterCols } from './clutter.js'; // r6.4 b_clutter
+import { CLUT_CTX } from './clutcap.js';
+import { yardFurniture } from './portyard.js'; // r6.4 b_portyard
+import { yardLights, warehouseLight } from './portlight.js'; // r6.4 b_portlight
+import { GroundLayer } from './ground.js'; // r6.4 b_ground
 
 // r6.3 additive light cone (flood lights on cranes / masts): bright at the lamp (uv.y = 1), fading down and toward the silhouette,
 // vertex colour = light colour; night only (uNight)
 let CONE_MAT = null, CONE_G = null;
-function coneMat() {
-  if (CONE_MAT) return CONE_MAT;
-  CONE_MAT = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ vC = color; vT = uv.y; vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
-    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
-  return CONE_MAT;
+// b_envprog2: the port's lamp cones (port.js) were the same shader with another exponent / strength -> uniforms uCP / uCK, one program
+// for both (the wash path is unchanged; port cone vertices have uv.x <= 1). ?oldenvmat2: the old two shaders
+export function coneMatU(cp, ck) {
+  const m = coneMat0(); if (OLDENV2) return m;
+  return new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight, uCP: { value: cp }, uCK: { value: ck } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: m.vertexShader, fragmentShader: m.fragmentShader.replace('uniform float uNight;', 'uniform float uNight; uniform float uCP; uniform float uCK;').replace('pow(vT, 2.2) * uNight * 0.11', 'pow(vT, uCP) * uNight * uCK') });
+}
+function coneMat() { if (CONE_MAT) return CONE_MAT; if (OLDENV2) return coneMat0(); return (CONE_MAT = coneMatU(2.2, 0.11)); }
+function coneMat0() {
+  if (CONE_MAT && OLDENV2) return CONE_MAT;
+  const m0 = new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    // b_portlight: same program, second mode — uv.x >= 2 marks a "wash" vertex (ground light pool / light on a box face, portlight.js):
+    // its vertex colour is the added night radiance, view-independent. Cone vertices (uv.x in [0, 1]) take the old path unchanged.
+    vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ vC = color; vT = uv.y; vM = step(1.5, uv.x); vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
+    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ if (vM > 0.5) { gl_FragColor = vec4(vC * uNight, 1.0); return; } float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
+  if (OLDENV2) CONE_MAT = m0; return m0;
 }
 // cone from the lamp at (x, y, z) down to the ground, radius r at the bottom (unit geometry: apex at y=0 top, base at y=-1)
 function cone(b, x, y, z, h, r, col) {
@@ -41,6 +64,13 @@ export class BldgLayer {
   constructor(scene, mats, city) {
     this.mats = mats; this.stream = city.stream; if (mats && mats.vcol && !mats.vcolD) mats.vcolD = mats.vcol; /* LOD alias (kit.js) */
     this.lmats = Object.assign(Object.create(mats), { cone: coneMat() }); this.group = new THREE.Group(); this.group.name = 'bldglayer'; scene.add(this.group);
+    this.via = city.viaduct ? new Viaduct(scene, this.lmats, city, city.viaduct) : null; // r6.4 b_street2 elevated light-rail
+    this.alley = new AlleyLayer(scene, this.lmats, city); // r6.4 b_alley: Deco-core back-alley clutter (alley.js, own distance LOD)
+    this.roofs = new RoofLayer(scene, this.lmats, city); // r6.4 b_rooftop: low / mid-rise roof plant, dishes, solar, rails, billboards, aviation lights (roofs.js)
+    this.gaps = new ParcelGapLayer(scene, this.lmats, city); // r6.4 b_parcelgap: street-side closure of the 0–3 m slots between streamed parcels (parcelgap.js; after roofs: chains onParcel)
+    this.shops = new StorefrontLayer(scene, this.lmats, city); // r6.4 b_storefront: ground-floor shop types on streamed parcels (storefront.js; chains onParcel)
+    this.ground = new GroundLayer(scene, this.mats, city); // r6.4 b_ground: manholes / drains / trench covers / kerb wear within 80 m (ground.js, own ring LOD)
+    this.clut = new ClutterCols(city); // r6.4 b_clutter: sidewalk clutter colliders per streamed parcel / side row (clutter.js; chains onParcel)
     this.items = new Map(); this.built = new Map(); this.counts = { port: 0, walk: 0, bridge: 0, cables: 0 };
     const add = (k, it) => { let l = this.items.get(k); if (!l) this.items.set(k, l = []); l.push(it); };
     const P = city.parcels.filter((p) => !p.far);
@@ -49,8 +79,10 @@ export class BldgLayer {
     // only dress the front, so streets running past building sides were bare (b_night_street)
     this.counts.side = 0;
     for (const p of P) { if (!(p.style === 'mid' || p.style === 'deco' || p.style === 'downtown')) continue; const c = Math.cos(p.ang), sn = Math.sin(p.ang);
+      p.svcRoad = 0; // b_alleyface2: sides / back facing a road keep the glass band (city.js svcEdgesLot); no rng use
       for (const sd of [1, -1]) { const lz = sd * (p.w / 2 + 4.5); const x = p.x - sn * lz, z = p.z + c * lz; const n = city.graph.index.near(x, z);
-        if (n && n.d < n.e.hw + n.e.sw + 0.5 && n.e.sw > 0) { add(keyOf(p.x, p.z), { kind: 'side', p, sd }); this.counts.side++; } } }
+        if (n && n.d < n.e.hw + n.e.sw + 0.5 && n.e.sw > 0) { add(keyOf(p.x, p.z), { kind: 'side', p, sd }); this.counts.side++; p.svcRoad |= sd > 0 ? 1 : 2; } }
+      { const lx = -(p.d / 2 + 4.5); const n = city.graph.index.near(p.x + c * lx, p.z + sn * lx); if (n && n.d < n.e.hw + n.e.sw + 0.5) p.svcRoad |= 4; } }
     // facing pairs across a street
     const front = (p) => { const fx = Math.cos(p.ang), fz = Math.sin(p.ang); return { x: p.x + fx * p.d / 2, z: p.z + fz * p.d / 2, fx, fz }; };
     const cand = P.filter((p) => p.style === 'mid' || p.style === 'downtown' || p.style === 'deco');
@@ -70,11 +102,14 @@ export class BldgLayer {
       const ox = -a.fz, oz = a.fx; const la = 0, lb = (b.x - a.x) * ox + (b.z - a.z) * oz; const lm = (la + lb) / 2;
       const A = { x: a.x + ox * lm, z: a.z + oz * lm }; const Bp = { x: A.x + a.fx * ((b.x - a.x) * a.fx + (b.z - a.z) * a.fz), z: A.z + a.fz * ((b.x - a.x) * a.fx + (b.z - a.z) * a.fz) };
       const mid = { x: (A.x + Bp.x) / 2, z: (A.z + Bp.z) / 2 }; const nr = city.graph.index.near(mid.x, mid.z); if (!nr || nr.d > nr.e.hw + 1) continue;
+      if (nearViaduct(city.viaduct, A, Bp, 13)) continue; // r6.4: no skyways / cross-street cables through the light-rail deck
       const hmin = Math.min(p.h, q.h); const r = R(); const seed = (p.seed ^ q.seed) >>> 0;
       const dt = p.style === 'downtown' && q.style === 'downtown';
       if ((dt || p.style === 'mid' || q.style === 'mid') && hmin > 14 && r < (dt ? 0.4 : 0.22)) { used.add(i); used.add(best); add(keyOf(A.x, A.z), { kind: 'walk', A, B: Bp, y: Math.min(hmin - 4, 6.5 + R() * 2.5), seed, dt }); this.counts.walk++; }
       else if (p.style !== 'downtown' && q.style !== 'downtown' && hmin > 9 && r < 0.75) { used.add(i); used.add(best); add(keyOf(A.x, A.z), { kind: 'cables', A, B: Bp, hmin, seed }); this.counts.cables++; }
     }
+    // r6.4 b_parcelfit: streamed-parcel colliders fitted to the drawn footprint + shop rows (parcelfit.js; after every planner, chains onParcel)
+    this.fit = new ParcelFit(city, [...this.items.values()].flat().filter((it) => it.kind === 'side'));
     // sky bridges between megatowers
     const tall = P.filter((p) => p.style === 'downtown' && p.h >= 90 && p.w > 26 && p.d > 26); const tu = new Set();
     for (let i = 0; i < tall.length; i++) {
@@ -88,6 +123,7 @@ export class BldgLayer {
         tu.add(i); tu.add(j); add(keyOf(p.x, p.z), { kind: 'bridge', p, q, y, seed: (p.seed * 31 + q.seed) >>> 0 }); this.counts.bridge++; break;
       }
     }
+    this.svccol = new SvcCol(city, this.gaps, this.fit); // b_svccol: service-face hatch / meter colliders + slot baffles / heap in place at startup (svccol.js; after every planner)
   }
   buildChunk(key, list) {
     const W = mkWorld();
@@ -95,19 +131,28 @@ export class BldgLayer {
       if (it.kind === 'port') { const lw = mkWorld(); const wh = withSeed(it.p.seed, () => rng() < 0.45); withSeed((it.p.seed ^ 0x9e37) >>> 0, () => portExtras(lw, it.p, wh));
         const m = parcelMatrix(it.p); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, it.p.x, it.p.z).append(b, m); }
       else if (it.kind === 'side') { const lw = mkWorld(); const p = it.p; const dt = p.style === 'downtown'; const ins = dt ? 1 : 0; const ctx = { W: lw };
-        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6 }));
-        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m); }
+        const bays = []; // b_corner: the side row's bays (same record as SHOP_LOG) -> storefront.js corner shops
+        const m = parcelMatrix(p).multiply(new THREE.Matrix4().makeRotationY(-it.sd * Math.PI / 2)); CLUT_CTX.m = m; // b_clutter (clutcap.js kerb check)
+        withSeed((p.seed ^ (it.sd > 0 ? 0x5151 : 0xa3a3)) >>> 0, () => shopStreet(ctx, p.w / 2 - ins, -p.d / 2 + ins + 0.5, p.d / 2 - ins - 0.5, 0.15, dt ? 5.0 : 4.4, 4.5, { grit: dt ? 0.35 : 0.7, blade: rng() < 0.6, log: bays })); CLUT_CTX.m = null; for (const b of lw.buckets.values()) if (b.vc) W.b(b.mat, p.x, p.z).append(b, m);
+        if (this.clut) this.clut.take(it, m, 1); // b_clutter
+        if (this.shops) this.shops.onSide(key, it, bays, m); }
       else withSeed(it.seed, () => (it.kind === 'walk' ? skyway(W, it) : it.kind === 'bridge' ? skyBridge(W, it) : streetCables(W, it)));
     }
-    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false } });
+    return W.build(this.group, this.lmats, { neon: { cast: false }, glassRail: { cast: false }, cone: { cast: false, receive: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } });
   }
   sync() {
     const st = this.stream; if (!st) return;
+    if (this.via) this.via.sync(globalThis.__G && globalThis.__G.camera); // r6.4 light-rail near detail (own distance LOD)
+    if (this.alley) this.alley.sync(globalThis.__G && globalThis.__G.camera);
+    if (this.roofs) this.roofs.sync(globalThis.__G && globalThis.__G.camera);
+    if (this.gaps) this.gaps.sync(globalThis.__G && globalThis.__G.camera);
+    if (this.shops) this.shops.sync(globalThis.__G && globalThis.__G.camera);
+    if (this.ground) this.ground.sync(globalThis.__G && globalThis.__G.camera);
     // detail LOD: small clutter meshes ('vcolD') only within DETAIL_R of the camera (chunk centre distance)
     const cam = globalThis.__G && globalThis.__G.camera; if (cam) { const p = cam.position; let n = 0;
       for (const c of st.chunks.values()) { if (!c.near) continue; const on = Math.hypot(c.cx - p.x, c.cz - p.z) < DETAIL_R + Math.max(0, p.y - 40) * 0.5;
-        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|')) { m.visible = on; n += on; } }
-      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
+        for (const m of c.near) if (m.name.startsWith('vcolD|') || m.name.startsWith('puddle|') || m.name.startsWith('steam|') || m.name.startsWith('nglow|') || m.name.startsWith('nrefl|')) { m.visible = on; n += on; } }
+      for (const b of this.built.values()) for (const m of b) if (m.name.startsWith('vcolD|') || m.name.startsWith('steam|') || m.name.startsWith('nglow|') || m.name.startsWith('nrefl|')) { const q = m.geometry.boundingSphere || (m.geometry.computeBoundingSphere(), m.geometry.boundingSphere); m.visible = q.center.distanceTo(p) < DETAIL_R + q.radius; }
       this.detailOn = n; }
     for (const [k, list] of this.items) {
       const c = st.chunks.get(k); const on = !!(c && c.near); const b = this.built.get(k);
@@ -146,12 +191,15 @@ function portExtras(W, p, warehouse) {
     for (let i = 0; i < 3; i++) tube(v, [-hx + 2, h + 2.5, rz - 1 + i], [hx - 1, h + 2.5, rz - 1 + i], rand(0.15, 0.3), pick([pc, [0.7, 0.7, 0.68], [0.25, 0.4, 0.3]]), G.tube6);
     if (hz > 12) { const tz = -hz + 5; _ry(v, G.cyl12, 0, h + 2.4, tz, 1.5, 7, 1.5, [0.85, 0.85, 0.82]); for (const x of [-2.4, 2.4]) box(v, x - 0.3, h, tz - 1.4, x + 0.3, h + 1.6, tz + 1.4, {}, DARK); }
     for (let i = 0; i < 3; i++) { const x = rand(-hx + 2, hx - 2), z = rand(-hz + 2, hz - 2); box(v, x - 0.7, h, z - 0.7, x + 0.7, h + 0.9, z + 0.7, {}, [0.55, 0.56, 0.57]); }
+    warehouseLight(W.b('cone', 0, 0), p); // r6.4 b_portlight: apron pool under the work light (no rng; after the last draw)
     return;
   }
   // container yard: rail-mounted gantry crane over the stacks + flood-light masts
   const cy = pick([[0.95, 0.68, 0.08], [0.9, 0.35, 0.1], [0.2, 0.45, 0.75]]); const xL = -hx - 1.4, xR = hx + 1.4, Hc = 19;
-  for (const x of [xL, xR]) beam(v, [x, 0.06, -hz], [x, 0.06, hz], 0.25, [0.25, 0.25, 0.26], 0.12); // rails
-  const zc = rand(-hz + 9, hz - 9);
+  const gy = p.gf && p.gf.yard; // r6.4 b_genfit: yards whose rails / masts / crane would stand on the sidewalk (genfit.js); others unchanged
+  if (!gy) for (const x of [xL, xR]) beam(v, [x, 0.06, -hz], [x, 0.06, hz], 0.25, [0.25, 0.25, 0.26], 0.12); // rails
+  else [xL, xR].forEach((x, i) => beam(v, [x, 0.06, gy.rail[i][0]], [x, 0.06, gy.rail[i][1]], 0.25, [0.25, 0.25, 0.26], 0.12));
+  let zc = rand(-hz + 9, hz - 9); if (gy && gy.zc !== null) zc = gy.zc; // the draw is still made (rng order unchanged)
   for (const x of [xL, xR]) {
     for (const s of [-1, 1]) beam(v, [x, 0.6, zc + s * 5], [x, Hc, zc + s * 2.2], 0.9, cy, 0.9);
     box(v, x - 0.7, 0.1, zc - 6, x + 0.7, 1.2, zc + 6, {}, cy.map((q) => q * 0.8)); // sill beam / bogies
@@ -165,7 +213,7 @@ function portExtras(W, p, warehouse) {
   const ys = rand(9, 13); for (const [ox, oz] of [[-1.2, -2.5], [1.2, -2.5], [-1.2, 2.5], [1.2, 2.5]]) tube(v, [tx + ox * 0.6, Hc + 1.8, zc + oz * 0.6], [tx + ox, ys + 0.6, zc + oz], 0.03, DARK, G.tube4);
   box(v, tx - 1.3, ys, zc - 6.1, tx + 1.3, ys + 0.6, zc + 6.1, {}, cy.map((q) => q * 0.85)); // spreader
   if (rng() < 0.6) box(v, tx - 1.22, ys - 2.6, zc - 6.1, tx + 1.22, ys, zc + 6.1, {}, pick([[0.62, 0.16, 0.12], [0.12, 0.32, 0.55], [0.2, 0.45, 0.3]])); // a lifted box
-  for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) { put(v, G.cyl8, x, 11, z, 0.25, 22, 0.25, STEEL); box(v, x - 1.6, 22, z - 0.25, x + 1.6, 22.3, z + 0.25, {}, DARK);
+  for (const [x, z] of (gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]])) { put(v, G.cyl8, x, 11, z, 0.25, 22, 0.25, STEEL); box(v, x - 1.6, 22, z - 0.25, x + 1.6, 22.3, z + 0.25, {}, DARK);
     for (const o of [-1.1, 0, 1.1]) put(nb, G.box, x + o, 21.85, z, 0.7, 0.12, 0.4, [0.95, 0.9, 0.75]); }
   put(nb, G.ball, tx, Hc + 3.9, zc, 0.2, 0.2, 0.2, [1, 0.5, 0.05]);
   // r6.2b night read: sodium work lights under both box girders, red obstruction lights on the girder ends + leg tops,
@@ -182,6 +230,8 @@ function portExtras(W, p, warehouse) {
   for (const x of [xL, xR]) for (const s of [-1, 1]) put(nb, G.ball, x, Hc - 2, zc + s * 2.2 + s * 0.5, 0.18, 0.18, 0.18, [1, 0.08, 0.05]);
   cone(cb, tx, Hc - 2.9, zc + 4.2, Hc - 3, 3, wh);
   for (const [x, z] of [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]) cone(cb, x, 21.8, z, 21.7, 7, [0.6, 0.58, 0.5]);
+  yardFurniture(v, nb, cb, p, { kg, beam, tube, put }, cone); // r6.4 b_portyard: fence, gate, vehicles, inner masts (no rng; p.py)
+  yardLights(cb, p, { xL, xR, zc, Hc, tx }, gy ? gy.mast : [[xL - 1.5, -hz + 1], [xR + 1.5, hz - 1]]); // r6.4 b_portlight: ground pools + box wash in 'cone' (no rng)
 }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 function _ry(b, g, x, y, z, sx, sy, sz, col) { _q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2); _s.set(sx, sy, sz); _p.set(x, y, z); _m.compose(_p, _q, _s); b.geom(g, _m, {}, col); }

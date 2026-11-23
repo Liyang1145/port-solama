@@ -5,6 +5,7 @@ import { prep } from './mats.js';
 import { bodyProto } from './carbody.js';
 import { buildInterior, interiorMats, setInteriorNight } from './carinterior.js';
 import { U } from './env.js';
+import { OLDENV2 } from './envprog.js'; // b_envprog2
 import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
 const PAINTS = [0xf2f2ee, 0x101215, 0x8c9096, 0x1d3f7a, 0x7a1418, 0xd7d3c8, 0x2f4f4f, 0xb5b8bb, 0x5b1e3a, 0x0d5c63, 0xe36b2c, 0x2b2b2e, 0xcfc5a8, 0x6b7f99];
@@ -321,10 +322,14 @@ export class Vehicle {
     // v3.4 headlight pools on the road ahead + red tail glow behind (additive decals, visible at night only)
     if (!GCACHE.has('hlpool')) {
       const g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
-      const mk = (col, cone) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uNight: U.uNight, uCol: { value: new THREE.Color(...col) } },
+      // b_envprog2: head cone and tail pool share one program (uniform uCone picks the branch, each branch's code unchanged); ?oldenvmat2: two
+      const FC = 'float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = smoothstep(1.0, 0.1, x / w) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
+      const FP = 'float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
+      if (!OLDENV2) GCACHE.set('hlpoolFS', 'uniform float uNight; uniform vec3 uCol; uniform float uCone; varying vec2 vUv; void main(){ if (uCone > 0.5) { ' + FC + ' } else { ' + FP + ' } }');
+      const mk = (col, cone) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: Object.assign({ uNight: U.uNight, uCol: { value: new THREE.Color(...col) } }, OLDENV2 ? {} : { uCone: { value: cone ? 1 : 0 } }),
         vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
         fragmentShader: cone ? 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = smoothstep(1.0, 0.1, x / w) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0); }'
-                             : 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0); }' });
+                             : 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0); }', ...(OLDENV2 ? {} : { fragmentShader: GCACHE.get('hlpoolFS') }) });
       GCACHE.set('hlpool', { g, head: mk([0.42, 0.38, 0.31], true), tail: mk([0.5, 0.03, 0.02], false) });
     }
     { const P = GCACHE.get('hlpool');
@@ -379,7 +384,7 @@ export class Vehicle {
     const r = this.dims.W * 0.5; const half = this.dims.L * 0.5 - r;
     for (const k of [-1, 0, 1]) {
       const cx = this.x + nfx * half * k, cz = this.z + nfz * half * k;
-      const res = city.col.resolve(cx, cz, r, 0.5);
+      const res = city.col.resolve(cx, cz, r, 0.5, undefined, this.y + this.dims.H, this.y); // b_canopycol: body height vs overhead boxes
       if (res.hit) {
         const dx = res.x - cx, dz = res.z - cz; this.x += dx; this.z += dz;
         const vn = this.vx * res.nx + this.vz * res.nz;

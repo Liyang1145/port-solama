@@ -4,6 +4,7 @@ import { prep } from './mats.js';
 import { U } from './env.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
+import { OLDENV } from './envprog.js'; // b_envprog
 
 function trunkTexture() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 512; const g = c.getContext('2d');
@@ -16,7 +17,10 @@ function trunkTexture() {
 
 export const foliagePatch = (s, strength = 0.6, transK = 1) => {
   s.uniforms.uTime = U.uTime; s.uniforms.uSunCol = U.uSunCol; s.uniforms.uNightF = U.uNight;
-  s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aSway;')
+  // b_envprog: strength / transmission as uniforms -> every foliage material shares one program (?oldenvmat: baked constants)
+  const tk = strength > 0 ? transK : 0; let cS = strength.toFixed(2), cT = tk.toFixed(2);
+  if (!OLDENV) { s.uniforms.uFStr = { value: +cS }; s.uniforms.uFTr = { value: +cT }; cS = 'uFStr'; cT = 'uFTr'; }
+  s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; attribute float aSway;' + (OLDENV ? '' : ' uniform float uFStr;'))
     .replace('#include <begin_vertex>', `#include <begin_vertex>
 #ifdef USE_INSTANCING
   float ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.23;
@@ -28,8 +32,8 @@ export const foliagePatch = (s, strength = 0.6, transK = 1) => {
   transformed.z += cos(uTime * 1.1 + ph) * 0.10 * sw;
   transformed.y += sin(uTime * 2.3 + ph + position.x) * 0.05 * sw;`)
     .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
-  objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), ${strength.toFixed(2)}));`);
-  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uSunCol; uniform float uNightF;')
+  objectNormal = normalize(mix(objectNormal, vec3(0.0, 1.0, 0.0), ${cS}));`);
+  s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uSunCol; uniform float uNightF;' + (OLDENV ? '' : ' uniform float uFTr;'))
     // r6.1: back faces of double-sided leaf cards get their normal bent toward the sky (still facing the viewer, so the BRDF
     // stays well-behaved): crown undersides are lit by the sky/canopy fill instead of reading as black from below
     .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
@@ -45,7 +49,7 @@ export const foliagePatch = (s, strength = 0.6, transK = 1) => {
     // plus a sky-fill so undersides read green instead of black
     vec3 nF = normal; float trans = clamp(-dot(nF, sunV), 0.0, 1.0);
     vec3 tcol = diffuseColor.rgb * vec3(1.05, 1.25, 0.55);
-    totalEmissiveRadiance += tcol * uSunCol * (back * 0.5 + trans * trans * 0.22) * ${(strength > 0 ? transK : 0).toFixed(2)} + diffuseColor.rgb * vec3(0.05, 0.065, 0.075) * (1.0 - uNightF); }`);
+    totalEmissiveRadiance += tcol * uSunCol * (back * 0.5 + trans * trans * 0.22) * ${cT} + diffuseColor.rgb * vec3(0.05, 0.065, 0.075) * (1.0 - uNightF); }`);
 };
 
 // --- v3.5 palms: three species (coconut / royal / sabal) with curved drooping pinnate or costapalmate fan fronds -----------------

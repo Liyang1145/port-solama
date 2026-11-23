@@ -1,0 +1,10 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0&ao=0&noshaft",
+ "reset": false,
+ "shots": [
+  {
+   "name": "prog_check",
+   "js": "__G.setHour(22.0); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1060,40,-905); c.lookAt(-1160,4,-975); c.updateMatrixWorld(); __G.neon.port && __G.neon.port.sync(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.render(); const R=__G.renderer, gl=R.getContext(); const P=R.info.programs; const bad=[]; const mine=[]; for (const p of P) { const k=String(p.cacheKey); { if (!/portbox|qpuddle/.test(k) && !/uNight;?\\s*varying vec3 vC|aG/.test(k.slice(0,400))) {}  const ok=gl.getProgramParameter(p.program, gl.LINK_STATUS); if (/portbox|qpuddle|attribute vec4 aG/.test(k)) mine.push((k.match(/portbox|qpuddle|attribute vec4 aG/)||['?'])[0]+':'+ok); if(!ok) bad.push(gl.getProgramInfoLog(p.program)); } } const pq=__G.neon.port; const chk=(m)=>{ if(!m) return 'none'; const cp=R.properties.get(m).currentProgram; return cp ? gl.getProgramParameter(cp.program, gl.LINK_STATUS) : 'unused'; }; JSON.stringify({glowLink: chk(pq.glow && pq.glow.material), coneLink: chk(pq.mats.cone), poolLink: chk(pq.mats.pool), programs: P.length, mine, bad: bad.map(s=>String(s).slice(0,300)), glow: !!(__G.neon.port && __G.neon.port.glow), pq: __G.neon.port.tris()})"
+  }
+ ]
+}

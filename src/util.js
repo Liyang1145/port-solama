@@ -45,6 +45,9 @@ export class ColliderGrid {
     const ex = Math.abs(ux) * hl + Math.abs(uz) * hw, ez = Math.abs(uz) * hl + Math.abs(ux) * hw;
     const b = this.add(cx - ex, cz - ez, cx + ex, cz + ez, h, tag); b.o = { cx, cz, ux, uz, hl, hw }; return b;
   }
+  // b_canopycol (map B): overhead box (bottom y0 > 0: shutter housings, door hoods over a service door) in a grid of its own, so every
+  // query / boxes scan / hash of the ground-up colliders stays as it was. Only resolve() reads it, for a body reaching into y0..h.
+  addOver(cx, cz, ux, uz, hl, hw, y0, h, tag = 'over') { const g = this.over || (this.over = new ColliderGrid(this.cell)); const b = g.addOBB(cx, cz, ux, uz, hl, hw, h, tag); b.y0 = y0; this.overY0 = Math.min(this.overY0 ?? Infinity, y0); return b; }
   query(x, z, r, out = []) {
     out.length = 0; const c = this.cell; const seen = new Set();
     for (let ix = Math.floor((x - r) / c); ix <= Math.floor((x + r) / c); ix++)
@@ -55,11 +58,13 @@ export class ColliderGrid {
     return out;
   }
   // push a circle (x,z,r) out of boxes; returns {x,z,hit,nx,nz}
-  resolve(x, z, r, y = 0, res = {}) {
+  // b_canopycol: bot / top = the body's feet / head (default: a walker, y = feet + 0.5, 1.8 m tall); used for overhead boxes only
+  resolve(x, z, r, y = 0, res = {}, top = y + 1.3, bot = y - 0.5) {
     res.hit = false; res.nx = 0; res.nz = 0;
     const list = this.query(x, z, r + 1, this._tmp || (this._tmp = []));
-    for (let it = 0; it < 2; it++) for (const b of list) {
-      if (y > b.h) continue;
+    const O = this.over && top > this.overY0 ? this.over.query(x, z, r + 1, this._tmpO || (this._tmpO = [])) : null; const L2 = O && O.length ? (this._L2 || (this._L2 = [list, O])) : (this._L1 || (this._L1 = [list]));
+    for (let it = 0; it < 2; it++) for (const L of L2) for (const b of L) {
+      if (L === O ? (top <= b.y0 || bot >= b.h) : y > b.h) continue;
       if (b.o) { // oriented: work in the box frame
         const o = b.o; const rx = x - o.cx, rz = z - o.cz; const la = rx * o.ux + rz * o.uz, lw = -rx * o.uz + rz * o.ux;
         const ca = clamp(la, -o.hl, o.hl), cw = clamp(lw, -o.hw, o.hw); let da = la - ca, dw = lw - cw; const q2 = da * da + dw * dw;

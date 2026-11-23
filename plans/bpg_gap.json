@@ -1,0 +1,25 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft",
+ "reset": false,
+ "shots": [
+  {
+   "name": "gap_stat",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(166.2,516,0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=600; c.position.set(166.2,1.7,518); c.lookAt(159,3.2,600); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.info.autoReset=false; R.info.reset(); __G.render(); const rc=R.info.render.calls, rt=R.info.render.triangles; R.info.autoReset=true; const B=__G.neon&&__G.neon.bldg; const L=B&&B.gaps; const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; JSON.stringify({frameCalls:rc, frameTris:rt, programs:R.info.programs.length, keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey)), cam:c.position.toArray(), stream:__G.stream.tris(), gapTris:L?L.tris():0, gapCalls:L?L.calls():0, gapStats:L?L.stats:null, nearGaps:L?L.gaps.filter(q=>{const p=L.probe(q); return Math.hypot(p.out[0]-167,p.out[1]-560)<50;}).map(q=>[q.id,+q.g0.toFixed(2),q.L.type,!!q.vis]):null})"
+  },
+  {
+   "name": "prog_census",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(166.2,516,0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=600; c.position.set(166.2,1.7,518); c.lookAt(159,3.2,600); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; const R=__G.renderer; const t0=performance.now(); R.compile(__G.scene, c); JSON.stringify({ms:Math.round(performance.now()-t0), n:R.info.programs.length, keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey))})"
+  },
+  {
+   "name": "walk",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; const L=__G.neon.bldg.gaps; if(!L) 'NOLAYER'; else { const nar=L.gaps.filter(q=>q.narrow), wid=L.gaps.filter(q=>!q.narrow); const pickN=(a,n)=>{const o=[]; const b=a.slice(); while(o.length<n&&b.length){o.push(b.splice(Math.floor(Math.random()*b.length),1)[0]);} return o;}; const out={stats:L.stats, narrow:[], wide:[]}; const steer=(q,start,target,frames)=>{ g.override=null; if(g.P.car) g.toggleCar(); g.tp(start[0],start[1],0); let mt=-9; for(let f=0;f<frames;f+=4){ const dx=target[0]-g.P.pos.x, dz=target[1]-g.P.pos.z; g.cam.yaw=Math.atan2(dx,dz)+Math.PI; g.override={mx:0,mz:1}; __G.step(4); mt=Math.max(mt, L.depthOf(q,g.P.pos.x,g.P.pos.z).t); } g.override=null; return +mt.toFixed(2); }; for(const q of pickN(nar,3)){ const pr=L.probe(q); const a=steer(q,pr.out,pr.deep,360), b=steer(q,pr.side,pr.deep,360); out.narrow.push({id:q.id,g0:pr.g0,type:pr.type,D:pr.D,heap:pr.heap,maxDepthFront:a,maxDepthSide:b,blocked:Math.max(a,b)<0.3}); } for(const q of pickN(wid,1)){ const pr=L.probe(q); g.override=null; if(g.P.car) g.toggleCar(); g.tp(pr.out[0],pr.out[1],pr.yaw); let wi=0, f=0, mt=-9; const tr=[]; while(f<3000 && wi<pr.path.length){ const w=pr.path[wi]; const d=L.depthOf(q,g.P.pos.x,g.P.pos.z); if((d.t>=w[2]-0.1 && Math.abs(d.x-w[3])<0.4) || d.t>=w[2]+0.35 || Math.hypot(w[0]-g.P.pos.x,w[1]-g.P.pos.z)<0.35){wi++; tr.push(f); continue;} const dx=w[0]-g.P.pos.x, dz=w[1]-g.P.pos.z; g.cam.yaw=Math.atan2(dx,dz)+Math.PI; g.override={mx:0,mz:1}; __G.step(2); f+=2; mt=Math.max(mt, d.t); } g.override=null; const d=L.depthOf(q,g.P.pos.x,g.P.pos.z); out.wide.push({id:q.id,g0:pr.g0,type:pr.type,D:pr.D,path:pr.path.map(w=>[w[2],w[3]]),reached:wi,frames:f,maxDepth:+mt.toFixed(2),final:[+d.t.toFixed(2),+d.x.toFixed(2)],ok:wi>=pr.path.length, tr}); } JSON.stringify(out); }"
+  },
+  {
+   "name": "street_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(166.2,516,0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=600; c.position.set(166.2,1.7,518); c.lookAt(159,3.2,600); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); 0"
+  }
+ ]
+}
