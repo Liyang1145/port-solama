@@ -413,6 +413,7 @@ export function buildRegion(ctx, H) {
         else if (c.det && d > 440) this.unload(c);
       }
       if (budget >= 99) return;
+      this.pump(); // perf_debug5
       if (this.job && this.job.c !== best && (!best || bd < this.job.d - 60)) this.job = null; // a much nearer chunk wins
       if (!this.job && best) this.job = this.begin(best, bd);
       if (this.job && this.step(this.job, 3)) this.job = null;
@@ -428,9 +429,24 @@ export function buildRegion(ctx, H) {
     },
     finish(c, Wd) {
       c.det = Wd.build(this.scene, this.M, { glassRail: { cast: false }, mural0: { cast: false }, mural1: { cast: false }, mural2: { cast: false }, mural3: { cast: false }, mural4: { cast: false }, mural5: { cast: false }, pool: { cast: false } });
-      for (const m of c.far) m.visible = false; this.stats.loads++; this.stats.loaded++;
+      this.stats.loads++; this.stats.loaded++;
+      // perf_debug5 (?oldtpwarm = old): the chunk's detailed meshes used to appear in the same frame they were built, so every
+      // shader program they needed (new material variants first seen on that side of the map) was compiled and linked inside
+      // that frame's draw (the 250-370 ms hitch after a teleport / respawn). Now they stay hidden behind the far LOD until
+      // renderer.compileAsync says their programs are ready (non-blocking with KHR_parallel_shader_compile), then swap in.
+      const A = this.async; if (!A || A.sync) { for (const m of c.far) m.visible = false; return; }
+      const dets = c.det; for (const m of dets) m.visible = false; c.pend = true; this.stats.pend = (this.stats.pend || 0) + 1;
+      const show = () => { c.pend = false; this.stats.pend--; if (c.det !== dets) return; for (const m of dets) m.visible = true; for (const m of c.far) m.visible = false; };
+      const R = A.renderer; if (A.par === undefined) A.par = !!R.extensions.get('KHR_parallel_shader_compile');
+      if (A.par) { const fake = { traverse: (fn) => { for (const m of dets) fn(m); }, traverseVisible() {} }; try { R.compileAsync(fake, A.camera, A.scene).then(show, show); } catch (e) { show(); } return; }
+      (A.q || (A.q = [])).push({ dets, i: 0, show }); // no parallel compile: link at most ONE new program per frame (pump), then swap in
     },
-    load(c) { const j = this.begin(c, 0); this.step(j, 1e9); },
+    pump() { const A = this.async; if (!A || !A.q || !A.q.length) return; const R = A.renderer, P = R.info.programs; const j = A.q[0];
+      while (j.i < j.dets.length) { const m = j.dets[j.i++]; const n0 = P.length; let ms;
+        try { ms = R.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, A.camera, A.scene); } catch (e) { ms = null; }
+        if (P.length > n0) { if (ms) for (const mt of ms) { const pr = R.properties.get(mt).currentProgram; if (pr) pr.getUniforms(); } return; } } // getUniforms: forces the link now
+      A.q.shift(); j.show(); },
+    load(c) { const A = this.async; const k = A && A.sync; if (A) A.sync = true; const j = this.begin(c, 0); this.step(j, 1e9); if (A) A.sync = k; },
     unload(c) { for (const m of c.det) { this.scene.remove(m); m.geometry.dispose(); } c.det = null; for (const m of c.far) m.visible = true; this.stats.unloads++; this.stats.loaded--; },
     // a road-following point ~35 m along the nearest region road that gets closer to (tx, tz); null if not on a region road
     waypoint(x, z, tx, tz) {

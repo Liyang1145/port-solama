@@ -163,6 +163,7 @@ async function load() {
   };
   for (const l of [env.sun, env.sunFar]) if (l.shadow.camera.layers.mask & 0xFFFFFFFE) l.shadow.camera.layers.enable(3); // a shadow camera with its own layers must also see CHAR_LAYER
   mark('post+probes');
+  if (!CYBER && city.region && !OLD.tpwarm) city.region.async = { renderer, camera, scene, sync: false }; // perf_debug5: streamed chunks swap in after their programs compiled (?oldtpwarm)
   const game = new Game({ renderer, scene, camera, env, city, G, T, props, Q, SNAP });
   let hour = Q.has('hour') ? +Q.get('hour') : CYBER ? 21.6 : 18.3; // r6.0: 霓港 opens at night
   env.setHour(hour, true); mark('game');
