@@ -13,12 +13,12 @@ const SET = {
   water: "g.override=null; if(g.P.car) g.toggleCar(); G.setHour(17.2); g.tp(-330,-30,-Math.PI/2); G.step(6);",
 };
 srv.listen(0, async () => {
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=' + (process.env.JSH || 1000), '--disable-dev-shm-usage', '--renderer-process-limit=1'] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=' + (process.env.JSH || 1000) + ' --max-semi-space-size=2 --optimize-for-size', '--disable-dev-shm-usage', '--renderer-process-limit=1', ...(process.env.SINGLE ? ['--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] : [])] });
   let perr = 0;
   for (const [vn, q] of V) {
     const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 }); const p = await ctx.newPage(); p.setDefaultTimeout(1100000);
     p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', vn, e.message.slice(0, 200)); });
-    const T0 = Date.now(); await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&dpr=1&map=gta&hour=15&${q}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 }); console.log(vn, 'ready s', (Date.now() - T0) / 1000 | 0);
+    const T0 = Date.now(); await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&dpr=1&map=gta&hour=${process.env.HOUR || 15}&${q}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 }); console.log(vn, 'ready s', (Date.now() - T0) / 1000 | 0);
     for (const sc of SCN) {
       const t = Date.now();
       await p.evaluate(`(() => { const G = __G, g = G.game; ${SET[sc]} G.sprobe.t = 99; if (G.sprobe.spn) G.sprobe.spn.every = 1; return 0; })()`);
