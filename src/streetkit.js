@@ -31,10 +31,10 @@ float fn3(vec3 p){ return fn2(p.xz + p.y * 1.7) * 0.5 + fn2(p.xy * 1.3 - p.z) * 
       .replace('#include <color_fragment>', `#include <color_fragment>
   { float wk = floor(vPbr.z + 0.5); fRough = vPbr.x > 0.0 ? vPbr.x : 0.85; fMetal = vPbr.y;
     vec3 p = vFW; float nz = fn3(p * 2.3) * 0.6 + fn3(p * 9.0) * 0.4;
-    float up = clamp(vFN.y, 0.0, 1.0); float foot = smoothstep(0.75, 0.05, p.y);
+    float up = clamp(vFN.y, 0.0, 1.0); float foot = (1.0 - smoothstep(0.05, 0.75, p.y));
     if (wk == 1.0) { // painted metal: chipped paint exposing dark steel, rust bleeding down from chips, sun-faded tops
       float chip = smoothstep(0.80, 0.86, fn3(p * 7.0) * 0.7 + fn3(p * 23.0) * 0.3 + foot * 0.12);
-      float rust = smoothstep(0.62, 0.9, fn2(vec2((p.x + p.z) * 18.0, p.y * 0.9))) * smoothstep(0.7, 0.2, fract(p.y * 0.8 + fn2(p.xz * 3.0))) * 0.5;
+      float rust = smoothstep(0.62, 0.9, fn2(vec2((p.x + p.z) * 18.0, p.y * 0.9))) * (1.0 - smoothstep(0.2, 0.7, fract(p.y * 0.8 + fn2(p.xz * 3.0)))) * 0.5;
       diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.33))) * 1.08, 0.3), up * 0.5);
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.2, 0.11), rust * (0.25 + foot * 0.5));
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.15, 0.14), chip); fMetal = mix(fMetal, 0.75, chip); fRough = mix(fRough, 0.55, chip) + rust * 0.3;

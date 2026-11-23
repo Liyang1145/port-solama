@@ -375,7 +375,7 @@ export function buildNature(scene, city, T, field) {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vBW; varying vec3 vBN;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvBW = position; vBN = normal;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vBW; varying vec3 vBN;' + NOISE)
       .replace('#include <map_fragment>', `#include <map_fragment>
-  float mz = smoothstep(0.35, 0.75, nvn(vBW.xy * 1.7 + vBW.zz * 1.3) * 0.7 + max(vBN.z, 0.0) * 0.35 + smoothstep(6.0, 0.0, vBW.y) * 0.35);
+  float mz = smoothstep(0.35, 0.75, nvn(vBW.xy * 1.7 + vBW.zz * 1.3) * 0.7 + max(vBN.z, 0.0) * 0.35 + (1.0 - smoothstep(0.0, 6.0, vBW.y)) * 0.35);
   diffuseColor.rgb = mix(diffuseColor.rgb * vec3(1.1, 1.06, 1.0), vec3(0.30, 0.40, 0.16) * (0.8 + 0.6 * diffuseColor.g), mz * 0.7);`);
   });
   const fernMat = prep(new THREE.MeshStandardMaterial({ map: pinnateTex(), alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, vertexColors: true, color: new THREE.Color().setRGB(1.0, 1.08, 0.9) }), 'fern', (s) => foliagePatch(s, 0.4));
@@ -388,7 +388,7 @@ export function buildNature(scene, city, T, field) {
   // r6.1 moss grows on the top / north faces, the rock is dark and glossy-wet in the falls' spray zone and at the waterline
   float up = clamp(vRN.y, 0.0, 1.0);
   float mo = smoothstep(0.35, 0.75, nvn(vRW.xz * 0.9) * 0.5 + 0.25 * nvn(vRW.xy * 2.0) + up * 0.45);
-  float dF = length((vRW - uFalls) * vec3(1.0, 0.6, 1.0)); float wetR = clamp(smoothstep(34.0, 8.0, dF) + smoothstep(uFalls.y + 1.5, uFalls.y - 0.2, vRW.y) * 0.5, 0.0, 1.0);
+  float dF = length((vRW - uFalls) * vec3(1.0, 0.6, 1.0)); float wetR = clamp((1.0 - smoothstep(8.0, 34.0, dF)) + (1.0 - smoothstep(uFalls.y - 0.2, uFalls.y + 1.5, vRW.y)) * 0.5, 0.0, 1.0);
   vec3 rk = diffuseColor.rgb * vec3(0.8, 0.78, 0.72) * (0.8 + 0.4 * nvn(vRW.xz * 3.0 + vRW.y));
   vec3 mossC = mix(vec3(0.16, 0.26, 0.09), vec3(0.24, 0.34, 0.10), nvn(vRW.xz * 6.0));
   diffuseColor.rgb = mix(rk, mossC, mo * 0.85);
@@ -480,8 +480,8 @@ export function buildNature(scene, city, T, field) {
         float s1 = nvn(vec2(x * 1.9, ft * 1.4 - uTime * 2.6)); float s2 = nvn(vec2(x * 4.7 + 3.0, ft * 2.6 - uTime * 4.1)); float s3 = nvn(vec2(x * 11.0, ft * 4.0 - uTime * 6.0));
         float streak = s1 * 0.5 + s2 * 0.32 + s3 * 0.18;
         float thick = smoothstep(0.15, 0.6, nvn(vec2(x * 0.45, uTime * 0.12 + uSeed)) * 0.7 + 0.3);   // where the veil is thin the rock shows
-        float edge = smoothstep(0.0, 0.10, vUv.x) * smoothstep(1.0, 0.90, vUv.x);
-        float lipFoam = smoothstep(0.08, 0.0, t); float footFoam = smoothstep(0.72, 1.0, t);
+        float edge = smoothstep(0.0, 0.10, vUv.x) * (1.0 - smoothstep(0.90, 1.0, vUv.x));
+        float lipFoam = (1.0 - smoothstep(0.0, 0.08, t)); float footFoam = smoothstep(0.72, 1.0, t);
         float a = mix(smoothstep(0.38, 0.72, streak) * thick, 1.0, max(lipFoam * 0.8, footFoam * 0.7)) * edge * uK;
         a *= 0.55 + 0.45 * smoothstep(0.0, 0.25, t + lipFoam);
         float lum = 0.55 + 0.45 * streak + footFoam * 0.3;
@@ -506,7 +506,7 @@ export function buildNature(scene, city, T, field) {
           vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]), upv = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
           gl_Position = projectionMatrix * viewMatrix * vec4(c + (right * position.x + upv * position.y) * sz, 1.0); }`,
       fragmentShader: `uniform vec3 uL; varying vec2 vUv; varying float vA; ${NOISE}
-        void main(){ float r = length(vUv - 0.5) * 2.0; float n = nvn(vUv * 5.0 + vA * 3.0); float a = smoothstep(1.0, 0.2, r) * (0.5 + 0.5 * n) * vA * 0.32; gl_FragColor = vec4(uL, a); }` });
+        void main(){ float r = length(vUv - 0.5) * 2.0; float n = nvn(vUv * 5.0 + vA * 3.0); float a = (1.0 - smoothstep(0.2, 1.0, r)) * (0.5 + 0.5 * n) * vA * 0.32; gl_FragColor = vec4(uL, a); }` });
     const g = new THREE.InstancedBufferGeometry(); const b2 = new THREE.PlaneGeometry(1, 1); g.setIndex(b2.index); g.setAttribute('position', b2.attributes.position); g.setAttribute('uv', b2.attributes.uv);
     g.setAttribute('aM', new THREE.InstancedBufferAttribute(new Float32Array(pts.flat()), 4)); g.instanceCount = N; const m = new THREE.Mesh(g, sprayMat); m.frustumCulled = false; m.renderOrder = 5; scene.add(m); out.meshes.push(m);
     out.sprayMat = sprayMat; }
@@ -517,7 +517,7 @@ export function buildNature(scene, city, T, field) {
       fragmentShader: `uniform float uTime, uNight; uniform vec3 uSunCol; uniform vec2 uC; varying vec3 vW; ${NOISE} uniform vec3 fogColor; uniform float fogDensity; varying vec3 vFogWP;
         void main(){ vec2 d = vW.xz - uC; float r = length(d * vec2(0.8, 1.0)); float ang = atan(d.y, d.x);
           float rings = nvn(vec2(r * 1.3 - uTime * 1.6, ang * 4.0)) * 0.6 + nvn(vW.xz * 0.9 + vec2(uTime * 0.2, -uTime * 0.35)) * 0.4;
-          float a = smoothstep(0.45, 0.8, rings) * smoothstep(11.0, 2.0, r) + smoothstep(4.0, 0.0, r) * 0.6;
+          float a = smoothstep(0.45, 0.8, rings) * (1.0 - smoothstep(2.0, 11.0, r)) + (1.0 - smoothstep(0.0, 4.0, r)) * 0.6;
           vec3 c = vec3(0.9, 0.94, 0.95) * (0.18 + 0.05 * length(uSunCol) * (1.0 - uNight));
           float fd = 1.0 - exp(-fogDensity * length(vFogWP - cameraPosition)); c = mix(c, fogColor, fd);
           gl_FragColor = vec4(c, clamp(a, 0.0, 1.0) * 0.75); }` });
@@ -548,7 +548,7 @@ export function buildNature(scene, city, T, field) {
         vec3 toCam = normalize(cameraPosition - c); vec3 side = normalize(cross(axis, toCam)); vec3 wp = c + side * position.x * (0.6 + vSeed) + axis * position.y;
         gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0); }`,
     fragmentShader: `uniform vec3 uCol; uniform float uA; varying vec2 vUv; varying float vSeed;
-      void main(){ float a = (1.0 - abs(vUv.x - 0.5) * 2.0); a = a * a * smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.55, vUv.y) * uA * (0.5 + vSeed);
+      void main(){ float a = (1.0 - abs(vUv.x - 0.5) * 2.0); a = a * a * smoothstep(0.0, 0.25, vUv.y) * (1.0 - smoothstep(0.55, 1.0, vUv.y)) * uA * (0.5 + vSeed);
         gl_FragColor = vec4(uCol * a, 1.0); }` });
   const shaftPts = []; for (let i = 0; i < 160; i++) { const x = lerp(WILD.x0 + 60, WILD.x1 - 40, R()), z = lerp(2500, 3350, R()); if (!F.inside(x, z)) continue; shaftPts.push([x, F.H(x, z) - 1, z, R()]); }
   out.shafts = mkBill(shaftPts, 5, 34, shaftMat); out.shaftMat = shaftMat;

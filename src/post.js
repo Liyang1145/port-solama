@@ -58,7 +58,7 @@ const LightFXShader = {
           float thick = 0.25 + dist * 0.01;
           if (dz > 0.02 + dist * 0.0006 && dz < thick) { occ = 1.0 - float(i - 1) / 12.0; break; }
         }
-        float fade = smoothstep(60.0, 30.0, dist);
+        float fade = (1.0 - smoothstep(30.0, 60.0, dist));
         col *= 1.0 - occ * fade * uContact * 0.55 * smoothstep(0.05, 0.4, ndl);
       }
     }
@@ -74,7 +74,7 @@ const LightFXShader = {
         acc += sky * l * w; w *= 0.955;
       }
       acc /= 36.0;
-      float fall = smoothstep(1.0, 0.0, length(dl * vec2(uRes.x / uRes.y, 1.0)) * 0.9);
+      float fall = (1.0 - smoothstep(0.0, 1.0, length(dl * vec2(uRes.x / uRes.y, 1.0)) * 0.9));
       col += uRayCol * acc * fall * uSunOn;
     }
     // --- light2 volumetric sun shafts: 12 jittered taps of the FAR shadow cascade along the view ray (<= 260 m) integrate
@@ -158,7 +158,7 @@ const GradeShader = {
     vec3 dayC = lut(tLutDay, col), nightC = lut(tLutNight, col);
     vec3 g = mix(mix(col, dayC, 0.55 + 0.45 * uGold), nightC, uNight);
     col = mix(col, g, uLutAmt);
-    float v = smoothstep(1.0, 0.28, length(c * vec2(1.0, 0.92)));
+    float v = (1.0 - smoothstep(0.28, 1.0, length(c * vec2(1.0, 0.92))));
     col *= mix(0.80, 1.0, v);
     float gr = h(uv * uRes + fract(uTime * 7.13) * 91.0) - 0.5;
     float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));

@@ -24,7 +24,7 @@ varying vec3 vWPc; uniform float uDirt;
 float dh(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 float dn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(dh(i), dh(i+vec2(1,0)), f.x), mix(dh(i+vec2(0,1)), dh(i+vec2(1,1)), f.x), f.y); }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
-float dust = smoothstep(0.95, 0.22, vWPc.y) * uDirt * (0.55 + 0.7 * dn(vWPc.xz * 5.0 + vWPc.y * 7.0));
+float dust = (1.0 - smoothstep(0.22, 0.95, vWPc.y)) * uDirt * (0.55 + 0.7 * dn(vWPc.xz * 5.0 + vWPc.y * 7.0));
 dust = clamp(dust + uDirt * 0.12 * dn(vWPc.xz * 1.3), 0.0, 0.8);
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.40, 0.355, 0.30), dust);`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.8, dust);')
@@ -328,7 +328,7 @@ export class Vehicle {
       if (!OLDENV2) GCACHE.set('hlpoolFS', 'uniform float uNight; uniform vec3 uCol; uniform float uCone; varying vec2 vUv; void main(){ if (uCone > 0.5) { ' + FC + ' } else { ' + FP + ' } }');
       const mk = (col, cone) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: Object.assign({ uNight: U.uNight, uCol: { value: new THREE.Color(...col) } }, OLDENV2 ? {} : { uCone: { value: cone ? 1 : 0 } }),
         vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-        fragmentShader: cone ? 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = smoothstep(1.0, 0.1, x / w) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0); }'
+        fragmentShader: cone ? 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = (1.0 - smoothstep(0.1, 1.0, x / w)) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0); }'
                              : 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0); }', ...(OLDENV2 ? {} : { fragmentShader: GCACHE.get('hlpoolFS') }) });
       GCACHE.set('hlpool', { g, head: mk([0.42, 0.38, 0.31], true), tail: mk([0.5, 0.03, 0.02], false) });
     }
