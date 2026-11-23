@@ -98,11 +98,13 @@ export function planMarina({ fab, DS, piers, col }) {
 
 // marina_b: floating-finger material = the shared vcol look + a heave from the boats' swell field, weighted 0 at the fixed pier
 // spine and 1 from 2.5 m out (the hinge), and only inside the three piers' x span. World-space buckets, so xz is world.
+const OLDMDECL = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmarinadecl');
 function floatMat(M, piers) {
   if (M.vcolFloat || !M.vcol) return; const base = M.vcol; const m = base.clone(); const P = piers.map((p) => new THREE.Vector4(p.x0, p.x1, p.z, p.hw));
   m.onBeforeCompile = (s, r) => { base.onBeforeCompile(s, r); s.uniforms.uTime = U.uTime; s.uniforms.uPier = { value: P };
+    const hasT = !OLDMDECL && /uniform\s+float\s+uTime\b/.test(s.vertexShader); // perf_debug5: base (vcol) may already be the merged env program that declares uTime -> 'uTime : redefinition' (?oldmarinadecl)
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>
-uniform float uTime; uniform vec4 uPier[${P.length}];` + SWELL + `
+${hasT ? '' : 'uniform float uTime; '}uniform vec4 uPier[${P.length}];` + SWELL + `
 float fHinge(vec2 p){ float w = 0.0; for (int i = 0; i < ${P.length}; i++) { vec4 q = uPier[i]; if (p.x > q.x - 2.0 && p.x < q.y + 2.0) w = max(w, clamp((abs(p.y - q.z) - q.w) / 2.5, 0.0, 1.0)); } return w; }`)
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.y += mSwell(transformed.xz, uTime) * fHinge(transformed.xz);'); };
   m.customProgramCacheKey = () => 'vcolFloat'; M.vcolFloat = m;

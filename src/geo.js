@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { CYBER } from './mapsel.js';
 // v4.4 (map 霓港): drop JS-side geometry arrays after upload (heap was ~2x GPU data). r6.0: map 索拉纳港 keeps r5.0 behaviour.
 const DROP_JS = CYBER;
+// perf_debug5 (?keepjs = old): 索拉纳港 kept every World bucket's JS arrays (plain Number arrays, ~8+ bytes per float) after the
+// meshes were built: heap sampling put ~210 MB live in GeoBucket.geom / quad. Now the gta map resets them after build too, but to
+// fresh EMPTY arrays (vc = 0) and keeps the bucket in its map, so a bucket reference someone still holds stays usable.
+const RESET_JS = !CYBER && !(typeof location !== 'undefined' && new URLSearchParams(location.search).has('keepjs'));
 
 export class GeoBucket {
   constructor(attrs = {}) { this.p = []; this.n = []; this.uv = []; this.idx = []; this.c = []; this.custom = {}; this.attrSizes = attrs; for (const k in attrs) this.custom[k] = []; this.vc = 0; }
@@ -79,6 +83,7 @@ export class World {
       m.castShadow = o.cast !== false; m.receiveShadow = o.receive !== false;
       m.name = key; scene.add(m); meshes.push(m);
       if (!opts.keep && DROP_JS) { b.p = b.n = b.uv = b.idx = b.c = null; b.custom = {}; } // v4.4: drop the JS-side arrays (heap was ~2x the GPU data)
+      else if (!opts.keep && RESET_JS) { b.p = []; b.n = []; b.uv = []; b.idx = []; b.c = []; for (const k in b.custom) b.custom[k] = []; b.vc = 0; }
     }
     if (!opts.keep && DROP_JS) this.buckets.clear();
     return meshes;
