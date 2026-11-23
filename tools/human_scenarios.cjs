@@ -76,7 +76,7 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
     await key.down('KeyW'); await key.down('ShiftLeft'); await look(6, 0, 300); await key.up('ShiftLeft'); await look(-6, 1, 300); await key.up('KeyW');
     const c = await ev(`(() => { const g = __G.game, P = g.P; let b = null, bd = 1e9; for (const v of g.traffic.cars) { const d = Math.hypot(v.x - P.pos.x, v.z - P.pos.z); if (d < bd && !v.ai) { bd = d; b = v; } } if (!b) for (const v of g.traffic.cars) { const d = Math.hypot(v.x - P.pos.x, v.z - P.pos.z); if (d < bd) { bd = d; b = v; } } return [b.x, b.z, Math.round(bd)]; })()`); r.car = c;
     r.walk = await walkTo(c[0] - 2.2, c[1], { sprint: true, stop: 1.6, maxF: 900 }); await key.tap('KeyF', 2); await run(20); r.inCar = (await pose()).inCar;
-    if (!r.inCar) { await ev('__G.game.carNearPlayer && __G.game.carNearPlayer("sport", 3)'); await run(2); await key.tap('KeyF', 2); await run(20); r.inCar2 = (await pose()).inCar; }
+    if (!r.inCar) { await ev('void (__G.game.carNearPlayer && __G.game.carNearPlayer("sport", 3))'); await run(2); await key.tap('KeyF', 2); await run(20); r.inCar2 = (await pose()).inCar; }
     const dst = MAPN === 'gta' ? [59.5, -225] : [-300, -60]; const pts = await route(dst[0], dst[1]); r.routePts = pts.length;
     r.drive = await driveTo(pts, { maxF: 2700, vmax: 20, reach: 7 });
     await hold(['KeyS'], 45); await key.tap('KeyF', 2); await run(15);
@@ -89,7 +89,7 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
     await key.down('KeyW'); await key.down('ShiftLeft'); await look(5, 0, 360); await key.up('ShiftLeft'); await look(-7, 1, 360); await key.down('ShiftLeft'); await look(3, -1, 360); await key.up('ShiftLeft');
     const used = (await ev('__mark()')) - F0; await look(-4, 0, Math.max(0, 1800 - used)); await key.up('KeyW'); r.frames = (await ev('__mark()')) - F0; r.state = await st(); return r; };
   S.loop60 = async () => { const r = {}; const F0 = await ev('__mark()');
-    await ev('__G.game.carNearPlayer && __G.game.carNearPlayer("sport", 3)'); await run(2); await key.tap('KeyF', 2); await run(20); r.inCar = (await pose()).inCar;
+    await ev('void (__G.game.carNearPlayer && __G.game.carNearPlayer("sport", 3))'); await run(2); await key.tap('KeyF', 2); await run(20); r.inCar = (await pose()).inCar;
     if (!r.inCar) { const c = await ev('(() => { const v = __G.game.nearestCar(40); return v ? [v.x, v.z] : null; })()'); if (c) { await walkTo(c[0] - 2.2, c[1], { stop: 1.6, maxF: 300 }); await key.tap('KeyF', 2); await run(20); r.inCar = (await pose()).inCar; } }
     const s0 = await pose(); const L = MAPN === 'gta' ? [[s0.x + 160, s0.z], [s0.x + 160, s0.z - 220], [s0.x - 40, s0.z - 220], [s0.x, s0.z]] : [[s0.x + 150, s0.z], [s0.x + 150, s0.z + 150], [s0.x, s0.z]];
     r.legs = []; for (const [tx, tz] of L) { const used = (await ev('__mark()')) - F0; if (used > 1750) break; const pts = await route(tx, tz); r.legs.push((await driveTo(pts.length ? pts : [[tx, tz]], { maxF: 1800 - used, vmax: 20, reach: 7 })).reached); }

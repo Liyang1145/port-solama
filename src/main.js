@@ -182,6 +182,7 @@ async function load() {
     // perf_debug1: one real frame (game + optional render) at the given dt; with ?prof returns the frame record
     tick(dt = 1 / 30, render = false) { frame(dt, !render); return PROF ? prof.frames[prof.frames.length - 1] : 0; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
+    THREE, // fix_pt1: test hooks (tools/camprobe.cjs raycasts)
     render() { renderFrame(0); },
     finish() { return shotfastFinish(renderer); }, // b_verify: ms until the GPU queue (SwiftShader pipeline JIT) is done
     reset() { game.testReset(); if (Q.has('hour')) { this.setHour(+Q.get('hour')); } return game.state(); }, // r6.2 per-test isolation (shot.cjs)
@@ -209,6 +210,7 @@ async function load() {
   }
   let rfN = 0;
   function renderFrame(dt) {
+    if (game.hud && game.hud.flushMinimap) game.hud.flushMinimap(); // fix_pt1: minimap drawn once per rendered frame
     if (!CYBER && ++rfN % 60 === 0) releaseCpuAttrs(scene); // perf_debug3: newly streamed chunks too
     if (CYBER) { stream.update(camera.position, 1); if (SNAP) stream.sync(camera.position); } // 霓港: detailed chunks before the mirror pass (wet-road / sea reflections)
     prof.mark('r:pre');

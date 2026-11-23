@@ -10,6 +10,7 @@ import { LANDS, DISTRICTS, beachX, BEACH_Z, districtAt as districtCyber } from '
 import { CYBER } from './mapsel.js';
 import { cyName } from './maps/cyber/names.js';
 // r6.0: area name of the active map ({name, sub} or null)
+const OLD_MMD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmmdraw'); // fix_pt1
 const districtAt = CYBER ? (x, z) => { const d = districtCyber(x, z); return d ? { name: d.name, sub: '霓港' } : null; } : districtGTA;
 
 const AREAS = [
@@ -50,7 +51,7 @@ export class HUD {
     // mainland district, causeway, pearl island and the natural island ends — drawn from the same mapgeo data as the world.
     const X0 = -1520, X1 = 760, Z0 = -1520, Z1 = 1520, S = 0.62;
     this.map = { X0, Z0, S };
-    const c = document.createElement('canvas'); c.width = Math.round((X1 - X0) * S); c.height = Math.round((Z1 - Z0) * S); const g = c.getContext('2d');
+    const c = document.createElement('canvas'); c.width = Math.round((X1 - X0) * S); c.height = Math.round((Z1 - Z0) * S); const g = c.getContext('2d', OLD_MMD ? undefined : { willReadFrequently: true }); // fix_pt1: CPU-rasterised once (was a GPU canvas whose thousands of recorded path fills were replayed on the GPU thread)
     const P = (x, z) => [(x - X0) * S, (z - Z0) * S];
     g.fillStyle = '#9fcfda'; g.fillRect(0, 0, c.width, c.height);
     const rect = (x0, z0, x1, z1, col) => { const [a, b] = P(x0, z0); g.fillStyle = col; g.fillRect(a, b, (x1 - x0) * S, (z1 - z0) * S); };
@@ -69,14 +70,14 @@ export class HUD {
     for (const i of this.city.inters) rect(i.x - 7, i.z - 7, i.x + 7, i.z + 7, '#ffffff');
     if (R) { g.strokeStyle = '#ffffff'; g.lineCap = 'round'; g.lineJoin = 'round';
       for (const r of R.roads) { g.lineWidth = r.hw * 2 * S; g.beginPath(); for (let k = 0; k < r.path.n; k++) { const [a, b] = P(r.path.X[k], r.path.Z[k]); if (k) g.lineTo(a, b); else g.moveTo(a, b); } g.stroke(); } }
-    this.mapCanvas = c;
+    this.mapCanvas = c; this.bakeMap();
   }
   buildMapCyber() {
     // r6.0 map 霓港 (from v4.4): the whole open world — coast polygons, the curved beach, every road of the graph at its real
     // width, the Deco blocks and the streamed parcel footprints, all from the same data as the 3-D world.
     const X0 = -3500, X1 = 1000, Z0 = -2000, Z1 = 3700, S = 0.42;
     this.map = { X0, Z0, S };
-    const c = document.createElement('canvas'); c.width = Math.round((X1 - X0) * S); c.height = Math.round((Z1 - Z0) * S); const g = c.getContext('2d');
+    const c = document.createElement('canvas'); c.width = Math.round((X1 - X0) * S); c.height = Math.round((Z1 - Z0) * S); const g = c.getContext('2d', OLD_MMD ? undefined : { willReadFrequently: true }); // fix_pt1: CPU-rasterised once (was a GPU canvas whose thousands of recorded path fills were replayed on the GPU thread)
     const P = (x, z) => [(x - X0) * S, (z - Z0) * S];
     g.fillStyle = '#9fcfda'; g.fillRect(0, 0, c.width, c.height);
     const poly = (pts, col) => { g.fillStyle = col; g.beginPath(); pts.forEach((q, i) => { const [a, b] = P(q[0], q[1]); if (i) g.lineTo(a, b); else g.moveTo(a, b); }); g.closePath(); g.fill(); };
@@ -89,8 +90,10 @@ export class HUD {
     g.strokeStyle = '#ffffff'; g.lineJoin = 'round'; g.lineCap = 'round';
     for (const e of this.city.graph.edges) { g.lineWidth = e.hw * 2 * S + 0.6; g.beginPath(); e.pts.forEach((q, i) => { const [a, b] = P(q[0], q[1]); if (i) g.lineTo(a, b); else g.moveTo(a, b); }); g.stroke(); }
     for (const i of this.city.inters) rect(i.x - 7, i.z - 7, i.x + 7, i.z + 7, '#ffffff');
-    this.mapCanvas = c;
+    this.mapCanvas = c; this.bakeMap();
   }
+  // fix_pt1: snapshot the finished plate into an ImageBitmap (decoded once, uploaded once) and draw that every frame
+  bakeMap() { if (OLD_MMD || typeof createImageBitmap !== 'function') return; const c = this.mapCanvas; createImageBitmap(c).then((bm) => { if (this.mapCanvas === c) { this.mapCanvas = bm; this.mapSrc = c; } }).catch(() => {}); }
   toggleBig() { this.bigMap = !this.bigMap; }
   msg(t, s = 2.5) { const m = this.$('msg'); m.textContent = t; this.sty(m, 'opacity', 1); this.msgT = s; this.$('help').style.opacity = 0; }
   big(t, col) { const b = this.$('big'); b.textContent = t; b.style.color = col; b.style.opacity = t ? 1 : 0; }
@@ -151,8 +154,13 @@ export class HUD {
     show('area', this.areaT > 0);
     // police search zone (GTA6 shows an area, not police dots)
     if (G.wanted > 0 && G.wantedFlash) { if (!this.searchPos) this.searchPos = (G.lastSeen || P.pos).clone(); } else this.searchPos = null;
-    this.drawMinimap(G);
+    // fix_pt1 (?oldmmdraw = old): the minimap is a GPU-accelerated 2D canvas; it used to be redrawn inside every logic step, i.e.
+    // up to 4x per rendered frame at 15 fps (only the last sub-step renders) and 30-45x per JS task in the logic-only harnesses,
+    // where Chrome's 2D-canvas rate limiter then blocked on the (SwiftShader) GPU thread draining a backlog that grew to >1 GB
+    // (the "carNearPlayer('sedan') OOM" of PLAYTEST_1H #2). Now it is drawn once, right before the frame that shows it.
+    if (OLD_MMD) this.drawMinimap(G); else this.mmG = G;
   }
+  flushMinimap() { const G = this.mmG; if (!G) return; this.mmG = null; this.drawMinimap(G); }
   drawMinimap(G) {
     const g = this.g, W = this.mm.width, H = this.mm.height; const P = G.P; const M = this.map;
     g.save(); g.clearRect(0, 0, W, H);
