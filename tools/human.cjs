@@ -55,7 +55,7 @@ const PAGE_HELPERS = `(() => {
 })()`;
 srv.listen(0, async () => {
   const port = srv.address().port; const T0 = Date.now();
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100', `--window-size=${W},${H}`, ...(process.env.SINGLE ? ['--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] : [])] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100' + (process.env.SINGLE ? ' --max-semi-space-size=2 --optimize-for-size' : ''), `--window-size=${W},${H}`, ...(process.env.SINGLE ? ['--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] : [])] });
   // the browser runs in its own session (playwright detaches it): remember it so the runner can kill exactly that session
   try { const cp = require('child_process').execSync(`ps -o pid= --ppid ${process.pid}`).toString().split(/\s+/).filter(Boolean); fs.writeFileSync(path.join(out, 'browser.pids'), cp.join(' ')); } catch (e) { }
   const killMine = () => { try { for (const pid of fs.readFileSync(path.join(out, 'browser.pids'), 'utf8').split(' ').filter(Boolean)) require('child_process').execSync(`for q in $(ps -o pid= --sid ${pid}); do kill -9 $q 2>/dev/null; done; true`); } catch (e) { } };
@@ -87,7 +87,7 @@ srv.listen(0, async () => {
   for (const [name, fn] of Object.entries(S)) {
     if (ONLY.length && !ONLY.includes(name)) continue;
     const t = Date.now(); const f0 = await ev('__mark()'); let res = null, err = null; const e0 = errs.length;
-    let cdp = null; if (process.env.CPUPROF) { cdp = await p.context().newCDPSession(p); await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); await cdp.send('Profiler.start'); } // perf_debug6
+    let cdp = null; if (process.env.CPUPROF) { cdp = await p.context().newCDPSession(p); await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: +(process.env.CPUPROF_US || 4000) }); await cdp.send('Profiler.start'); } // perf_debug6
     try { res = await fn(); } catch (e) { err = e.message.slice(0, 400); log('SCENARIO-ERR', name, err); }
     let top = null; if (cdp) { try { const { profile } = await cdp.send('Profiler.stop'); const by = {}; for (const n of profile.nodes) by[n.id] = n; const dt = {}; const tot = profile.samples.length;
       for (const id of profile.samples) { const cf = by[id].callFrame; const k = (cf.functionName || '(anon)') + ' ' + cf.url.split('/').pop() + ':' + cf.lineNumber + ':' + cf.columnNumber; dt[k] = (dt[k] || 0) + 1; }
