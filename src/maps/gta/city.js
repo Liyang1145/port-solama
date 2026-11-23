@@ -19,6 +19,7 @@ import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } fro
 const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
 import { shopEdge } from './shoppools.js'; // a_shopnight2
 import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear, landmarkDeckH, jettyWalk } from './landmarks.js';
+import { planMarina } from './marina.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -177,13 +178,16 @@ export function buildCity(scene, mats, T) {
   skyline(bld);
   marina(bld); const lmk = landmarks(bld);
   fab.populate(col); // own RNG stream: the shared rng sequence (island / district layout) is unchanged
+  // marina_a: 鹈鹕游艇港 slips / fuel dock + canal-front lot detail + the moored-boat fleet (own position-seeded randomness)
+  const MR = planMarina({ fab, DS, piers: PIERS, col });
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
   const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal, inCanalWater });
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); lmk.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.yardCol = (fab._ycol = collectYardCol(fab, yard)) && fab._ycol.S; fab._pcol = collectPoleCol(fab); /* a_polecol: same point, read-only */ fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; fab.dtKit = prepDowntown(fab, col, palms); region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); region.downtown = attachDowntown(fab.dtKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); lmk.update(cam); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); updateDowntown(fab.dtKit, cam); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); lmk.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.yardCol = (fab._ycol = collectYardCol(fab, yard)) && fab._ycol.S; fab._pcol = collectPoleCol(fab); /* a_polecol: same point, read-only */ fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; fab.dtKit = prepDowntown(fab, col, palms); region.fabStats = attachFabric(fab, scene, M); MR.attach(scene); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); region.downtown = attachDowntown(fab.dtKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); lmk.update(cam); updateFabric(fab, cam); MR.update(cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); updateDowntown(fab.dtKit, cam); };
+    region.marina = MR;
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;
@@ -230,6 +234,7 @@ export function buildCity(scene, mats, T) {
   const isLand = (x, z) => {
     { const h = region.groundH(x, z); if (h !== undefined) return h > L.waterY - 0.6; }
     for (const p of PIERS) if (x >= p.x0 && x <= p.x1 && Math.abs(z - p.z) <= p.hw) return true;
+    if (MR.onDeck(x, z)) return true; // marina_a: finger piers + fuel dock
     if (x >= L.islandX[0] && x <= L.beachX[0] && z >= L.islandZ[0] && z <= L.islandZ[1]) return true;
     if (x >= L.beachX[0] && Math.abs(z) < L.islandZ[1] + 110 && beachH(x, z) > L.waterY - 0.6) return true;
     return false;
@@ -932,16 +937,10 @@ function marina(ctx) {
     // yacht's boarding gap); plain fields on the same object, no extra random draws
     const dockLamp = { x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock', pool: [p.x0 + 5.5, p.z, 11, p.hw * 1.9], pier: [p.x0, p.x1, p.z, p.hw], berths: [] };
     ctx.lamps.push(dockLamp);
-    // yachts on both sides
+    // yachts on both sides — r6.x marina_a: the boats are now marina.js's instanced fleet (finger slips, bobbing, LOD). The loop
+    // still draws exactly the same rng values so the shared layout sequence after it is unchanged. (preview merge: a_portlamps berths kept)
     for (const sz of [-1, 1]) for (let x = p.x0 + 8; x < p.x1 - 8; x += rand(13, 17)) {
-      if (rng() < 0.25) continue; const Lh = rand(9, 14), Bh = rand(3, 3.8); const zc = p.z + sz * (p.hw + Bh / 2 + 0.8); dockLamp.berths.push([x, sz, Lh]);
-      const hull = new THREE.CylinderGeometry(Bh / 2, Bh / 2 * 0.75, Lh, 14, 1); hull.rotateZ(Math.PI / 2); hull.scale(1, 0.55, 1);
-      gput(v, hull, x, L.waterY + 0.7, zc, [0.94, 0.94, 0.92]);
-      const bow = new THREE.ConeGeometry(Bh / 2, 3, 14); bow.rotateZ(-Math.PI / 2); bow.scale(1, 0.55, 1); gput(v, bow, x + Lh / 2 + 1.5, L.waterY + 0.7, zc, [0.94, 0.94, 0.92]);
-      box(v, x - Lh / 2, L.waterY + 0.25, zc - Bh / 2 - 0.02, x + Lh / 2, L.waterY + 0.45, zc + Bh / 2 + 0.02, {}, pick([[0.1, 0.2, 0.45], [0.1, 0.1, 0.1], [0.6, 0.1, 0.1]]), false);
-      box(v, x - Lh * 0.3, L.waterY + 1.2, zc - Bh * 0.35, x + Lh * 0.15, L.waterY + 2.6, zc + Bh * 0.35, {}, [0.9, 0.9, 0.88], false);
-      box(v, x - Lh * 0.28, L.waterY + 1.7, zc - Bh * 0.36, x + Lh * 0.13, L.waterY + 2.3, zc + Bh * 0.36, {}, [0.08, 0.12, 0.16], false);
-    }
+      if (rng() < 0.25) continue; const Lh = rand(9, 14); rand(3, 3.8); pick([0, 1, 2]); dockLamp.berths.push([x, sz, Lh]); }
   }
 }
 
