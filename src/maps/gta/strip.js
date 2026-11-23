@@ -25,7 +25,6 @@ import { U } from '../../env.js';
 import { raster, FONT } from './raster.js';
 import { KIT_LAYER } from './houses.js';
 import { SHOPS as SHOP2, OLD_ASHOP2 } from './shoppools.js'; // a_shopnight2: mainland storefront-band pools (region low-rise shops, e.g. 第八街)
-import { PASS } from '../../perf.js'; // perf_debug6
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const STRIP_OFF = Q.has('nostrip');
 const AUDIT = Q.has('stripaudit');
@@ -398,8 +397,7 @@ export function attachStrip(K, scene) { if (!K) return null; const { box: G, bod
   m.customDepthMaterial = new THREE.MeshDepthMaterial(); m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; m.userData.skit = true; m.layers.set(KIT_LAYER); scene.add(m);
   m.instanceMatrix.array.fill(0, 0, 16); m.count = 1; m.visible = true; m.userData.n = [1, 0]; m.userData.warm = 0; let keep = 0; // zero-scale warm-up instance (programs built with the rest, as a_houses)
   m.onBeforeShadow = function () { keep = this.count; this.count = scene.overrideMaterial ? 0 : this.userData.n[0]; this.userData.warm |= 1; }; m.onAfterShadow = function () { this.count = keep; };
-  m.onBeforeRender = function (r, sc, cam, geo, mat) { this.userData.warm |= mat === MAT ? 2 : 4; if (PASS.probe && mat === MAT) { this.userData.pk = this.count; this.count = Math.min(this.count, Math.max(1, this.userData.n[0])); } }; // perf_debug6 (?oldsprobeinst): probe faces draw the casters only
-  m.onAfterRender = function () { if (this.userData.pk !== undefined) { this.count = this.userData.pk; this.userData.pk = undefined; } };
+  m.onBeforeRender = function (r, sc, cam, geo, mat) { this.userData.warm |= mat === MAT ? 2 : 4; };
   K.mesh = m;
   const tm = new THREE.InstancedMesh(quadGeo(), prep(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.05 }), 'fabCar'), TCAP);
   tm.instanceMatrix.setUsage(THREE.DynamicDrawUsage); tm.setColorAt(0, new THREE.Color(1, 1, 1)); tm.instanceColor.setUsage(THREE.DynamicDrawUsage); tm.frustumCulled = false; tm.castShadow = false; tm.receiveShadow = true;

@@ -24,7 +24,6 @@ import * as THREE from 'three';
 import { fabKit } from './fabric.js';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
-import { PASS } from '../../perf.js'; // perf_debug6
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const HOUSES_OFF = Q.has('nohouses');
 const AUDIT = Q.has('houseaudit');
@@ -323,7 +322,7 @@ export function attachHouses(K, scene) { if (!K) return null; const { box: G, bo
   // program in the first frames (a depth program first built later carries that frame's light counts in its key -> a new program)
   m.instanceMatrix.array.fill(0, 0, 16); m.count = 1; m.visible = true; m.userData.n = [1, 0, 0]; m.userData.warm = 0; let keep = 0;
   m.onBeforeShadow = function () { keep = this.count; this.count = scene.overrideMaterial ? 0 : this.userData.n[0]; this.userData.warm |= 1; }; m.onAfterShadow = function () { this.count = keep; }; // the shadow maps redrawn inside GTAO's normal pass are thrown away: skip
-  m.onBeforeRender = function (r, sc, cam, geo, mat) { keep = this.count; if (mat !== MAT) this.count = this.userData.n[0] + this.userData.n[1]; else if (PASS.probe) this.count = Math.min(this.count, this.userData.n[0]); /* perf_debug6 (?oldsprobeinst) */ this.userData.warm |= mat === MAT ? 2 : 4; }; m.onAfterRender = function () { this.count = keep; };
+  m.onBeforeRender = function (r, sc, cam, geo, mat) { keep = this.count; if (mat !== MAT) this.count = this.userData.n[0] + this.userData.n[1]; this.userData.warm |= mat === MAT ? 2 : 4; }; m.onAfterRender = function () { this.count = keep; };
   K.mesh = m; K.last = null; K.info = { houses: 0, boxes: 0, tris: 0 }; attachLights(K, scene); K.stats.attachMs = Math.round(performance.now() - T0); return K; }
 const CAP = 1000, NEAR = 42, FADE = 12, FADE1 = 7; // a_housepolish: dissolve bands [RAD - FADE, RAD] and [NEAR - FADE1, NEAR] (house distance)
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
