@@ -17,6 +17,7 @@ const HOUSE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(locat
 import { collectYardCol } from './yardcol.js'; import { collectPoleCol } from './polecol.js'; // a_yardcol / a_polecol (same point as collectTrunks: after every bake-hashed pass)
 import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } from './edgewalls.js'; // a_edgewalls (after curbfix / propfix / parkfix: their bake inputs are unchanged)
 const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
+import { shopEdge } from './shoppools.js'; // a_shopnight2
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -301,6 +302,11 @@ function promenade(W, b, shrubs, trees) {
 function facadeAttrs(style, fh, ww, seed, wallC, glassC, up = [0, 0, 0]) {
   return (i, len) => { const n = Math.max(1, Math.round(len / ww)); return { aWin: [style, fh, len / n, seed], aCol: wallC, aGlass: glassC, aUp: up }; };
 }
+// a_shopnight2: storefront (style 3) edges at street level carry their per-unit open bits in aWin.x (shoppools.js; no rng draw)
+function shopAttrs(poly, y0, style, ww, seed, f) {
+  if (style !== 3 || y0 >= 1) return f;
+  return (i, len) => { const a = f(i, len); const n = Math.max(1, Math.round(len / ww)); a.aWin[0] = shopEdge(3, poly[i], poly[(i + 1) % poly.length], len, n, seed, i, y0); return a; };
+}
 // one building volume (polygon footprint) with ground-floor storefront band + upper style
 function volume(ctx, poly, y0, y1, opts) {
   const { W, col } = ctx; const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
@@ -308,9 +314,9 @@ function volume(ctx, poly, y0, y1, opts) {
   const seed = rand(0, 100);
   const ground = opts.ground ?? 4.6;
   if (opts.store && y0 < 1) {
-    prismWalls(b, poly, y0, y0 + ground, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]), null, 0, true);
+    prismWalls(b, poly, y0, y0 + ground, shopAttrs(poly, y0, 3, opts.storeW || 4.5, seed, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13])), null, 0, true);
     prismWalls(b, poly, y0 + ground, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
-  } else prismWalls(b, poly, y0, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
+  } else prismWalls(b, poly, y0, y1, shopAttrs(poly, y0, opts.style, opts.ww, seed, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up)), null, 0, true);
   if (opts.relief !== false && (opts.style === 0 || opts.style === 2 || opts.style === 1)) relief(ctx, poly, opts.store && y0 < 1 ? y0 + ground : y0, y1, opts.fh, opts.ww, opts.style, opts.wall, y1 - y0 > 40 || opts.lite);
   if (opts.store && y0 < 1 && opts.canopy !== false) canopies(ctx, poly, y0 + ground, opts.wall);
   if (opts.store && y0 < 1) shopfront(ctx, poly, y0, ground, opts.storeW || 4.5, opts.wall);

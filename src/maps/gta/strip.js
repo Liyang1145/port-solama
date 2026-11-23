@@ -24,6 +24,7 @@ import { prep } from '../../mats.js';
 import { U } from '../../env.js';
 import { raster, FONT } from './raster.js';
 import { KIT_LAYER } from './houses.js';
+import { SHOPS as SHOP2 } from './shoppools.js'; // a_shopnight2: mainland storefront-band pools (region low-rise shops, e.g. 第八街)
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const STRIP_OFF = Q.has('nostrip');
 const AUDIT = Q.has('stripaudit');
@@ -419,10 +420,11 @@ function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attri
 const LOT_D = 22, LOT_R = 420;
 function putPool(A, k, x, z, a, sx, sz, y) { const c = Math.cos(a), s = Math.sin(a), j = k * 16; A.fill(0, j, j + 16); A[j] = c * sx; A[j + 2] = -s * sx; A[j + 5] = 1; A[j + 8] = s * sz; A[j + 10] = c * sz; A[j + 12] = x; A[j + 13] = y; A[j + 14] = z; A[j + 15] = 1; }
 const WALK_R = 200; // a_shopnight: shop-front / canopy pools within 200 m (after the lot pools; the mesh holds 512 since this pass)
-function nightPools(K, p) { const pm = K.pm, L = K.lotPools, Wp = K.walkPools, at = pm.userData.at, CP = OLD_ASHOP ? 256 : 512;
-  if (!at || at[2] !== L.length + Wp.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length + Wp.length]; let k = 0; const A = pm.instanceMatrix.array;
+function nightPools(K, p) { const pm = K.pm, L = K.lotPools, Wp = K.walkPools, Sp = SHOP2.ml, at = pm.userData.at, CP = OLD_ASHOP ? 256 : 512;
+  if (!at || at[2] !== L.length + Wp.length + Sp.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length + Wp.length + Sp.length]; let k = 0; const A = pm.instanceMatrix.array;
     for (let i = 0; i + 2 < L.length && k < 256; i += 3) if (Math.hypot(L[i] - p.x, L[i + 1] - p.z) < LOT_R) putPool(A, k++, L[i], L[i + 1], L[i + 2], LOT_D, LOT_D, 0.07);
     for (let i = 0; i + 5 < Wp.length && k < CP; i += 6) if (Math.hypot(Wp[i] - p.x, Wp[i + 1] - p.z) < WALK_R) putPool(A, k++, Wp[i], Wp[i + 1], Wp[i + 2], Wp[i + 3], Wp[i + 4], Wp[i + 5]);
+    for (let i = 0; i + 5 < Sp.length && k < CP; i += 6) if (Math.hypot(Sp[i] - p.x, Sp[i + 1] - p.z) < WALK_R) putPool(A, k++, Sp[i], Sp[i + 1], Sp[i + 2], Sp[i + 3], Sp[i + 4], Sp[i + 5]); // a_shopnight2 (empty with ?oldashop2)
     pm.count = k; if (k) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); } }
   pm.visible = U.uNight.value > 0.03 && pm.count > 0; }
 export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh, tm = K.tmesh;

@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
+import { OLD_ASHOP2 } from './maps/gta/shoppools.js'; // a_shopnight2
 import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
 
 export const M = {}; // material registry
@@ -185,8 +186,10 @@ uniform sampler2D tConc; uniform float uNight; uniform float uTime; uniform floa
 vec3 neonPal(float h){ h = fract(h); return h < 0.3 ? vec3(1.0, 0.17, 0.84) : h < 0.58 ? vec3(0.1, 0.94, 1.0) : h < 0.8 ? vec3(0.55, 0.36, 1.0) : vec3(1.0, 0.32, 0.45); } flat varying vec3 vCol; flat varying vec3 vGlass; flat varying vec3 vUp; varying vec2 vUvM; varying vec3 vWPb;
 ${HASH}${SHOPROOM}`)
       .replace('#include <map_fragment>', `
-float style = floor(vWin.x + 0.5); float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
-vec2 cf = vec2(vUvM.x / ww, vUvM.y / fh); vec2 cid = floor(cf); vec2 f = fract(cf);
+${!CYBER && !OLD_ASHOP2 ? `float wx0_ = floor(vWin.x + 0.5); float shopM = floor(wx0_ / 8.0); float style = wx0_ - shopM * 8.0;` : `float style = floor(vWin.x + 0.5);`} float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
+vec2 cf = vec2(vUvM.x / ww, vUvM.y / fh); vec2 cid = floor(cf); vec2 f = fract(cf);${!CYBER && !OLD_ASHOP2 ? `
+// a_shopnight2: storefront open bits decided in JS (shoppools.js: aWin.x = style + 8 * (1 + mask), one bit per 2-bay unit); -1 = old hash
+float shopOn = shopM > 0.5 ? float(((int(shopM) - 1) >> int(clamp(floor(cid.x * 0.5), 0.0, 23.0))) & 1) : -1.0;` : ``}
 float rnd = h12(cid + seed * 17.0); float rnd2 = h12(cid.yx * 1.7 + seed * 3.1);
 float isGlass = 0.0; float frame = 0.0; float lit = 0.0; float interior = 0.0; float shade = 1.0; float isMetal = 0.0; float posterM = 0.0; vec3 posterC = vec3(1.0);
 vec3 wall = vCol;
@@ -304,7 +307,7 @@ col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
 ${CYBER ? `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.36 : 0.42);` : `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.42 : 0.5);`}
-lit = max(lit, step(rnd, litChance));
+lit = max(lit, step(rnd, litChance));${!CYBER && !OLD_ASHOP2 ? ` if (style == 3.0 && shopOn > -0.5) lit = shopOn; // a_shopnight2` : ``}
 `)
       .replace('#include <roughnessmap_fragment>', `
 float roughnessFactor = roughness;
@@ -410,7 +413,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
   if (style == 3.0 && isGlass > 0.01 && aa < 0.99) { // r6.3 parallax shop room (near); far bays keep the flat interior above
     float unit = floor(cid.x * 0.5); float st3 = floor(h12(vec2(seed * 3.7, unit)) * 4.0); float sv = h12(vec2(unit * 1.37 + 0.5, seed * 2.9));
     float RW = 2.0 * ww; float ux = (cid.x - unit * 2.0 + f.x) * ww; float RD = 4.2 + 3.2 * h12(vec2(seed, unit + 0.5));
-    float onU = max(1.0 - n, step(h12(vec2(unit, seed * 5.3)), 0.86));
+    float onU = max(1.0 - n, ${!CYBER && !OLD_ASHOP2 ? `shopOn > -0.5 ? shopOn : ` : ``}step(h12(vec2(unit, seed * 5.3)), 0.86));
     vec3 rdS = vec3(vt_.xy, max(vt_.z, 0.06));
     gLod = max(smoothstep(0.42, 0.16, rdS.z / length(rdS)), smoothstep(0.02, 0.06, max(fw.x * ww, fw.y * fh)));
     vec3 roomS = shopRoom(vec2(clamp(ux, 0.02, RW - 0.02), clamp(f.y * fh, 0.05, fh * 0.86 - 0.05)), rdS, RW, fh * 0.86, RD, st3, sv, n, onU);
