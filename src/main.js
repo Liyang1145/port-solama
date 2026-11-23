@@ -244,7 +244,15 @@ async function load() {
   // perf_debug3 (?nowarm = old): game.start() spawns the player / traffic / peds whose ~39 shader programs (+ shadow-depth and
   // mirror variants) were first compiled inside the first gameplay frame (~3 s hitch in SwiftShader). Now: compile them
   // (parallel where KHR_parallel_shader_compile exists) and draw one hidden warm-up frame while the loading screen is still up.
-  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); if (SNAP) renderFrame(0); else frame(1 / 60); LT.warm = Math.round(performance.now() - t); };
+  // perf_debug6 (?nowarmstream = old): materials that only streamed chunks use (marina floating fingers 'vcolFloat') had their
+  // program linked in the first frames after reaching that area (~106 ms SwiftShader link after a teleport). Link them here, behind
+  // the loading screen, as the render-target variant the real draws use.
+  const warmStream = () => { const R = city.region; if (CYBER || Q.has('nowarmstream') || !R || !R.M || !R.async || !R.rtOn) return; const A = R.async; let n = 0;
+    for (const k of ['vcolFloat']) { const mt = R.M[k]; if (!mt) continue; const g = new THREE.BufferGeometry(); const z9 = new Array(9).fill(0);
+      g.setAttribute('position', new THREE.Float32BufferAttribute(z9, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(z9, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(6).fill(0), 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(z9, 3));
+      const m = new THREE.Mesh(g, mt); m.castShadow = m.receiveShadow = true; const kk = R.rtOn(A); try { renderer.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, camera, scene); n++; } catch (e) { } R.rtOff(A, kk); g.dispose(); }
+    LT.warmStream = n; };
+  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); warmStream(); if (SNAP) renderFrame(0); else frame(1 / 60); LT.warm = Math.round(performance.now() - t); };
   st.onclick = async () => { if (st.dataset.busy) return; st.dataset.busy = 1; game.start(); await warm(); document.getElementById('load').style.display = 'none'; };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
   if (PROF) {
