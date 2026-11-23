@@ -56,10 +56,10 @@ cyber 图的真人场景本轮未跑完（时间/内存），仅跑回归 B。
 | # | 严重度 | 问题 | 归属 |
 |---|---|---|---|
 | 3（更新） | 高 | JS 堆仍 ~1 GB。普查：CPU 侧顶点数组 305 MB + 索引 28 MB，其中按位置签名判定的重复几何 ~41 MB；最大一块是未命名 Mesh 117 MB、vcol 地块 ~48 MB、角色 ~40 MB。只释放 normal/uv/color 仅得 17 MB（多数网格在登记前已上传，或是位置/索引/自定义属性）。剩余 ~600 MB 不在几何里，需真正的堆快照（沙箱内存不够拍 1 GB 快照）| Hark（下一轮，需大内存机器拍快照）|
-| 9（新） | 中 | 街道反射探针 sprobe 每帧画一个立方体面，某些面 1430–1877 calls / 8.3–9.0 M tris，现在是单帧最大的 pass（比镜面原来还大）；需同样的距离/尺寸裁剪 | Hark |
-| 10（新） | 低 | 无头沙箱里 rcmp 在 640x360 或 DSF=1 视口、或多画一帧截图时 chrome 被全局 OOM 杀（容器其它进程占 2 GB）；截图流程需更小内存 | Hark（工具）|
+| 9（perf_debug4 已处理） | 中 | 街道反射探针 sprobe：每面裁剪（>380 m、<0.03 rad、35 m 外低矮地面/路缘、单件 <8 m 的城市级实例集：街具/棕榈/停放车辆）+ 64 px 面 + 隔帧一面 + 6 s/15 s 刷新（?oldsprobe 回退）。gta 出生点：单面最大 2086 calls / 9.06 M tris / 52 ms → 538 / 4.27 M / 24 ms；一次刷新合计 calls 15559→3956（两次捕获窗口）。剩余三角形来自覆盖全城的合并建筑网格，按包围球无法裁 | Hark |
+| 10（更新） | 中 | 沙箱截图：tools/shotlite.cjs（--single-process + readPixels）不再 OOM，但 SwiftShader 下加载 30–37 s + 第 8 帧（PMREM）20–36 s，读回超过单次 100 s 上限，**新旧对比截图仍未导出**；回归一项也要 ~100 s（regress_fresh 超时后 chrome 成孤儿需手动按 PID 杀）。需要更大内存/更快的机器或后台执行 | Hark（工具）|
 | 11（新） | 低 | 回归 B 的 missions 脚本第一次跑报 `TypeError: reading 'x'`（cyber 图上 M.data.van 未定义，脚本用的是 A 图坐标），重试通过；非 PAGEERROR，疑为既有脚本脆弱 | GPT |
-| 7（更新） | 低 | 每个场景开头的 250–370 ms 逻辑帧尖峰：首帧拆解显示是 HUD 首次绘制 + 首轮生成人车；正式游玩已移到加载画面下，场景内瞬移后的尖峰未处理 | Hark |
+| 7（更新） | 低 | 瞬移后 250–370 ms 逻辑帧尖峰：perf_debug4 用 tools/tpspike.cjs（?prof，仅逻辑帧）在 (281,14)/(−300,200)/(600,−400) 瞬移后 3 帧均 4–14 ms，**无法复现**；尖峰应在渲染侧（区块流式挂载/首绘），未处理 | Hark |
 
 daynight：开跑约 10 s 被沙箱 OOM 杀（同 #3/#10）；session3min / cyber 真人场景：本轮未跑。
 回归：A plans/r5_regress.json 11/11，PAGEERROR 0；B plans/r6_cyber_smoke.json 7/7，PAGEERROR 0（missions 第一次失败、重试通过，见 #11）。
