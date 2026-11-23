@@ -174,7 +174,7 @@ async function load() {
   if (!Q.has('noprecompile')) { LT.precompile2 = await pre(false); if (lp) lp.innerHTML = lp0; mark('precompile(envmap variants)'); }
 
   const W = window.__G = {
-    game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, poi: POI, missionStarts: MISSION_STARTS, stream, nature, neon,
+    game, env, city, street, scene, camera, renderer, post, U, water, sprobe, M, map: MAP, poi: POI, missionStarts: MISSION_STARTS, stream, nature, neon,
     streamSync(x, z) { if (!stream) return 0; const p = x === undefined ? camera.position : { x, z }; return stream.sync(p); },
     setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(SNAP && !PROF); sprobe.t = 99; }, // ?prof harness: the player path (amortized)
     photo(on = true, focus = 0, ap = 1.2) { post.dof = on ? 1 : 0; post.focus = focus || 6; post.aperture = ap; document.body.classList.toggle('photo', !!on); },

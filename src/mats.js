@@ -7,6 +7,7 @@ import { envReg, envPatch, envFamily, envMerger, envUberWrap, OLDENV, OLDENV2, E
 import { OLD_ASHOP2 } from './maps/gta/shoppools.js'; // a_shopnight2
 
 export const M = {}; // material registry
+const OLD_GLASS = typeof location !== 'undefined' && /[?&]oldglass\b/.test(location.search); // fix_pt4
 // a_interior: shop-kind grid (R = kind + 1, G = variant + 1 per 1 m cell; box = x0, z0, 1/(cell*size), 0) — map A only, filled by street.js
 export const SHOPK = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0, 0, 0) } };
 { const t = new THREE.DataTexture(new Uint8Array(4), 1, 1); t.needsUpdate = true; SHOPK.tex.value = t; }
@@ -343,6 +344,7 @@ export function buildingMaterial(T) {
   const mat = new THREE.MeshStandardMaterial({ map: ts.map, normalMap: ts.normalMap, roughnessMap: ts.roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.6, 0.6) });
   ts.map.repeat.set(0.25, 0.25); ts.normalMap.repeat.set(0.25, 0.25); ts.roughnessMap.repeat.set(0.25, 0.25);
   const uniforms = { tShopK: SHOPK.tex, uShopKB: SHOPK.box, tConc: { value: cs.map }, uNight: U.uNight, uTime: U.uTime, uDbg: { value: +(new URLSearchParams(location.search).get('dbg') || 0) } };
+  mat.userData.uDbg = uniforms.uDbg; // fix_pt4: runtime debug view switch (?dbg=N at load does the same)
   return prep(mat, 'building', (s) => {
     Object.assign(s.uniforms, uniforms);
     s.vertexShader = s.vertexShader
@@ -370,8 +372,14 @@ vec3 conc = baseTex;
 // r6.1 tangent frame from screen derivatives (window recess parallax)
 vec3 rP_ = vWPb; vec3 rdp1 = dFdx(rP_), rdp2 = dFdy(rP_); vec2 rdu1 = dFdx(vUvM), rdu2 = dFdy(vUvM);
 vec3 rNg = normalize(cross(rdp1, rdp2) + 1e-7); if (dot(rNg, cameraPosition - rP_) < 0.0) rNg = -rNg;
+vec3 rNv_ = normalize((vec4(vNormal, 0.0) * viewMatrix).xyz); if (dot(rNv_, cameraPosition - rP_) < 0.0) rNv_ = -rNv_;
 vec3 rd2p = cross(rdp2, rNg), rd1p = cross(rNg, rdp1);
 vec3 rTt = normalize(rd2p * rdu1.x + rd1p * rdu2.x + 1e-6), rBt = normalize(rd2p * rdu1.y + rd1p * rdu2.y + 1e-6);
+${OLD_GLASS ? '' : `// fix_pt4: storefront rooms use an exact wall frame (vertex normal, world up, tangent = up x normal, signed like the uv tangent):
+// the screen-derivative frame tilted the room ray (rd.y/rd.z off by up to 0.2 next to the glass), which bent the room's box into a
+// fish-eye arc at close range (PLAYTEST V3, A (61.1,200)). ?oldglass = derivative frame.
+if (style == 3.0) { vec3 nH_ = vec3(rNv_.x, 0.0, rNv_.z); if (dot(nH_, nH_) > 0.25) { nH_ = normalize(nH_); vec3 tH_ = cross(vec3(0.0, 1.0, 0.0), nH_);
+  rTt = dot(tH_, rTt) < 0.0 ? -tH_ : tH_; rBt = vec3(0.0, rBt.y < 0.0 ? -1.0 : 1.0, 0.0); rNg = nH_; } }`}
 vec3 rV = normalize(rP_ - cameraPosition);
 vec3 vt_ = vec3(dot(rV, rTt), dot(rV, rBt), max(dot(rV, -rNg), 0.08));
 float reveal = 0.0, revealK = 1.0;
