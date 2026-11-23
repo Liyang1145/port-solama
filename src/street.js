@@ -24,6 +24,8 @@ function bladeNamesA(names) {
   const py = new Map(); LAYOUT.islandEW.forEach((z, i) => { if (EW_NAME[z]) { names[i] = EW_NAME[z]; py.set(i, EW_PY[z]); } }); LAYOUT.islandNS.forEach((x, i) => { if (NS_NAME[x]) { names[9 + i] = NS_NAME[x]; py.set(9 + i, NS_PY[x]); } });
   BLADE_NAMES.length = 0; BLADE_NAMES.push(...names); return py;
 }
+const OLD_SIGNBACK = typeof location !== 'undefined' && /[?&]oldsignback\b/.test(location.search); // fix_pt2
+const OLD_POOL = typeof location !== 'undefined' && /[?&]oldpool\b/.test(location.search); // fix_pt2
 function signAtlas() {
   // 8x4 cells of 128px: generic road signs (original drawings)
   const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const g = c.getContext('2d');
@@ -98,11 +100,17 @@ export function buildStreet(scene, city) {
   const stamp3 = (parts, m) => { for (const [geo, c, pb] of parts) g.geom(geo, m, { aPbr: pb }, c); };
   const cov = new GeoBucket(); const covers = (i, w, d, m) => cov.geom(coverQuad(i, w, d), m); // r6.3 cast-iron floor covers
   const occupied = (x, z, d) => city.palms.some((p) => Math.abs(p.x - x) < d && Math.abs(p.z - z) < d) || city.lamps.some((l) => Math.abs(l.x - x) < d && Math.abs(l.z - z) < d) || city.trees.some((t) => Math.abs(t.x - x) < d && Math.abs(t.z - z) < d);
-  const signFace = (cellU0, cellV0, cellU1, cellV1, x, y, z, ry, wdt, hgt) => {
+  const signFace = (cellU0, cellV0, cellU1, cellV1, x, y, z, ry, wdt, hgt, det = false) => {
     const geo = new THREE.PlaneGeometry(wdt, hgt); const uv = geo.attributes.uv;
     for (let k = 0; k < 4; k++) uv.setXY(k, cellU0 + (cellU1 - cellU0) * uv.getX(k), cellV0 + (cellV1 - cellV0) * uv.getY(k));
     const m = T(x, y, z, ry); sg.geom(geo, m);
-    const back = new THREE.PlaneGeometry(wdt, hgt); back.rotateY(Math.PI); back.translate(0, 0, -0.012); add(back, m, [0.55, 0.56, 0.57]);
+    const back = new THREE.PlaneGeometry(wdt, hgt); back.rotateY(Math.PI); back.translate(0, 0, -0.012); add(back, m, OLD_SIGNBACK ? [0.55, 0.56, 0.57] : [0.34, 0.35, 0.36]);
+    // fix_pt2 (?oldsignback = old): a bare light-grey back read as an empty notice board at night (PLAYTEST_1H V2): darker aluminium,
+    // a folded rim and two horizontal mounting channels with the clamp, in the same furniture mesh (no new draw / program)
+    if (!OLD_SIGNBACK && det) { const rim = [0.5, 0.51, 0.52], ch = [0.22, 0.23, 0.24];
+      for (const sy of [-1, 1]) { const e = new THREE.BoxGeometry(wdt, 0.025, 0.02); e.translate(0, sy * (hgt / 2 - 0.012), -0.022); add(e, m, rim); }
+      for (const sx of [-1, 1]) { const e = new THREE.BoxGeometry(0.025, hgt, 0.02); e.translate(sx * (wdt / 2 - 0.012), 0, -0.022); add(e, m, rim); }
+      for (const sy of [-0.28, 0.28]) { const c = new THREE.BoxGeometry(wdt * 0.92, 0.045, 0.03); c.translate(0, sy * hgt, -0.03); add(c, m, ch); } }
   };
   const cellUV = (i) => { const cx = i % 8, cy = Math.floor(i / 8); return [cx / 8, 1 - (cy + 1) / 4, (cx + 1) / 8, 1 - cy / 4]; };
   const postSign = (x, z, ry, cell, h = 2.6, size = 0.75) => {
@@ -110,7 +118,7 @@ export function buildStreet(scene, city) {
     const p = new THREE.CylinderGeometry(0.035, 0.035, h + size * 0.5, 6); add(p, T(x, gh + (h + size * 0.5) / 2, z), [0.6, 0.62, 0.63]);
     const [u0, v0, u1, v1] = cellUV(cell);
     const fx = Math.sin(ry) * 0.05, fz = Math.cos(ry) * 0.05;
-    signFace(u0, v0, u1, v1, x + fx, gh + h, z + fz, ry, size, size);
+    signFace(u0, v0, u1, v1, x + fx, gh + h, z + fz, ry, size, size, true); // fix_pt2: single-sided post sign -> back detail
     city.col.add(x - 0.08, z - 0.08, x + 0.08, z + 0.08, 3, 'sign');
   };
 
@@ -373,7 +381,9 @@ export function buildShopSigns(scene, city) {
   for (const a of city.awnings) {
     const sx = Math.sign(a.out) || 1; const len = a.z1 - a.z0;
     const geo = new THREE.PlaneGeometry(5.5, len + 3); geo.rotateX(-Math.PI / 2);
-    pg.geom(geo, new THREE.Matrix4().makeTranslation(a.x0 + sx * 2.6, 0.17, (a.z0 + a.z1) / 2), {}, [1.0, 0.72, 0.45]);
+    // fix_pt2 (?oldpool = old): map B storefronts also carry real point lights over the walk, so the stacked additive awning spill
+    // (neighbouring pools overlap 3 m) burnt the spawn sidewalk to white at night (PLAYTEST_1H V5); B gets 45 % of it
+    const kP = CYBER && !OLD_POOL ? 0.45 : 1; pg.geom(geo, new THREE.Matrix4().makeTranslation(a.x0 + sx * 2.6, 0.17, (a.z0 + a.z1) / 2), {}, [1.0 * kP, 0.72 * kP, 0.45 * kP]);
   }
   for (const sg of city.signs) {
     if (!sg.vertical) continue; const col = new THREE.Color(sg.color);

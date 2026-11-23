@@ -348,7 +348,16 @@ export class Game {
     const night = U.uNight.value;
     this.setCarLights(night);
     if (P.car && night > 0.2) { const v = P.car; const f = v.forward(); this.headlight.position.set(v.x + f.x * 2.3, v.y + 0.8, v.z + f.z * 2.3); this.headlight.target.position.set(v.x + f.x * 20, 0, v.z + f.z * 20); this.headlight.intensity = 400 * night; this.headlight.target.updateMatrixWorld(); }
+    // fix_pt1 (?oldfill = old): on foot at night the protagonist was a near-black silhouette (back lit by the street, front in the dark).
+    // Reuse the car headlight spot (always in the scene, so no new light count -> no new shader programs) as a soft character fill from
+    // just above the camera aimed at the chest: narrow cone, short reach, so it reads as a key light on the player and not as a torch.
+    else if (!P.car && night > 0.2 && !(this.oldFill ?? (this.oldFill = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldfill')))) {
+      const hl = this.headlight, c = this.camera.position; const pp = this.player.pos;
+      hl.position.set(c.x, c.y + 0.7, c.z); hl.target.position.set(pp.x, pp.y + 1.15, pp.z); hl.target.updateMatrixWorld();
+      if (!this._fillSet) { this._fillSet = [hl.angle, hl.penumbra, hl.distance, hl.decay]; } hl.angle = 0.32; hl.penumbra = 0.9; hl.distance = 9; hl.decay = 2; hl.intensity = 16 * Math.min(1, (night - 0.2) / 0.4);
+    }
     else this.headlight.intensity = 0;
+    if (this._fillSet && (P.car || night <= 0.2)) { const hl = this.headlight; [hl.angle, hl.penumbra, hl.distance, hl.decay] = this._fillSet; this._fillSet = null; }
     { const act = this.policeCars.filter((v) => v.siren).sort((a, b) => Math.hypot(a.x - P.pos.x, a.z - P.pos.z) - Math.hypot(b.x - P.pos.x, b.z - P.pos.z)); const ph = Math.floor(performance.now() / 160) % 2;
       this.sirenLights.forEach((l, i) => { const v = act[i]; if (!v) { l.intensity = 0; return; } l.position.set(v.x, v.y + 2.0, v.z); l.intensity = 40 * (0.3 + U.uNight.value); l.color.setHex((ph + i) % 2 ? 0xff2020 : 0x2040ff); }); }
     this.sfx.update(dt, { wanted: this.wanted, car: P.car, speed: P.car ? Math.abs(P.car.speed) : 0 });
@@ -494,6 +503,16 @@ export class Game {
     // r6.2: the smoothed camera lags behind `want`, so for a few frames it could sit inside / behind a wall the ray had
     // already pulled `want` in front of (see-through walls when turning next to a building): re-test the smoothed position
     if (!snap) { const t2 = this.city.col.raycast(target.x, target.y, target.z, C.pos.x, C.pos.y, C.pos.z); if (t2 < 1) C.pos.copy(target).lerp(C.pos, Math.max(0.05, t2 - 0.25 / Math.max(1, dist))); }
+    // fix_pt2 (?oldcam = old; replaces fix_pt1's 0.2 m camera sphere, which measured no gain when walking in): with the player's back to a
+    // wall the camera is pulled in to the shoulder and the near plane cuts through the head / torso (PLAYTEST_1H #7; tools/camwalk.cjs: the
+    // camera point itself was inside a box 0 times in ~1900 walked / swept frames, but sat < 0.5 m from the head 20-38 times per spot).
+    // Hide the character while the camera is that close (on foot only; shown again past 0.7 m or when the camera backs out).
+    if (!(this.oldCam ?? (this.oldCam = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldcam')))) {
+      const pr = this.player.root;
+      if (!P.car && this.deadT <= 0) { const hd = Math.hypot(C.pos.x - P.pos.x, C.pos.y - (P.pos.y + 1.55), C.pos.z - P.pos.z);
+        if (hd < 0.5 && pr.visible && !this._camHid) { pr.visible = false; this._camHid = true; } else if (hd > 0.7 && this._camHid) { pr.visible = true; this._camHid = false; } }
+      else if (this._camHid) { this._camHid = false; if (!P.car) pr.visible = true; }
+    }
     this.camera.position.copy(C.pos);
     C.look.copy(target);
     this.camera.lookAt(C.look);

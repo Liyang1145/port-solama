@@ -63,6 +63,7 @@ const COREFLOW_OFF = typeof location !== 'undefined' && /[?&]nocoreflow/.test(lo
 const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(location.search);
 // b_core test switch: ?nobcore restores the old (overlapping, slab-like) PVC door strips
 const BC_OFF = typeof location !== 'undefined' && /[?&]nobcore/.test(location.search);
+const DUPNAME = typeof location !== 'undefined' && /[?&]olddupname/.test(location.search); // fix_pt1
 function pickType() { let r = rng() * TW; for (const t of TYPES) { r -= t[2]; if (r <= 0) return t; } return TYPES[0]; }
 
 // ------------------------------------------------------------------ unit geometries ----
@@ -256,7 +257,12 @@ export class StorefrontLayer {
     const w = r.a1 - r.a0; if (w < 2.3) { this.stats.narrow++; return null; }
     if (r.kind === 'shut' && r.open === 0) { this.stats.closed++; return null; }
     const ac = (r.a0 + r.a1) / 2; const BM = r.F0 ? r.F0.clone().multiply(new THREE.Matrix4().makeTranslation(ac, 0, 0)) : new THREE.Matrix4().multiplyMatrices(M, BAYB.clone().setPosition(r.fx, 0, r.z1 - ac));
-    const synced = r.sg === 1 && r.sk >= 0 && r.sk < SIGN_TYPE.length; const T = synced ? TYPE_BY_ID[SIGN_TYPE[r.sk]] : pickType(); const type = T[0]; this.stats.types[type]++; this.stats.shops++;
+    const synced = r.sg === 1 && r.sk >= 0 && r.sk < SIGN_TYPE.length; let T = synced ? TYPE_BY_ID[SIGN_TYPE[r.sk]] : pickType();
+    // fix_pt1 (?olddupname = old): two neighbouring bays could draw the same one-name type (two 霓虹药房 side by side, PLAYTEST_1H V4);
+    // the neighbour's type is remembered per frontage and a repeat of a single-name type moves to the next type (no extra rng draw)
+    const fk = r.F0 || (src + '|' + r.fx + '|' + r.z1); const prevN = DUPNAME ? null : (this._lastName || (this._lastName = new Map())).get(fk); const adj = prevN && prevN.i === r.i - 1;
+    if (!synced && adj && prevN.type === T[0] && T[1].length === 1) { let j = TYPES.indexOf(T); do { j = (j + 1 + (r.i % 2)) % TYPES.length; } while (TYPES[j][0] === T[0] || TYPES[j][1].includes(prevN.nk)); T = TYPES[j]; this.stats.dupFix = (this.stats.dupFix || 0) + 1; }
+    const type = T[0]; this.stats.types[type]++; this.stats.shops++;
     const bs = this.stats.bySrc[src]; bs.shops++; bs.types[type] = (bs.types[type] || 0) + 1;
     if (synced) this.stats.signSync++; else if (r.sg === 1) this.stats.signOther++;
     const shop = { type, src, inst: {}, tris: 0, cost: 0, uniq: [], of: 0 }; const hw = w / 2; const gz = r.core ? 0.14 : 0.236; // glass plane (core: the facade shader wall, no storefront kit)
@@ -349,7 +355,8 @@ export class StorefrontLayer {
         if (type === 'pharm' && r.aw) wl = Math.min(wl, Math.max(0.6, w - 0.9)); } // room beside it for the pharmacy cross, clear of the awning brace
       asm = 'lb'; if (!lbDrop) P0('lbBody', 0, yl, lz, wl, hl, 0.18); asm = null;
       const c = new THREE.Vector3(0, yl, lz + 0.096).applyMatrix4(BM); const n = new THREE.Vector3(0, 0, 1).transformDirection(BM);
-      const nk = synced ? r.sk : pick(T[1]); if (!lbDrop) shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
+      let nk = synced ? r.sk : pick(T[1]); if (!synced && adj && prevN.nk === nk) { const alt = T[1].filter((q) => q !== nk); if (alt.length) { nk = alt[r.i % alt.length]; this.stats.dupFix = (this.stats.dupFix || 0) + 1; } }
+      if (!DUPNAME) this._lastName.set(fk, { i: r.i, nk, type }); if (!lbDrop) shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
     // ---- window display card (lit panel + dark strokes) in front of the parallax room, behind the glass
     const card = (k, x0, x1, ya, yb2) => { if (yb2 - ya < 0.15 || x1 - x0 < 0.2) return false; P(k, (x0 + x1) / 2, (ya + yb2) / 2, 0.12, x1 - x0, yb2 - ya, 0.02); return true; };
     const ink = (x, y, sx, sy) => P('ink', x, y, 0.135, sx, sy, 0.006);

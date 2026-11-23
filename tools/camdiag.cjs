@@ -1,0 +1,19 @@
+// fix_pt2: why is the camera still inside a collider at a few camwalk poses? For each [px, pz, yaw, pitch]: stand there, settle the camera
+// (G.step 12, mouse fresh), then report the look-at target, camera, every box that contains the camera (exact AABB / OBB test, with its
+// extents), raycast target->camera, and whether the target itself is inside. usage: node tools/camdiag.cjs <map> '<json cases>' [query]
+const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
+const root = path.resolve(__dirname, '..'); const MAPN = process.argv[2] || 'cyber'; const CASES = JSON.parse(process.argv[3] || '[]'); const VQ = process.argv[4] || '';
+const srv = http.createServer((q, s) => { const p = path.join(path.resolve(root, process.env.DIST || 'dist'), decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': p.endsWith('.html') ? 'text/html' : p.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); s.end(d); }); });
+srv.listen(0, async () => {
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--js-flags=--max-old-space-size=1100', '--disable-dev-shm-usage', '--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] });
+  const p = await (await b.newContext({ viewport: { width: 320, height: 180 } })).newPage(); p.setDefaultTimeout(600000); let perr = 0; p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
+  await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&map=${MAPN}&lowshadow&probe=0&${VQ}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
+  const r = await p.evaluate(`(() => { const G = __G, g = G.game, col = g.city.col; const out = [];
+    const contains = (b, x, z, y, r) => { if (b.y0 !== undefined ? (y < b.y0 || y > b.h) : y > b.h) return false; if (b.o) { const o = b.o; const rx = x - o.cx, rz = z - o.cz; const la = rx * o.ux + rz * o.uz, lw = -rx * o.uz + rz * o.ux; const da = Math.abs(la) - o.hl, dw = Math.abs(lw) - o.hw; const qa = Math.max(0, da), qw = Math.max(0, dw); return qa * qa + qw * qw < r * r; } const qx = Math.max(b.minX, Math.min(b.maxX, x)) - x, qz = Math.max(b.minZ, Math.min(b.maxZ, z)) - z; return qx * qx + qz * qz < r * r; };
+    const boxesAt = (x, y, z, r) => { const L = col.query(x, z, r + 1).filter((b) => contains(b, x, z, y, r)); if (col.over) for (const b of col.over.query(x, z, r + 1)) if (contains(b, x, z, y, r)) L.push(b); return L.map((b) => [b.tag, b.o ? ['obb', +b.o.cx.toFixed(2), +b.o.cz.toFixed(2), +b.o.hl.toFixed(2), +b.o.hw.toFixed(2), +Math.atan2(b.o.uz, b.o.ux).toFixed(2)] : [+b.minX.toFixed(2), +b.minZ.toFixed(2), +b.maxX.toFixed(2), +b.maxZ.toFixed(2)], b.y0 ?? 0, +b.h.toFixed(2)]); };
+    for (const [px, pz, yaw, pitch] of ${JSON.stringify(CASES)}) { g.tp(px, pz, 0); G.step(2); g.cam.yaw = yaw; g.cam.pitch = pitch; for (let i = 0; i < 12; i++) { g.cam.lastMouse = performance.now(); G.step(1); }
+      const c = G.camera.position.clone(), L = g.cam.look.clone(); const P = g.P.pos;
+      out.push({ p: [+P.x.toFixed(2), +P.z.toFixed(2)], yaw, pitch, cam: c.toArray().map((v) => +v.toFixed(2)), look: L.toArray().map((v) => +v.toFixed(2)), dist: +c.distanceTo(L).toFixed(2), camIn: boxesAt(c.x, c.y, c.z, 0.05), lookIn: boxesAt(L.x, L.y, L.z, 0.05), ray: +col.raycast(L.x, L.y, L.z, c.x, c.y, c.z).toFixed(3), playerIn: boxesAt(P.x, P.y + 0.5, P.z, 0.3) }); }
+    return out; })()`);
+  for (const row of r) console.log(VQ || 'new', JSON.stringify(row)); console.log('PAGEERROR', perr); await b.close(); process.exit(0);
+});

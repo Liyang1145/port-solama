@@ -1,0 +1,34 @@
+// fix_pt2: third-person camera vs colliders while WALKING (not teleported) to the PLAYTEST_1H points. For each point and 8 approach
+// directions: start 6 m out on a free spot, face the point, hold W (override mz=1) for up to 2.5 s with the camera orbiting slowly
+// (yaw drift like a player turning the mouse), then a 16 yaw x 2 pitch sweep where the player stopped. Every frame: camera inside
+// a collider (resolve r 0.05 at camera y, ground-up + overhead boxes; same test as the playtest __check) -> counted, first few logged
+// with the box tags. One variant per process (single-process chrome). usage: node tools/camwalk.cjs <map> "x,z;x,z" <variant-query>
+const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
+const root = path.resolve(__dirname, '..'); const MAPN = process.argv[2] || 'cyber'; const PTS = (process.argv[3] || '198.7,77.5;140.8,-336.5;12,330').split(';').map((s) => s.split(',').map(Number)); const VQ = process.argv[4] || '';
+const srv = http.createServer((q, s) => { const p = path.join(path.resolve(root, process.env.DIST || 'dist'), decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': p.endsWith('.html') ? 'text/html' : p.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); s.end(d); }); });
+srv.listen(0, async () => {
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--js-flags=--max-old-space-size=1100', '--disable-dev-shm-usage', '--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] });
+  const p = await (await b.newContext({ viewport: { width: 320, height: 180 } })).newPage(); p.setDefaultTimeout(600000); let perr = 0; p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
+  await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&map=${MAPN}&lowshadow&probe=0&${VQ}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
+  const r = await p.evaluate(`(() => { const G = __G, g = G.game, col = g.city.col; const PTS = ${JSON.stringify(PTS)}; const res = [];
+    const loose = (c) => { const rr = col.resolve(c.x, c.z, 0.05, c.y); return Math.hypot(rr.x - c.x, rr.z - c.z) > 0.05; }; // playtest __check (walker-height overhead test)
+    const cont = (b, x, z, y) => { if (b.y0 !== undefined && b.y0 > 0 ? (y < b.y0 || y > b.h) : y > b.h) return false; if (b.o) { const o = b.o; const rx = x - o.cx, rz = z - o.cz; return Math.abs(rx * o.ux + rz * o.uz) < o.hl && Math.abs(-rx * o.uz + rz * o.ux) < o.hw; } return x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ; };
+    const inside = (c) => col.query(c.x, c.z, 0.5).some((b) => cont(b, c.x, c.z, c.y)) || (col.over ? col.over.query(c.x, c.z, 0.5).some((b) => cont(b, c.x, c.z, c.y)) : false); // exact: camera point inside a box
+    const THREE = G.THREE, rc = new THREE.Raycaster(), tv = new THREE.Vector3(); const occl = (c, L) => { tv.copy(c).sub(L); const d = tv.length(); if (d < 0.4) return 'head'; tv.normalize(); rc.set(L, tv); rc.near = 0.35; rc.far = d - 0.1; const was = g.player.root.visible; g.player.root.visible = false;
+      const hs = rc.intersectObjects(G.scene.children, true).filter((h) => { let o = h.object; while (o) { if (!o.visible) return false; o = o.parent; } const m = h.object.material; return !(m && m.transparent) && !h.object.isSprite && !h.object.isPoints && !h.object.isLine; }); g.player.root.visible = was; return hs.length ? (hs[0].object.name || hs[0].object.type) + '@' + hs[0].distance.toFixed(2) + '/' + d.toFixed(2) : null; };
+    const tags = (c) => { const L = col.query(c.x, c.z, 0.3).filter((b) => c.y <= b.h).map((b) => b.tag + '/' + (+b.h).toFixed(1)); const O = col.over ? col.over.query(c.x, c.z, 0.3).filter((b) => c.y > b.y0 && c.y < b.h).map((b) => 'OV:' + b.tag + '/' + (+b.y0).toFixed(1) + '-' + (+b.h).toFixed(1)) : []; return L.concat(O).slice(0, 4); };
+    for (const [x, z] of PTS) { const row = { pt: [x, z], walkFrames: 0, walkIn: 0, walkLoose: 0, sweep: 0, sweepIn: 0, sweepLoose: 0, occ: 0, head: 0, headC: 0, headVis: 0, reached: [], bad: [] };
+      for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; let sx = x + Math.sin(a) * 6, sz = z + Math.cos(a) * 6;
+        if (col.resolve(sx, sz, 0.4, g.city.groundH(sx, sz) + 0.5).hit) { sx = x + Math.sin(a) * 4; sz = z + Math.cos(a) * 4; if (col.resolve(sx, sz, 0.4, g.city.groundH(sx, sz) + 0.5).hit) continue; }
+        const hd = Math.atan2(x - sx, z - sz); g.tp(sx, sz, hd); g.cam.yaw = hd - Math.PI; g.cam.pitch = 0.1; G.step(3);
+        let best = 1e9; for (let i = 0; i < 75; i++) { const P = g.P.pos; const dd = Math.hypot(P.x - x, P.z - z); best = Math.min(best, dd); if (dd < 0.4) break;
+          g.cam.yaw = Math.atan2(x - P.x, z - P.z) - Math.PI + Math.sin(i * 0.21 + k) * 0.9; g.cam.lastMouse = performance.now(); g.override = { mz: 1, mx: 0 }; G.step(1);
+          const c = G.camera.position; row.walkFrames++; if (loose(c)) row.walkLoose++; if (inside(c)) { row.walkIn++; if (row.bad.length < 8) row.bad.push(['walk', k, i, [+P.x.toFixed(2), +P.z.toFixed(2)], [+c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2)], tags(c)]); } }
+        g.override = null; G.step(2); const P = g.P.pos; row.reached.push(+best.toFixed(2));
+        for (let i = 0; i < 16; i++) for (const pitch of [0.15, -0.25]) { g.cam.yaw = i / 16 * Math.PI * 2; g.cam.pitch = pitch; g.cam.lastMouse = performance.now(); G.step(8); const c = G.camera.position; row.sweep++; if (loose(c)) row.sweepLoose++; { const P2 = g.P.pos; const hd = Math.hypot(c.x - P2.x, c.y - P2.y - 1.55, c.z - P2.z); if (hd < 0.5) { row.headC++; if (g.player.root.visible) row.headVis++; } } const oc = occl(c, g.cam.look); if (oc === 'head') row.head++; else if (oc) { row.occ++; if (row.bad.length < 10) row.bad.push(['occ', k, i, pitch, oc]); }
+          if (inside(c)) { row.sweepIn++; if (row.bad.length < 8) row.bad.push(['sweep', k, i, [+P.x.toFixed(2), +P.z.toFixed(2)], [+c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2)], tags(c)]); } } }
+      res.push(row); }
+    return res; })()`);
+  for (const row of r) console.log(VQ || 'new', JSON.stringify(row.pt), 'walk exact', row.walkIn + '/' + row.walkFrames, 'loose', row.walkLoose, 'sweep exact', row.sweepIn + '/' + row.sweep, 'loose', row.sweepLoose, 'occluded', row.occ, 'look<0.4', row.head, 'head<0.5', row.headC, 'headVisible', row.headVis, 'reached', JSON.stringify(row.reached), JSON.stringify(row.bad));
+  console.log(VQ || 'new', 'PAGEERROR', perr); fs.writeFileSync(path.join(root, 'shots/fp1/camwalk_' + MAPN + '_' + (VQ || 'new') + '.json'), JSON.stringify(r)); await b.close(); process.exit(0);
+});

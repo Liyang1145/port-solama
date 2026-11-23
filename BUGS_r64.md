@@ -75,3 +75,16 @@ daynight：开跑约 10 s 被沙箱 OOM 杀（同 #3/#10）；session3min / cybe
 | 13（新，已修） | 已修 | GLSL smoothstep(edge0>edge1) 32 处（规范未定义）→ 1.0-smoothstep(lo,hi,x)，数学等价 | Hark |
 | 14（新） | 待查 | A police 回归：第二、三段 crime(2,'test') 未让通缉生效（escalated 0 / 3000 帧，loseFrames 0），清通缉 200 帧后仍有 5 警车 6 警察 + 直升机；perf_debug3 同测正常（3 / 1921）。只跑逻辑帧，与渲染改动无关，疑随机/状态残留 | GPT |
 | 15（新） | 低 | 探针远景 LOD（?oldsprobelod）只作用于远西大陆 34 个 region 区块，出生点/(−300,200) 无收益；剩余探针三角形来自 fabric/houses/downtown 城市级合并网格与实例集 | Hark |
+
+## fix_pt1/fix_pt2 更新（同分支，c8647e6 → 见 /workspace/work/patches/fix_pt1.md；试玩清单 /workspace/work/patches/PLAYTEST_1H.md）
+Hark 已处理：carNearPlayer OOM（测试框架 page.evaluate 返回 Vehicle，非游戏泄漏）、小地图每渲染帧画一次（?oldmmdraw）、bake 重烘焙（stale 告警消失）、报废车不能再上 + wanted=0 不再把 'dead' 改回 'flee'（?olddeadcar）、开局/瞬移停车位分摊（?oldmanage2，B 首帧 239→114 ms）、海滩 groundH 与沙面对齐（?oldsand）、夜间步行补光（?oldfill）、相邻重名招牌（?olddupname）、路牌背面（?oldsignback）、B 店铺地面光池（?oldpool）、贴墙时相机贴脸隐藏角色（?oldcam）。
+
+### 交 GPT（玩法/平衡，均已复现，复现步骤见下）
+| # | 问题 | 复现 | 根因/线索 |
+|---|---|---|---|
+| G1 | 车生命值归零无任何反馈 | A (279.9,−44.1) 开出生旁跑车 50 km/h 级撞墙 4–5 次 → health ≤0：W/S 0 km/h、HUD 仍「跑车 · 按 F 下车」，无烟/火/爆炸，不强制下车 | vehicles.js:472 dead→throttle 0；:510 每次碰撞 (impact−6)*2.2。追捕 AI 警车也会这样自己撞报废（PLAYTEST #24 的"开不动的警车"就是它，copprobe 复现 health −35）。Hark 只加了「报废车不让上 + HUD 一句」（?olddeadcar），冒烟→起火→爆炸/强制下车/报废车从 policeCars 移出（目前仍占派车名额）请 GPT 定 |
+| G2 | Esc 不暂停 | Esc 后按住 W 2.5 s：A 移动 1.08 m、B 4.31 m，游戏时间 +3.43 s | 无暂停菜单 / 未冻结 game.update（BUGS_r64 #4） |
+| G3 | 抢劫任务 rob 4–6 s 阵亡 | 起点 ≈(60,50) 开始 rob：3 s 转 escape（3 星、4 警车）→ 第 4–6 s health 0；B 图「抢到 $2194 · 甩掉警察！」与「阵亡」同屏 | 逃跑窗口过短/首波火力过强；失败时成功文案未清 |
+| G4 | 1 星通缉 6 s 清零 | A (278,−44)/B (274,−36) 对路人开 5 枪得 1 星，原地站 6 s → wanted 0（附近 2 辆警车） | lostT 计时在警车/警察就在附近时仍累加，疑 los/seen 判定；与 #14 同类 |
+| G5 | police 回归随机失败 | plans/r5_regress.json police 项：第二、三段 crime(2,'test') 后 escalated 0 / 3000 帧，清通缉 200 帧后仍有 5 警车 6 警察 + 直升机；perf_debug3 同测正常 | 状态残留/随机（BUGS_r64 #14），只跑逻辑帧，与渲染改动无关 |
+其它（低）：B 出生点 20 s 内无提示掉血 100→82（疑被车撞）、B 代客泊车目标叫「棕榈停车场」（A 图地名）、复活扣款与提示 $500 不符（待复核）、跑车起步偏慢（低置信）。
