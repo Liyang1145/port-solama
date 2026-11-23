@@ -11,11 +11,11 @@ srv.listen(0, async () => {
   await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&map=${MAPN}&dpr=1&lowshadow&nopost&far=140&${VQ}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
   for (const [x, z] of PTS) {
     const r = await p.evaluate(`(() => { const G = __G, g = G.game, P = g.P, col = g.city.col; const res = { n: 0, pIn: 0, cIn: 0, cases: [] };
-      for (let k = 0; k < 12; k++) for (const slide of [0, 1, -1]) { if (P.car) g.toggleCar(); g.override = null; g.tp(${x}, ${z}, 0); G.step(2);
-        const yaw = k / 12 * Math.PI * 2; g.carNearPlayer('sedan', 0.01); const v = g.traffic.cars[g.traffic.cars.length - 1]; let cx = ${x}, cz = ${z};
+      for (let k = 0; k < 24; k++) for (const slide of [0, 1, -1]) { if (P.car) g.toggleCar(); g.override = null; g.tp(${x}, ${z}, 0); G.step(2);
+        const yaw = k / 24 * Math.PI * 2; g.carNearPlayer('sedan', 0.01); const v = g.traffic.cars[g.traffic.cars.length - 1]; let cx = ${x}, cz = ${z};
         if (slide) { const lx = Math.cos(yaw) * slide, lz = -Math.sin(yaw) * slide; for (let d = 0; d < 6; d += 0.1) { const t = col.raycast(cx, G.game.city.groundH(cx, cz) + 0.6, cz, cx + lx * (v.dims.W / 2 + 0.15), G.game.city.groundH(cx, cz) + 0.6, cz + lz * (v.dims.W / 2 + 0.15)); if (t < 1) break; cx += lx * 0.1; cz += lz * 0.1; } }
         v.place(cx, cz, yaw); v.health = 100; v.ai = null; g.tp(cx + Math.cos(yaw) * 2, cz - Math.sin(yaw) * 2, 0); G.step(1); g.toggleCar(); G.step(3); if (!P.car) { continue; } g.toggleCar(); res.n++;
-        let pin = 0, cin = 0; for (let f = 0; f < 8; f++) { G.step(1); const q = col.resolve(P.pos.x, P.pos.z, 0.35, P.pos.y + 0.5); if (Math.hypot(q.x - P.pos.x, q.z - P.pos.z) > 0.05) pin++; const c = G.camera.position; const q2 = col.resolve(c.x, c.z, 0.05, c.y); if (Math.hypot(q2.x - c.x, q2.z - c.z) > 0.05) cin++; }
+        let pin = 0, cin = 0; for (let f = 0; f < 9; f++) { if (f) G.step(1); const q = col.resolve(P.pos.x, P.pos.z, 0.35, P.pos.y + 0.5); if (Math.hypot(q.x - P.pos.x, q.z - P.pos.z) > 0.05) pin++; const c = G.camera.position; const q2 = col.resolve(c.x, c.z, 0.05, c.y); if (Math.hypot(q2.x - c.x, q2.z - c.z) > 0.05) cin++; }
         if (pin) res.pIn++; if (cin) res.cIn++; if (pin || cin) res.cases.push({ yaw: +yaw.toFixed(2), slide, car: [+cx.toFixed(1), +cz.toFixed(1)], player: [+P.pos.x.toFixed(2), +P.pos.z.toFixed(2)], pin, cin });
         const i = g.traffic.cars.indexOf(v); if (i >= 0) { g.traffic.cars.splice(i, 1); v.dispose ? v.dispose() : v.root && v.root.removeFromParent(); } }
       return res; })()`);
