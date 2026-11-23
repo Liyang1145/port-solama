@@ -226,7 +226,7 @@ vec3 shopRoom(vec2 ro2, vec3 rd, float RW, float RH, float RD, float st, float s
         else { alb = mix(wallC, cc, cl); alb = mix(alb, vec3(0.08), rail); }
     } else if (st == 4.0) {
       if (sub < 0.5) { // diner: tiled wainscot, framed photos, kitchen pass + menu light box on the back wall
-        vec2 tq = wq / vec2(0.15, 0.075); float tg = smoothstep(0.08, 0.0, min(fract(tq.x + 0.5 * mod(floor(tq.y), 2.0)), fract(tq.y)));
+        vec2 tq = wq / vec2(0.15, 0.075); float tg = (1.0 - smoothstep(0.0, 0.08, min(fract(tq.x + 0.5 * mod(floor(tq.y), 2.0)), fract(tq.y))));
         vec3 tileC = mix(vec3(0.10, 0.42, 0.42), vec3(0.62, 0.12, 0.12), step(0.5, sv));
         alb = mix(wallC, tileC * (1.0 - 0.3 * tg), step(wq.y, 1.2)); alb = mix(alb, vec3(0.75, 0.75, 0.78), step(abs(wq.y - 1.22), 0.025));
         if (id == 3.0) { float pass = step(abs(wq.x - RW * 0.42), RW * 0.2) * step(1.15, wq.y) * step(wq.y, 1.85);
@@ -239,7 +239,7 @@ vec3 shopRoom(vec2 ro2, vec3 rd, float RW, float RH, float RD, float st, float s
         if (id == 3.0 && wq.y > 1.15 && wq.y < 2.45) { float row = fract((wq.y - 1.15) / 0.43); float bx = fract(wq.x / 0.09); float bh = h12(vec2(floor(wq.x / 0.09), floor((wq.y - 1.15) / 0.43)) + sv);
           float bot = step(0.08, row) * step(row, 0.55 + 0.3 * bh) * step(abs(bx - 0.5), 0.32 - 0.18 * step(0.75 * (0.55 + 0.3 * bh), row)) * step(0.15, bh);
           vec3 bc = mix(vec3(0.55, 0.28, 0.06), mix(vec3(0.10, 0.35, 0.12), vec3(0.75, 0.78, 0.74), step(0.6, h12(vec2(bh, 2.0)))), step(0.45, bh));
-          alb = mix(vec3(0.95, 0.75, 0.45), bc, bot); alb = mix(alb, vec3(0.2, 0.13, 0.08), smoothstep(0.06, 0.0, row)); emi = 0.9 * (1.0 - bot * 0.6) * step(0.06, row); }
+          alb = mix(vec3(0.95, 0.75, 0.45), bc, bot); alb = mix(alb, vec3(0.2, 0.13, 0.08), (1.0 - smoothstep(0.0, 0.06, row))); emi = 0.9 * (1.0 - bot * 0.6) * step(0.06, row); }
         if (id == 3.0 && wq.y > 2.5 && wq.y < 2.9) { alb = MN * step(abs(wq.x - RW * 0.5), RW * 0.2); emi = mE * 0.7 * step(abs(wq.x - RW * 0.5), RW * 0.2); }
         if (id == 0.0) { float fr = step(abs(fract(wq.x / 1.8) - 0.5), 0.18) * step(abs(wq.y - 1.75), 0.3); alb = mix(alb, vec3(0.5, 0.42, 0.3) * (0.5 + 0.5 * vnoise(wq * 4.0 + sv)), fr); }
       }
@@ -489,7 +489,7 @@ if (style == 6.0) {
   tin = mix(tin, 0.88, 1.0 - fine); float tv = h12(floor(tg) + seed);
   vec3 tileC = mix(vec3(0.74, 0.76, 0.72), vec3(0.36, 0.52, 0.46), step(0.5, fract(seed * 0.37))) * (0.86 + 0.18 * tv);
   tileC = mix(tileC * 0.45, tileC, tin); tileC = mix(tileC, wc * 0.55, step(0.972, tv) * fine);
-  tileC *= 1.0 - 0.4 * smoothstep(0.7, 0.0, yb) * (0.6 + 0.4 * vnoise(vec2(uu * 1.7, seed)));
+  tileC *= 1.0 - 0.4 * (1.0 - smoothstep(0.0, 0.7, yb)) * (0.6 + 0.4 * vnoise(vec2(uu * 1.7, seed)));
   wc = mix(wc, tileC, dado); wc *= 1.0 - 0.45 * step(abs(yb - 1.26), 0.022);
   float stk = smoothstep(0.55, 0.9, vnoise(vec2(uu * 2.3, seed * 1.9)) * 0.7 + vnoise(vec2(uu * 7.1, yb * 0.15)) * 0.3);
   wc *= 1.0 - stk * 0.28 * (1.0 - dado * 0.6);
@@ -510,8 +510,8 @@ if (style == 6.0) {
   if (t == 2.0 || t == 4.0) {
     float sl = fract(oy / 0.075);
     vec3 sc = mix(vec3(0.52, 0.55, 0.57), vec3(0.34, 0.38, 0.42), step(0.5, hs)) * (0.82 + 0.3 * vnoise(vec2(uu * 2.6, yb * 0.9) + seed));
-    sc *= mix(0.86, 0.68 + 0.36 * smoothstep(0.0, 0.55, sl) * smoothstep(1.0, 0.75, sl), fine);
-    sc = mix(sc, vec3(0.30, 0.19, 0.12), smoothstep(0.7, 0.0, oy) * 0.55 * vnoise(vec2(uu * 4.0, 3.0)));
+    sc *= mix(0.86, 0.68 + 0.36 * smoothstep(0.0, 0.55, sl) * (1.0 - smoothstep(0.75, 1.0, sl)), fine);
+    sc = mix(sc, vec3(0.30, 0.19, 0.12), (1.0 - smoothstep(0.0, 0.7, oy)) * 0.55 * vnoise(vec2(uu * 4.0, 3.0)));
     // spray tag: a row of wavy letter strokes + an underline in a 1.6 x 0.5 m box at chest height (35 % of shutters)
     float tx_ = lu - (fract(hs * 5.3) - 0.5) * max(hw - 0.9, 0.0); float ty_ = oy - (t == 4.0 ? 0.55 : 1.05);
     float tbox = step(abs(tx_), min(0.8, hw - 0.2)) * step(abs(ty_), 0.26);
@@ -521,7 +521,7 @@ if (style == 6.0) {
     sc = mix(sc, vec3(0.12, 0.12, 0.13), step(oy, 0.07));
     sc = mix(sc, vec3(0.05), step(abs(lu), 0.06) * step(abs(oy - 0.16), 0.05) * step(o0, 0.5));
     svcC = mix(svcC, sc, inO); svcR = mix(svcR, 0.5 + 0.2 * tag, inO); svcMet = 0.6 * inO * (1.0 - tag);
-    svcH += inO * (smoothstep(0.0, 0.5, sl) * smoothstep(1.0, 0.5, sl) - 0.5) * 0.006 * fine;
+    svcH += inO * (smoothstep(0.0, 0.5, sl) * (1.0 - smoothstep(0.5, 1.0, sl)) - 0.5) * 0.006 * fine;
   } else if (t == 5.0) {
     // b_alleyface2: one steel-door look with alley.js (its door material 0x5a636e, roughness 0.55, metalness 0.45, frame 0.08 m,
     // kick plate to 0.3 m, lever at 0.39 m and 1.02 m, hood 1.16 by 0.2 m): the painted door and the fitted door read as the same make
@@ -530,7 +530,7 @@ if (style == 6.0) {
     float grl = step(abs(lu), hw - 0.14) * step(0.25, yb) * step(yb, 0.55) * step(0.5, fract(yb / 0.04));
     float kick = step(yb, 0.3); float lever = step(abs(lu - 0.39), 0.05) * step(abs(yb - 1.02), 0.02);
     vec3 dcol = mix(dc, dc * 0.55, pnl); dcol = mix(dcol, vec3(0.03), grl * fine); dcol = mix(dcol, dc * 1.3, kick); dcol = mix(dcol, dc * 1.6, lever);
-    dcol *= 1.0 - 0.3 * smoothstep(0.5, 0.0, abs(lu - hw * 0.6)) * smoothstep(0.6, 1.1, yb) * step(yb, 1.5);
+    dcol *= 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.5, abs(lu - hw * 0.6))) * smoothstep(0.6, 1.1, yb) * step(yb, 1.5);
     svcC = mix(svcC, dcol, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.45 * inO;
     float sgn = step(abs(lu), 0.17) * step(abs(yb - 2.49), 0.07);
     float gly = sgn * step(0.5, fract(lu * 9.0 + 0.25)) * step(abs(yb - 2.49), 0.035) * fine;
@@ -807,7 +807,7 @@ if (kind == 0.0 || kind == 3.0) {
   float zebra = step(0.5, fract(u / 1.1)) * step(1.0, e) * step(e, 4.2) * step(au, hw - 0.5);
 ${BG ? `  // b_ground: worn zebra — paint gone in the wheel paths, ragged stripe ends, a few stripes faded as a whole
   { float zs = floor(u / 1.1); float zh = h12(vec2(zs, floor(L * 0.37)));
-    float wp = smoothstep(0.42, 0.2, abs(abs(fract(au / 3.5) - 0.5) - 0.25) * 3.5 / 1.4);
+    float wp = (1.0 - smoothstep(0.2, 0.42, abs(abs(fract(au / 3.5) - 0.5) - 0.25) * 3.5 / 1.4));
     float zn = vnoise(vRW.xz * 5.5) * 0.55 + vnoise(vRW.xz * 19.0) * 0.45;
     float keep = step(wp * 0.62 + (1.0 - smoothstep(0.0, 0.9, min(e - 1.0, 4.2 - e))) * 0.35 + zh * 0.25, zn + 0.18);
     zebra *= keep * mix(1.0, 0.55, step(0.8, zh)); }
@@ -833,7 +833,7 @@ ${CYBER ? '' : '  sgTrW = max(sgTrW, (shaft + head) * inb * step(30.0, L));\n'} 
 float paintMask = clamp(wpaint + ypaint, 0.0, 1.0) * (0.55 + 0.45 * smoothstep(0.25, 0.75, wear));
 ${CYBER ? '' : `// a_signage (map A): wheel paths 0.85 m either side of each lane centre polish the zebra bars / stop line / arrows down to
 // the asphalt in patches; fine chipping everywhere else on them
-float sgWheel = smoothstep(0.5, 0.12, abs(abs(fract(au / 3.5) * 3.5 - 1.75) - 0.85));
+float sgWheel = (1.0 - smoothstep(0.12, 0.5, abs(abs(fract(au / 3.5) * 3.5 - 1.75) - 0.85)));
 float sgChip = smoothstep(0.3, 0.8, vnoise(vRW.xz * 6.5)) * 0.7 + smoothstep(0.55, 0.9, vnoise(vRW.xz * 21.0)) * 0.3;
 paintMask *= 1.0 - sgTrW * clamp(sgWheel * (0.3 + 0.55 * sgChip) + (1.0 - sgWheel) * 0.28 * sgChip, 0.0, 0.85);
 `}vec3 asph = texelColor.rgb * diffuse;
@@ -855,12 +855,12 @@ if (kind != 1.0) { float li = floor(au / 3.5); float pv = fract(v / 21.0 + li * 
   float a0 = 3.0 + hp.x * 8.0, a1 = a0 + 2.2 + hp.y * 5.0, b0 = 0.3 + hp.y * 0.8, b1 = b0 + 1.4 + hp.x * 1.2;
   float inP = step(a0, pv) * step(pv, a1) * step(b0, uu) * step(uu, b1) * step(h12(vec2(pc, li + 11.0)), 0.3);
   float edge = min(min(pv - a0, a1 - pv), min(uu - b0, b1 - uu));
-  bgPatch = inP; asph = mix(asph, asph * vec3(0.66, 0.66, 0.7), inP); asph *= 1.0 - inP * smoothstep(0.06, 0.0, edge) * 0.55;
+  bgPatch = inP; asph = mix(asph, asph * vec3(0.66, 0.66, 0.7), inP); asph *= 1.0 - inP * (1.0 - smoothstep(0.0, 0.06, edge)) * 0.55;
   paintMask *= 1.0 - inP * 0.7;
-  float trk = smoothstep(0.3, 0.12, abs(lanePos - 0.25)) * (1.0 - inP);
+  float trk = (1.0 - smoothstep(0.12, 0.3, abs(lanePos - 0.25))) * (1.0 - inP);
   vec2 cq = vRW.xz * 2.2; vec2 ci = floor(cq), cf = fract(cq); float d1 = 9.0, d2 = 9.0;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { vec2 o = vec2(float(i), float(j)); vec2 pp = o + vec2(h12(ci + o), h12(ci + o + 17.0)) - cf; float dd = dot(pp, pp); if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd; }
-  float net = smoothstep(0.07, 0.0, sqrt(d2) - sqrt(d1)) * trk * smoothstep(0.55, 0.75, vnoise(vRW.xz * 0.08 + 5.0));
+  float net = (1.0 - smoothstep(0.0, 0.07, sqrt(d2) - sqrt(d1))) * trk * smoothstep(0.55, 0.75, vnoise(vRW.xz * 0.08 + 5.0));
   asph = mix(asph, asph * 0.5, net * 0.85); }
 ` : ``}vec3 col = mix(asph, wpaint > ypaint ? paintW : paintY, paintMask);
 col = mix(col, vec3(0.16, 0.42, 0.20) * (0.8 + 0.3 * wear), bikeG * (0.7 + 0.3 * smoothstep(0.2, 0.7, wear)));
@@ -872,7 +872,7 @@ if (kind == 0.0 || kind == 2.0) { float hwd = kind == 0.0 ? 7.0 : 4.5; float sd 
   float dh = fract(dc * 0.6180339887 + sd * 0.37 + fract(L * 0.0137)), dh2 = fract(dc * 0.4142135 + sd * 0.71 + fract(L * 0.0291));
   float vd = (dc + 0.5 + (dh - 0.5) * 0.5) * 30.0; float ed = min(vd + sd * 15.0, L - vd - sd * 15.0);
   float rq = length(vec2((vv - vd) * 0.5, (au - (hwd - 0.3)) * 0.95)) + (vnoise(vRW.xz * 1.4) - 0.5) * 0.45;
-  float dpud = smoothstep(1.05, 0.6, rq) * step(0.18, dh2) * step(8.0, ed);
+  float dpud = (1.0 - smoothstep(0.6, 1.05, rq)) * step(0.18, dh2) * step(8.0, ed);
   float gut = smoothstep(hwd - 1.1, hwd - 0.3, au) * smoothstep(0.5, 0.72, vnoise(vRW.xz * 0.32 + 9.0)) * step(5.4, min(v, L - v));
   pud = max(pud, max(dpud, gut * 0.9)); }
 ` : ``}float wet = uWet;
@@ -939,7 +939,7 @@ export function simpleMats(T) {
   vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = h12(cl + 41.0), hs2 = h12(cl + 93.0); vec2 lc = fract(sp / 1.6);
   diffuseColor.rgb *= 0.9 + 0.2 * hs; diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.17, 1.13), step(0.93, hs2));
   vec2 g2 = abs(lc - 0.5); float jw = 0.485 - 0.012 * step(0.6, vnoise(sp * 0.7)); float jd = smoothstep(jw, jw + 0.01, max(g2.x, g2.y)); diffuseColor.rgb *= 1.0 - jd * 0.22 * vnoise(sp * 2.3 + 4.0);
-  float ck = step(0.8, hs) * smoothstep(0.014, 0.0, abs(lc.y - 0.5 - 0.22 * sin(lc.x * 5.0 + hs * 30.0))) * step(abs(lc.x - 0.5), 0.25 + 0.25 * hs2); diffuseColor.rgb *= 1.0 - ck * 0.45;
+  float ck = step(0.8, hs) * (1.0 - smoothstep(0.0, 0.014, abs(lc.y - 0.5 - 0.22 * sin(lc.x * 5.0 + hs * 30.0)))) * step(abs(lc.x - 0.5), 0.25 + 0.25 * hs2); diffuseColor.rgb *= 1.0 - ck * 0.45;
   float stn = smoothstep(0.62, 0.8, vnoise(sp * 0.45 + 2.0)) * smoothstep(0.4, 0.7, vnoise(sp * 3.1)); diffuseColor.rgb *= 1.0 - stn * 0.25; roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.6, stn); }` : '') : `
 { // r6.3 索拉纳港 pavement wear: dark joint-sealant lines get dirtier, flattened gum spots, drip / coffee stains, a few hairline cracks per slab
   vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = fract(sin(dot(cl, vec2(12.9898, 78.233))) * 43758.5453);
@@ -958,7 +958,7 @@ export function simpleMats(T) {
     float dk = min(min(abs(abs(sp.x - 50.0) - 7.0), abs(abs(sp.x - 170.0) - 7.0)), abs(abs(sp.x - 290.0) - 7.0));
     float zr = sp.y - floor((sp.y + 75.0) / 150.0) * 150.0; dk = min(dk, abs(abs(zr) - 7.0));
     float gn = fract(sin(dot(floor(sp * 3.0), vec2(17.1, 91.7))) * 4375.85);
-    float band = smoothstep(0.95, 0.25, dk) * (0.55 + 0.45 * gn);
+    float band = (1.0 - smoothstep(0.25, 0.95, dk)) * (0.55 + 0.45 * gn);
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 0.75, 0.7), band * 0.6);
   } }`))
       .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying vec3 vSWP;');
@@ -974,12 +974,12 @@ export function simpleMats(T) {
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;')
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   if (vKW.y < 0.16) { float al = dot(vKW.xz, vec2(abs(vKN.z), abs(vKN.x))); float h1 = fract(sin(floor(al * 0.7) * 12.989) * 43758.5);
-    float face = 1.0 - abs(vKN.y); float ty = smoothstep(0.02, 0.07, vKW.y) * smoothstep(0.15, 0.09, vKW.y);
-    float rub = step(0.55, h1) * smoothstep(0.0, 0.25, fract(al * 0.7)) * smoothstep(1.0, 0.6, fract(al * 0.7)) * ty * face;
+    float face = 1.0 - abs(vKN.y); float ty = smoothstep(0.02, 0.07, vKW.y) * (1.0 - smoothstep(0.09, 0.15, vKW.y));
+    float rub = step(0.55, h1) * smoothstep(0.0, 0.25, fract(al * 0.7)) * (1.0 - smoothstep(0.6, 1.0, fract(al * 0.7))) * ty * face;
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09, 0.09, 0.1), rub * 0.55); roughnessFactor = mix(roughnessFactor, 0.6, rub * 0.5);
     float chip = step(0.86, fract(sin(floor(al * 6.0) * 78.23) * 1937.1)) * smoothstep(0.125, 0.15, vKW.y) * (1.0 - vKN.y * 0.5);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.76, 0.72), chip * 0.35);
-    diffuseColor.rgb *= 1.0 - smoothstep(0.035, 0.0, vKW.y) * face * 0.35; }`);
+    diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 0.035, vKW.y)) * face * 0.35; }`);
   });
   const sand = texSet(T, 'sand', 1); for (const t of [sand.map, sand.normalMap, sand.roughnessMap]) t.repeat.set(1 / 6, 1 / 6);
   if (CYBER) {

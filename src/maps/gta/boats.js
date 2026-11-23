@@ -231,7 +231,7 @@ float bn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); 
   if (gK > 5.5 && gK < 6.5) { // teak: 7.5 cm planks along the boat, black caulk seams, staggered butt joints, grain
     float pz = (abs(bNn.y) > 0.5 ? bPp.z : bPp.y) / 0.075; float pi = floor(pz); float fz = fract(pz);
     float bx = (bPp.x + bh(vec2(pi, vSd)) * 2.4) / 2.4; float butt = 1.0 - step(0.012, fract(bx)) * step(fract(bx), 0.996);
-    float seam = max(1.0 - smoothstep(0.06, 0.16, fz) * smoothstep(0.94, 0.84, fz), butt);
+    float seam = max(1.0 - smoothstep(0.06, 0.16, fz) * (1.0 - smoothstep(0.84, 0.94, fz)), butt);
     float tone = 0.82 + 0.3 * bh(vec2(pi, floor(bx) + vSd * 17.0)); float grain = 0.9 + 0.12 * bn(vec2(bPp.x * 9.0, pz * 3.0));
     vec3 tk = vec3(0.56, 0.40, 0.25) * tone * grain; tk = mix(tk, vec3(0.62, 0.57, 0.50), 0.35 * vSd); // some decks silvered by the sun
     diffuseColor.rgb = mix(mix(tk, vec3(0.05, 0.045, 0.04), seam * 0.9), vec3(0.50, 0.38, 0.26), bAA * 0.8); gRough = 0.7; }

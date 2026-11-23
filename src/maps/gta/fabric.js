@@ -710,7 +710,7 @@ function mats(M) {
           float m = fract(lu / 1.5 + 0.5 * pPar); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tb = step(abs(gy - 2.36), 0.03);
           float frm = max(mul, tb); fGlass = 1.0 - frm; diffuseColor.rgb = mix(vec3(0.20, 0.20, 0.21), vec3(0.08, 0.11, 0.14), fGlass);
           float lev = (0.24 + 0.12 * pT) * shopIn(vec2(lu, gy), vFW - cameraPosition, fn, ft, pT);
-          fLit = mix(0.035 * smoothstep(2.9, 1.2, gy), lev, pOpen); // closed: only a dim back-of-house light
+          fLit = mix(0.035 * (1.0 - smoothstep(1.2, 2.9, gy)), lev, pOpen); // closed: only a dim back-of-house light
           fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.58, fract(pT * 7.13))) * mix(vec3(1.0), sTint, pOpen); }`} }
       else { float bd = 1.0 - step(0.012, abs(fract(lu / 0.15 + 0.5) - 0.5) * 0.15); float rail = step(vIH - 0.12, fy) + step(abs(fy - 0.3), 0.05); diffuseColor.rgb *= mix(1.0, (1.0 - 0.3 * bd) * (1.0 - 0.12 * clamp(rail, 0.0, 1.0)), fNr); }
     } else if (fk < 1.5 && vK.x - fk > 0.02) { // a_strip: strip-mall shop, the lot-side normal angle rides in the fraction (0.05..0.45)
@@ -784,13 +784,13 @@ function mats(M) {
         // (on the 6 m pier rhythm), a reception desk 5 m in on the entrance face, a polished floor and a washed back wall 7.5 m in
         float iL = 1.0; { vec3 dV = vFW - cameraPosition; float dn = max(-dot(dV, fn), 0.12 * length(dV)); vec2 pr = vec2(dot(dV.xz, ft), dV.y) / dn; vec2 uv0 = vec2(lu, fy);
           float tF = pr.y < -0.002 ? -fy / pr.y : 99.0; float tB = min(7.5, tF); vec2 bw = uv0 + pr * tB;
-          float wash = 0.62 + 0.5 * smoothstep(1.3, 0.0, abs(fract(bw.x / 3.0) - 0.5) * 3.0) * smoothstep(0.4, GF - 1.0, bw.y);
-          vec3 ic = tF < 7.5 ? mix(vec3(0.50, 0.47, 0.42), vec3(0.66, 0.62, 0.55), abs(step(0.5, fract(bw.x / 1.2)) - step(0.5, fract(tB / 1.2)))) : room * (0.85 + 0.15 * wash); iL = tF < 7.5 ? 0.62 + 0.25 * smoothstep(0.3, 0.0, abs(fract(bw.x / 3.0) - 0.5)) : wash;
+          float wash = 0.62 + 0.5 * (1.0 - smoothstep(0.0, 1.3, abs(fract(bw.x / 3.0) - 0.5) * 3.0)) * smoothstep(0.4, GF - 1.0, bw.y);
+          vec3 ic = tF < 7.5 ? mix(vec3(0.50, 0.47, 0.42), vec3(0.66, 0.62, 0.55), abs(step(0.5, fract(bw.x / 1.2)) - step(0.5, fract(tB / 1.2)))) : room * (0.85 + 0.15 * wash); iL = tF < 7.5 ? 0.62 + 0.25 * (1.0 - smoothstep(0.0, 0.3, abs(fract(bw.x / 3.0) - 0.5))) : wash;
           float dsk = (dtM ? step(0.9, dot(fn.xz, sN)) : step(fh12(vec2(fsd * 7.0, 3.0)), 0.55)) * step(5.0, tF); vec2 d5 = uv0 + pr * 5.0;
           float dk = dsk * step(abs(d5.x), 2.3) * step(d5.y, 1.08); ic = mix(ic, mix(vec3(0.34, 0.24, 0.17), vec3(0.82, 0.78, 0.70), step(0.98, d5.y)), dk); iL = mix(iL, 0.55 + 0.9 * step(0.98, d5.y), dk);
           vec2 c3 = uv0 + pr * 3.6; float cl = step(abs(fract((c3.x - 3.0) / 6.0 + 0.5) - 0.5) * 6.0, 0.32) * step(c3.y, GF - 0.9) * step(3.6, tF);
           ic = mix(ic, vec3(0.70, 0.67, 0.61) * (0.85 + 0.15 * step(0.0, (fract((c3.x - 3.0) / 6.0 + 0.5) - 0.5))), cl); iL = mix(iL, 0.45, cl);
-          vec2 p2 = uv0 + pr * 2.4; float pd = smoothstep(0.30, 0.10, length(vec2((fract(p2.x / 3.0) - 0.5) * 3.0, (p2.y - (GF - 1.75)) * 1.6))) * step(2.4, tF);
+          vec2 p2 = uv0 + pr * 2.4; float pd = (1.0 - smoothstep(0.10, 0.30, length(vec2((fract(p2.x / 3.0) - 0.5) * 3.0, (p2.y - (GF - 1.75)) * 1.6)))) * step(2.4, tF);
           float cord = step(abs((fract(p2.x / 3.0) - 0.5) * 3.0), 0.012) * step(GF - 1.75, p2.y); ic = mix(ic, vec3(0.2), cord); ic = mix(ic, vec3(1.0, 0.93, 0.78), pd); iL = mix(iL, 2.4, pd);
           room = ic; }
         vec3 c = mix(mix(frmC, gran, pl * (1.0 - dr)), fasC, fas); c = mix(c, lime, pier * (1.0 - pl)); c = mix(c, vec3(0.78, 0.76, 0.72), bar); c = mix(c, vec3(0.12), dfr); c = mix(c, room, gl);

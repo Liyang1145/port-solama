@@ -127,7 +127,7 @@ float pn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix
     float bl = smoothstep(0.62, 0.9, pn(q * 1.7 + sd * 21.0)) * fract(sd * 3.1);
     vec3 rust = vec3(0.30, 0.14, 0.07) * (0.7 + 0.6 * pn(q * 9.0));
     diffuseColor.rgb = mix(diffuseColor.rgb, rust, clamp(rm + bl * 0.7, 0.0, 0.85));
-    diffuseColor.rgb *= 1.0 - smoothstep(0.7, 0.0, vLP.y) * 0.25;                         // road grime at the foot
+    diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 0.7, vLP.y)) * 0.25;                         // road grime at the foot
     if (vFace > 2.5) diffuseColor.rgb *= 0.75 + 0.25 * pn(q * 2.0 + sd * 9.0); }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   { float along = vFace < 0.5 ? vLP.x : vLP.z; float fw = fwidth(along * 3.5);

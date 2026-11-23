@@ -330,7 +330,7 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
     diffuseColor.rgb *= 0.72 + 0.5 * n;                                         // pitted limestone
     diffuseColor.rgb *= 1.0 - 0.45 * smoothstep(0.62, 0.8, rkn(vRW * 4.1 + 3.0)); // solution holes / dark pits
     float y = vRW.y + (rkn(vRW * 0.9) - 0.5) * 0.25;
-    float wet = smoothstep(-0.25, -0.75, y); float alg = smoothstep(-0.55, -0.95, y);
+    float wet = (1.0 - smoothstep(-0.75, -0.25, y)); float alg = (1.0 - smoothstep(-0.95, -0.55, y));
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.45, 0.42, 0.36), wet);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.20, 0.10) * (0.7 + 0.6 * n), alg * 0.85);   // algae / barnacle band
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, 1.06, 1.0), smoothstep(0.4, 1.4, y) * 0.5); // sun-bleached tops

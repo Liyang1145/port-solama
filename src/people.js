@@ -57,7 +57,7 @@ uniform float uHue, uVal, uSat, uSkin, uTint, uOpq;
 vec3 rgb2hsv(vec3 c){ vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g)); vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10; return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x); }
 vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www); return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y); }`;
 const TINT_APPLY = `{ vec3 hsv = rgb2hsv(diffuseColor.rgb);
-  float skin = uSkin * smoothstep(0.13, 0.08, hsv.x) * smoothstep(0.12, 0.25, hsv.y) * smoothstep(0.7, 0.5, hsv.y) * smoothstep(0.15, 0.3, hsv.z);
+  float skin = uSkin * (1.0 - smoothstep(0.08, 0.13, hsv.x)) * smoothstep(0.12, 0.25, hsv.y) * (1.0 - smoothstep(0.5, 0.7, hsv.y)) * smoothstep(0.15, 0.3, hsv.z);
   vec3 t = hsv2rgb(vec3(fract(hsv.x + uHue), clamp(hsv.y * uSat, 0.0, 1.0), clamp(hsv.z * uVal, 0.0, 1.0)));
   diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`;
 

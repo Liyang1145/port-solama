@@ -439,7 +439,7 @@ export class Vehicle {
     if (!GCACHE.has('hlpool')) {
       const g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
       // b_envprog2: head cone and tail pool share one program (uniform uCone picks the branch, each branch's code unchanged); ?oldenvmat2: two
-      const FC = 'float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = smoothstep(1.0, 0.1, x / w) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
+      const FC = 'float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = (1.0 - smoothstep(0.1, 1.0, x / w)) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
       const FP = 'float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
       if (!OLDENV2) GCACHE.set('hlpoolFS', 'uniform float uNight; uniform vec3 uCol; uniform float uCone; varying vec2 vUv; void main(){ if (uCone > 0.5) { ' + FC + ' } else { ' + FP + ' } }');
       const mk = (col, cone) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: Object.assign({ uNight: U.uNight, uCol: { value: new THREE.Color(...col) } }, OLDENV2 ? {} : { uCone: { value: cone ? 1 : 0 } }),
