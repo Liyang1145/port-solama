@@ -13,7 +13,7 @@ const SET = {
   water: "g.override=null; if(g.P.car) g.toggleCar(); G.setHour(17.2); g.tp(-330,-30,-Math.PI/2); G.step(6);",
 };
 srv.listen(0, async () => {
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1300'] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=' + (process.env.JSH || 1000), '--disable-dev-shm-usage', '--renderer-process-limit=1'] });
   let perr = 0;
   for (const [vn, q] of V) {
     const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 }); const p = await ctx.newPage(); p.setDefaultTimeout(1100000);

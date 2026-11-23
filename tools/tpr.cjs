@@ -11,7 +11,7 @@ const HOOK = `(() => { const P = WebGL2RenderingContext.prototype; const A = win
   for (const k in grp) { const f = P[k]; if (!f) continue; const g = grp[k]; P[k] = function (...a) { const t = performance.now(); try { return f.apply(this, a); } finally { const d = performance.now() - t; A[g] += d; A.n[k] = (A.n[k] || 0) + 1;
     if (g === 'up' && (k === 'bufferData' || k === 'bufferSubData') && a[1] && a[1].byteLength) A.upB += a[1].byteLength; } }; } })();`;
 srv.listen(0, async () => {
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1300'] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=' + (process.env.JSH || 1300), '--disable-dev-shm-usage', '--renderer-process-limit=1'] });
   const ctx = await b.newContext({ viewport: { width: +(process.env.VW || 640), height: +(process.env.VH || 360) }, deviceScaleFactor: +(process.env.DSF || 1) });
   await ctx.addInitScript(HOOK); const p = await ctx.newPage(); p.setDefaultTimeout(1100000); let perr = 0;
   p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
