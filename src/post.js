@@ -284,7 +284,7 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       sv.copy(sunDir).transformDirection(camera.matrixWorldInverse); lfx.uniforms.uSunV.value.copy(sv);
       lfx.uniforms.uContact.value = (1 - night) * Math.min(1, Math.max(0, sunDir.y * 6));
       sp.copy(camera.position).addScaledVector(sunDir, 1000).project(camera);
-      const vis = sp.z < 1 && sunDir.y > -0.02 ? THREE.MathUtils.smoothstep(1.2, 0.6, Math.max(Math.abs(sp.x), Math.abs(sp.y))) : 0; // r5.0: 1.2/0.6 (was 1.7/0.5): no ray fans from a sun well off-screen (aerial shots)
+      const vis = sp.z < 1 && sunDir.y > -0.02 ? (1 - THREE.MathUtils.smoothstep(Math.max(Math.abs(sp.x), Math.abs(sp.y)), 0.6, 1.2)) : 0; // shaftfix: three's smoothstep is (x, min, max) - full inside |ndc|<0.6, fades to 0 at 1.2 // r5.0: 1.2/0.6 (was 1.7/0.5): no ray fans from a sun well off-screen (aerial shots)
       lfx.uniforms.uSunUV.value.set(sp.x * 0.5 + 0.5, sp.y * 0.5 + 0.5);
       lfx.uniforms.uSunOn.value = vis * (1 - night) * (0.22 + gold * 0.5); // r6.1 softer shafts (backlit golden hour was a white wash) // v4.4 stronger golden-hour shafts
       lfx.uniforms.uRayCol.value.copy(sunCol).multiplyScalar(0.02);
