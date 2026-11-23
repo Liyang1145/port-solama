@@ -18,6 +18,7 @@ import { collectYardCol } from './yardcol.js'; import { collectPoleCol } from '.
 import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } from './edgewalls.js'; // a_edgewalls (after curbfix / propfix / parkfix: their bake inputs are unchanged)
 const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
 import { shopEdge } from './shoppools.js'; // a_shopnight2
+import { landmarksBase, decoCloseJob, decoUrnColliders, keepSandClear, landmarkDeckH, jettyWalk } from './landmarks.js';
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -147,6 +148,7 @@ export function buildCity(scene, mats, T) {
     for (let i = 0; i < 50; i++) { const z = rand(-L.islandZ[1] + 25, L.islandZ[1] - 25), x = rand(355, 400); deco.umbrellas.push({ x, z, color: pick(ACCENT), r: rand(0, 6) }); }
     // v3.4: dense umbrella clusters (GTA6 beaches are packed) — rows near the hotels, thinning toward the water
     for (let cz = -L.islandZ[1] + 30; cz < L.islandZ[1] - 30; cz += 26) { const n = randi(18, 30); for (let i = 0; i < n; i++) { const x = 354 + Math.pow(rng(), 1.4) * 34, z = cz + rand(-20, 20); deco.umbrellas.push({ x, z, color: pick([...ACCENT, [0.95, 0.95, 0.92], [0.92, 0.82, 0.2], [0.85, 0.2, 0.25], [0.2, 0.45, 0.85]]), r: rand(0, 6), towelOnly: rng() < 0.35 }); } }
+    keepSandClear(deco.umbrellas); // r6.4 a_landmarks2: clear the wheel's kiosk / queue / deck (positions only, rng untouched)
     // palms along the promenade
     for (let z = -L.islandZ[1] + 8; z < L.islandZ[1] - 8; z += rand(7, 13)) {
       if (Math.abs(z % 150) < 9 || Math.abs((z % 150) + 150) < 9 || Math.abs((z % 150) - 150) < 9) continue;
@@ -163,7 +165,7 @@ export function buildCity(scene, mats, T) {
   const DS = detailStream(128);
   // r6.3 (ground_a): mainland urban fabric around the district — lattice + downtown blocks first (the skyline snaps into them)
   const fab = planFabric();
-  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS, fab };
+  const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [], ds: DS, fab, beachH }; // a_jetty: beachH for the jetty steps
   for (const b of blocks) {
     if (b.area === 'promenade') { promenade(W, b, shrubs, trees); { const zc = (b.z0 + b.z1) / 2 + 22; DS.add(b.x1, zc, 8, job('beach', (Wd) => beachDetail(Wd, b.x1, zc, mulb(seedOf(b.x1, zc, 9))))); } continue; }
     if (b.area === 'island') islandBlock(bld, b, palms, trees, shrubs);
@@ -173,15 +175,15 @@ export function buildCity(scene, mats, T) {
   // ------------------------------------------- v4.0 district edges + far skyline ----
   districtEdges(bld, deco);
   skyline(bld);
-  marina(bld); landmarks(bld);
+  marina(bld); const lmk = landmarks(bld);
   fab.populate(col); // own RNG stream: the shared rng sequence (island / district layout) is unchanged
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
   const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal, inCanalWater });
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.yardCol = (fab._ycol = collectYardCol(fab, yard)) && fab._ycol.S; fab._pcol = collectPoleCol(fab); /* a_polecol: same point, read-only */ fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; fab.dtKit = prepDowntown(fab, col, palms); region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); region.downtown = attachDowntown(fab.dtKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); updateDowntown(fab.dtKit, cam); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); lmk.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.yardCol = (fab._ycol = collectYardCol(fab, yard)) && fab._ycol.S; fab._pcol = collectPoleCol(fab); /* a_polecol: same point, read-only */ fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; fab.dtKit = prepDowntown(fab, col, palms); region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); region.downtown = attachDowntown(fab.dtKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); lmk.update(cam); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); updateDowntown(fab.dtKit, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;
@@ -234,6 +236,7 @@ export function buildCity(scene, mats, T) {
   };
   const groundH = (x, z) => {
     { const h = region.groundH(x, z); if (h !== undefined) { if (h === 0 && fab.stripKit) { const r = stripGroundH(fab.stripKit, x, z); if (r !== undefined) return r; } return h; } } // a_stripfix: strip-mall front walks
+    { const h = landmarkDeckH(x, z); if (h !== undefined) return h; } // r6.4 a_landmarks4: wheel boarding deck + lighthouse bridge
     if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z), -1.6);
     if (!isLand(x, z)) return L.waterY - 3;
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
@@ -647,7 +650,8 @@ function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     signs.push({ x: fx + s * 0.06, y: yA + 0.75, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: Math.min(14, z1 - z0 - 4), h: 1.1, vertical: false, color: pick(['#ffd49a', '#ffe2b8', '#ffc77e']) });
   }
   if (ctx.ds) { const p = { x0, z0, x1, z1, facing, poly, top, ground, floors, fh, style: dStyle, ww: dWw, wall, accent, R, pylon, small };
-    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('deco', (Wd) => decoHotelDetail(Wd, p))); }
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, job('deco', (Wd) => decoHotelDetail(Wd, p)));
+    ctx.ds.add((x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) / 2 + 3, decoCloseJob({ ...p, pylonTop: pylon ? top + ph + 1.2 : 0 })); decoUrnColliders(p, ctx.col); } // r6.4 a_landmarks(2)
 }
 
 function midrise(ctx, x0, z0, x1, z1) {
@@ -805,13 +809,9 @@ function districtEdges(ctx, deco) {
     const dy = 0.95;
     box(W.b('concrete', (x0 + x1) / 2, zj), x0, -1.5, zj - 1.6, x1, dy, zj + 1.6);
     box(v, x1 - 3, -1.5, zj - 2.4, x1 + 0.5, dy + 0.05, zj + 2.4, {}, [0.72, 0.71, 0.68]); // round-head platform
-    const m = W.b('metal', (x0 + x1) / 2, zj);
-    for (const e of [-1.45, 1.45]) {
-      for (let x = x0 + 1; x < x1; x += 2.2) box(m, x - 0.035, dy, zj + e - 0.035, x + 0.035, dy + 1.05, zj + e + 0.035);
-      for (const y of [dy + 1.0, dy + 0.55]) box(m, x0 + 1, y, zj + e - 0.03, x1 - 0.2, y + 0.05, zj + e + 0.03);
-    }
-    lamps.push({ x: x1 - 1.2, z: zj + 1.2, y: dy, dir: [0, -sg], kind: 'bridge' });
-    col.add(x0, zj - 4.5, x1 + 4, zj + 4.5, 1.6, 'rail');
+    // a_jetty: walkway deck — shore steps, edge railings (the only colliders), end rail, bollards; railings are built there too
+    jettyWalk(ctx, x0, x1, zj, dy, ctx.beachH);
+    lamps.push({ x: x1 - 1.2, z: zj + sg * 1.2, y: dy, dir: [0, -sg], kind: 'bridge' }); // a_jetty: on the outer side, clear of the bridge opening
     // walls the sand off past the jetty so the beach ends at the rocks
     // (r5.0: the sand wall past the jetty is gone — the beach continues to the island tips)
   }
@@ -946,25 +946,5 @@ function marina(ctx) {
 }
 
 // skyline guides: lighthouse at the south jetty head, 「海风之眼」 Ferris wheel at the north end of the beach
-function landmarks(ctx) {
-  const { W, col } = ctx;
-  { const x = 528, z = -374; const v = W.b('vcol', x, z);
-    const tw = new THREE.CylinderGeometry(1.7, 2.6, 24, 18, 6); tw.translate(0, 12, 0);
-    const red = new THREE.CylinderGeometry(2.02, 2.22, 5, 18); red.translate(0, 12.5, 0); gput(v, red, x, -0.5, z, [0.78, 0.1, 0.08]);
-    v.geom(tw, new THREE.Matrix4().makeTranslation(x, -0.5, z), {}, [1, 1, 1]);
-    box(v, x - 2.4, 23.4, z - 2.4, x + 2.4, 23.8, z + 2.4, {}, [0.15, 0.15, 0.15]);
-    const lan = new THREE.CylinderGeometry(1.2, 1.2, 2.4, 12); gput(W.b('neon', x, z), lan, x, 25, z, [1.0, 0.85, 0.5]);
-    const cap = new THREE.ConeGeometry(1.6, 1.6, 12); gput(v, cap, x, 27, z, [0.8, 0.12, 0.1]);
-    col.add(x - 2.6, z - 2.6, x + 2.6, z + 2.6, 30, 'lighthouse');
-   }
-  { const x = 384, z = 352, R = 16, H = R + 3; const v = W.b('vcol', x, z); const n = W.b('neon', x, z);
-    for (const sz of [-1.2, 1.2]) {
-      const rim = new THREE.TorusGeometry(R, 0.22, 6, 64); gput(v, rim, x, H, z + sz, [0.95, 0.95, 0.95]);
-      const rim2 = new THREE.TorusGeometry(R + 0.35, 0.07, 4, 64); gput(n, rim2, x, H, z + sz, [0.9, 0.72, 0.45]); // r6.1 warm bulb ring
-      for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.07, 0.07, R, 4); sp.translate(0, R / 2, 0); sp.rotateZ(a); gput(v, sp, x, H, z + sz, [0.9, 0.9, 0.9]); }
-      for (const dx of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.3, 0.45, Math.hypot(H, R * 0.55), 6); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, Math.hypot(H, R * 0.55) / 2, 0); leg.rotateZ(ang); gput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
-    }
-    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.1; const gx = x + Math.cos(a) * R, gy = H + Math.sin(a) * R;
-      box(v, gx - 0.8, gy - 2.2, z - 0.9, gx + 0.8, gy - 0.6, z + 0.9, {}, pick([[0.95, 0.4, 0.45], [0.25, 0.65, 0.75], [0.98, 0.8, 0.3], [0.95, 0.95, 0.92]])); }
-    box(v, x - 4, 0, z - 3, x + 4, 2.4, z + 3, {}, [0.85, 0.82, 0.76]); col.add(x - R * 0.7, z - 3, x + R * 0.7, z + 3, 6, 'wheel'); }
-}
+// r6.4 a_landmarks: modelled in ./landmarks.js (resident base + streamed close-up detail; same 16 pick() calls as before)
+function landmarks(ctx) { return landmarksBase(ctx, pick, ctx.ds); }
