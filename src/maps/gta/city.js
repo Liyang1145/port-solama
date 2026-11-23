@@ -45,6 +45,7 @@ const GLASS = [[0.10, 0.20, 0.24], [0.16, 0.24, 0.30], [0.22, 0.26, 0.28], [0.20
 const NEON = [[1.0, 0.18, 0.55], [0.15, 0.85, 1.0], [0.6, 0.25, 1.0], [1.0, 0.45, 0.15], [0.2, 1.0, 0.6], [1.0, 0.3, 0.8]];
 export const HOTEL_NAMES = ['CORALINE', 'SANDPIPER', 'LA PALOMA', 'SEAGRAPE', 'BRISA MAR', 'ALBATROSS', 'STARLIGHT', 'MARIGOLD', 'THE HALCYON', 'SOLANA', 'BLUE HERON', 'CASA LUNA'];
 
+const OLD_SAND = typeof location !== 'undefined' && /[?&]oldsand\b/.test(location.search); // fix_pt2
 export function buildCity(scene, mats, T) {
   const W = new World(250);
   W.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 };
@@ -242,7 +243,9 @@ export function buildCity(scene, mats, T) {
   const groundH = (x, z) => {
     { const h = region.groundH(x, z); if (h !== undefined) { if (h === 0 && fab.stripKit) { const r = stripGroundH(fab.stripKit, x, z); if (r !== undefined) return r; } return h; } } // a_stripfix: strip-mall front walks
     { const h = landmarkDeckH(x, z); if (h !== undefined) return h; } // r6.4 a_landmarks4: wheel boarding deck + lighthouse bridge
-    if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z), -1.6);
+    // fix_pt2 (?oldsand = old): the sand mesh adds a small ripple (±0.1 m) to beachH (see the beach block above); walkers / props stood
+    // on plain beachH, so feet sank into the sand on the ripple crests (PLAYTEST_1H V6, wheel beach 384,340). Same ripple here.
+    if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z) + (OLD_SAND ? 0 : (Math.sin(x * 0.21 + z * 0.13) * 0.04 + Math.sin(z * 0.05) * 0.06) * clamp((x - L.beachX[0]) / 10, 0, 1)), -1.6);
     if (!isLand(x, z)) return L.waterY - 3;
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
     return blockAt(x, z) ? 0.15 : 0;

@@ -1,0 +1,27 @@
+// fix_pt2: visual probes for PLAYTEST_1H V2/V3/V5/V6 (logic + raycasts only, no readPixels). usage: node tools/vprobe.cjs <map> [variant-query]
+// gta: V6 sand vs groundH grid around the wheel beach (384,340): ray down onto visible meshes vs city.groundH; V2 / V3 screen picks.
+// cyber: V5 spawn sidewalk at 21.6 h: lights near the left sidewalk (point / spot, intensity, distance) + what the sidewalk is.
+const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
+const root = path.resolve(__dirname, '..'); const MAPN = process.argv[2] || 'gta'; const VQ = process.argv[3] || '';
+const srv = http.createServer((q, s) => { const p = path.join(path.resolve(root, process.env.DIST || 'dist'), decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': p.endsWith('.html') ? 'text/html' : p.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); s.end(d); }); });
+srv.listen(0, async () => {
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--js-flags=--max-old-space-size=1100', '--disable-dev-shm-usage', '--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] });
+  const p = await (await b.newContext({ viewport: { width: 640, height: 360 } })).newPage(); p.setDefaultTimeout(600000); let perr = 0; p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
+  await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&map=${MAPN}&lowshadow&probe=0&dpr=1&${VQ}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
+  const r = await p.evaluate(`(() => { const G = __G, g = G.game, THREE = G.THREE; const out = {}; const rc = new THREE.Raycaster();
+    const vis = (o) => { while (o) { if (!o.visible) return false; o = o.parent; } return true; };
+    const desc = (h) => { const o = h.object, m = Array.isArray(o.material) ? o.material[h.face ? h.face.materialIndex : 0] : o.material; return { obj: o.name || o.type, par: o.parent && (o.parent.name || o.parent.type), gp: o.parent && o.parent.parent && (o.parent.parent.name || ''), mat: m && (m.name || m.type), key: m && m.userData && (m.userData.prepKey || m.userData.key || m.userData.kind), map: m && m.map ? (m.map.name || (m.map.image && m.map.image.width + 'x' + m.map.image.height)) : null, em: m && m.emissive && m.emissive.getHexString(), emI: m && m.emissiveIntensity, col: m && m.color && m.color.getHexString(), tr: m && m.transparent, inst: h.instanceId, d: +h.distance.toFixed(2), p: h.point.toArray().map((v) => +v.toFixed(2)), ud: Object.keys(o.userData || {}).slice(0, 5) }; };
+    const pick = (ndc) => { G.camera.updateMatrixWorld(); return ndc.map(([x, y]) => { rc.setFromCamera(new THREE.Vector2(x, y), G.camera); rc.far = 150; return [x, y, rc.intersectObjects(G.scene.children, true).filter((h) => vis(h.object) && !h.object.isSprite && !h.object.isPoints).slice(0, 3).map(desc)]; }); };
+    const down = (x, z) => { rc.set(new THREE.Vector3(x, 30, z), new THREE.Vector3(0, -1, 0)); rc.far = 40; const hs = rc.intersectObjects(G.scene.children, true).filter((h) => vis(h.object) && !h.object.isSprite && !h.object.isPoints && !(h.object.material && h.object.material.transparent)); const top = hs.find((h) => h.point.y < 3); return top ? [+top.point.y.toFixed(3), (top.object.name || top.object.type) + '|' + (top.object.material && (top.object.material.name || top.object.material.type))] : null; };
+    if (${JSON.stringify(MAPN)} === 'gta') {
+      const grid = []; for (const [x, z] of [[384, 340], [380, 340], [388, 340], [384, 336], [384, 344], [376, 330], [392, 350], [370, 340], [360, 340], [400, 340]]) { const gh = g.city.groundH(x, z); g.tp(x, z, 0); G.step(2); grid.push([x, z, +gh.toFixed(3), +g.P.pos.y.toFixed(3), down(x, z)]); } out.sand = grid;
+      G.setHour(22.5); g.tp(281, 14, Math.PI); G.step(8); g.updateCamera(1, true); out.night = { cam: G.camera.position.toArray().map((v) => +v.toFixed(2)), hits: pick([[0.72, 0.82], [0.82, 0.8], [0.9, 0.75], [0.78, 0.9], [0.86, 0.68]]) };
+      G.setHour(12); g.tp(61.1, 200, 0); G.step(10); g.updateCamera(1, true); out.x61 = { cam: G.camera.position.toArray().map((v) => +v.toFixed(2)), hits: pick([[-0.78, -0.03], [-0.53, 0.08], [-0.85, 0.3], [-0.6, -0.4], [-0.3, 0.1], [-0.95, -0.2]]) };
+    } else {
+      G.setHour(21.6); g.tp(280.5, 36, Math.PI); G.step(8); g.updateCamera(1, true); const P = g.P.pos; const L = [];
+      G.scene.traverse((o) => { if ((o.isPointLight || o.isSpotLight) && o.intensity > 0 && vis(o)) { const wp = o.getWorldPosition(new THREE.Vector3()); const d = Math.hypot(wp.x - P.x, wp.z - P.z); if (d < 30) L.push([o.type, o.name, +wp.x.toFixed(1), +wp.y.toFixed(1), +wp.z.toFixed(1), +o.intensity.toFixed(1), +o.distance.toFixed(1), o.decay, o.color.getHexString(), o.parent && o.parent.name]); } });
+      out.lights = L; out.cam = G.camera.position.toArray().map((v) => +v.toFixed(2)); out.hits = pick([[-0.7, -0.5], [-0.5, -0.3], [-0.85, -0.75], [-0.3, -0.6]]);
+    }
+    return out; })()`);
+  console.log(VQ || 'new', JSON.stringify(r)); console.log('PAGEERROR', perr); fs.writeFileSync(path.join(root, 'shots/fp1/vprobe_' + MAPN + '.json'), JSON.stringify(r, null, 1)); await b.close(); process.exit(0);
+});
