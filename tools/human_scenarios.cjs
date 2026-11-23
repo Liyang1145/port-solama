@@ -22,6 +22,7 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
   const S = {};
   S.walk = async () => { const r = {}; const s0 = await pose();
     await hold(['KeyW'], 90); const s1 = await pose(); r.walk3s = +Math.hypot(s1.x - s0.x, s1.z - s0.z).toFixed(1);
+    await look(-10, 0, 9); // the spawn faces a palm trunk 6.5 m ahead: turn a little like a player would
     await hold(['KeyW', 'ShiftLeft'], 120); const s2 = await pose(); r.sprint4s = +Math.hypot(s2.x - s1.x, s2.z - s1.z).toFixed(1);
     await key.down('KeyW'); const ys = []; for (let j = 0; j < 3; j++) { await key.tap('Space', 1); for (let q = 0; q < 6; q++) { await run(3); ys.push(await ev('+__G.game.P.pos.y.toFixed(2)')); } } await key.up('KeyW'); r.jumpPeakY = Math.max(...ys);
     await key.down('KeyW'); await look(10, 0, 120); await look(-14, 2, 60); await look(0, -3, 30); await key.up('KeyW'); // walk while sweeping the camera

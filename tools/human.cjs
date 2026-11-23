@@ -53,7 +53,7 @@ const PAGE_HELPERS = `(() => {
 })()`;
 srv.listen(0, async () => {
   const port = srv.address().port; const T0 = Date.now();
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100', `--window-size=${W},${H}`] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1500', `--window-size=${W},${H}`] });
   const ctx = await b.newContext({ viewport: { width: W, height: H } }); const p = await ctx.newPage(); p.setDefaultTimeout(1500000);
   let perr = 0, cerr = 0; const errs = [];
   p.on('pageerror', (e) => { perr++; errs.push('PAGEERROR ' + e.message.slice(0, 300)); log('PAGEERROR', e.message.slice(0, 300)); });

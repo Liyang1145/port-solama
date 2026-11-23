@@ -37,7 +37,7 @@ import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_
 // loadtime: staged boot timing (ms since navigation start) -> window.__LT, shown on the load screen and in the console
 const LT = window.__LT = { marks: [], t: {} };
 let ltPrev = performance.now();
-function mark(name) { const n = performance.now(); LT.marks.push([name, Math.round(n - ltPrev), Math.round(n)]); LT.t[name] = Math.round(n - ltPrev); ltPrev = n; }
+function mark(name) { const n = performance.now(); LT.marks.push([name, Math.round(n - ltPrev), Math.round(n), performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0]); LT.t[name] = Math.round(n - ltPrev); ltPrev = n; }
 mark('html+bundle');
 const Q = new URLSearchParams(location.search);
 const SNAP = Q.has('snap');

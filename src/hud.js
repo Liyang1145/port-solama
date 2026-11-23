@@ -23,7 +23,12 @@ const AREAS = [
 export class HUD {
   constructor(city) {
     this.city = city;
-    this.$ = (id) => document.getElementById(id);
+    const EL = {}; this.$ = (id) => EL[id] || (EL[id] = document.getElementById(id)); // perf_debug1: cached lookups
+    // perf_debug1 (?oldhud): the HUD rewrote innerHTML / textContent / style of ~12 DOM nodes every frame (style recalc + layout
+    // each frame on top of the WebGL work); writes now only happen when the value changes
+    const OLDHUD = new URLSearchParams(location.search).has('oldhud');
+    this.put = OLDHUD ? (el, k, v) => { el[k] = v; } : (el, k, v) => { const c = el.__hc || (el.__hc = {}); if (c[k] !== v) { c[k] = v; el[k] = v; } };
+    this.sty = OLDHUD ? (el, k, v) => { el.style[k] = v; } : (el, k, v) => { const c = el.__hs || (el.__hs = {}); if (c[k] !== v) { c[k] = v; el.style[k] = v; } };
     this.stars = [...document.querySelectorAll('#stars span')];
     this.mm = this.$('mmc'); this.g = this.mm.getContext('2d');
     this.msgT = 0; this.cashT = 0; this.hurtT = 0; this.bigMap = false;
@@ -87,9 +92,9 @@ export class HUD {
     this.mapCanvas = c;
   }
   toggleBig() { this.bigMap = !this.bigMap; }
-  msg(t, s = 2.5) { const m = this.$('msg'); m.textContent = t; m.style.opacity = 1; this.msgT = s; this.$('help').style.opacity = 0; }
+  msg(t, s = 2.5) { const m = this.$('msg'); m.textContent = t; this.sty(m, 'opacity', 1); this.msgT = s; this.$('help').style.opacity = 0; }
   big(t, col) { const b = this.$('big'); b.textContent = t; b.style.color = col; b.style.opacity = t ? 1 : 0; }
-  cash(n) { this.cashEl.textContent = '+$' + n; this.cashEl.style.opacity = 1; this.cashT = 2.5; this.statT = Math.max(this.statT, 3); }
+  cash(n) { this.cashEl.textContent = '+$' + n; this.sty(this.cashEl, 'opacity', 1); this.cashT = 2.5; this.statT = Math.max(this.statT, 3); }
   hurt() { this.hurtT = 0.35; this.statT = 5; }
   // r6.2 GPS follows the roads (was a straight dashed line across water and buildings); recomputed at most twice a second
   gpsRoute(G, p, tg) {
@@ -104,9 +109,9 @@ export class HUD {
   }
   update(dt, G) {
     const P = G.P;
-    this.msgT -= dt; if (this.msgT <= 0) this.$('msg').style.opacity = 0;
-    this.cashT -= dt; if (this.cashT <= 0) this.cashEl.style.opacity = 0;
-    this.hurtT -= dt; this.hurtEl.style.opacity = this.hurtT > 0 ? 1 : (P.health < 25 ? 0.5 : 0);
+    this.msgT -= dt; if (this.msgT <= 0) this.sty(this.$('msg'), 'opacity', 0);
+    this.cashT -= dt; if (this.cashT <= 0) this.sty(this.cashEl, 'opacity', 0);
+    this.hurtT -= dt; this.sty(this.hurtEl, 'opacity', this.hurtT > 0 ? 1 : (P.health < 25 ? 0.5 : 0));
     // stamina (visual only): drains while sprinting, refills otherwise
     this.stam = P.stamina ?? 100;
     const combat = G.wanted > 0 || G.mouse.aim || G.mouse.down || P.reloadT > 0 || (G.arsenal && G.arsenal.fireT > -2);
@@ -114,9 +119,9 @@ export class HUD {
     if (P.money !== this.lastMoney) { if (this.lastMoney >= 0) this.statT = Math.max(this.statT, 3.5); this.lastMoney = P.money; }
     this.lastHP = P.health;
     this.statT -= dt; this.wpnT = combat ? 4 : this.wpnT - dt;
-    const show = (id, on) => { this.$(id).style.opacity = on || this.peek ? 1 : 0; };
+    const show = (id, on) => { this.sty(this.$(id), 'opacity', on || this.peek ? 1 : 0); };
     show('tl', this.statT > 0);
-    this.$('stb').style.display = this.stam < 99.5 || this.peek ? 'flex' : 'none';
+    this.sty(this.$('stb'), 'display', this.stam < 99.5 || this.peek ? 'flex' : 'none');
     show('stars', G.wanted > 0); show('evid', G.wanted > 0);
     show('wpn', P.onFoot && this.wpnT > 0); show('money', this.statT > 0);
     // wanted: white while seen, red + blinking once they lost sight (search)
@@ -129,20 +134,20 @@ export class HUD {
       const key = ev.join('');
       if (key !== this.evKey) { this.evKey = key; this.$('evid').innerHTML = ev.map((e) => `<i>${e}</i>`).join(''); }
     }
-    this.$('cashv').textContent = '$' + P.money.toLocaleString('en-US');
-    { const A = G.arsenal, w = A.cur, a = A.ammo(); this.$('ammo').innerHTML = `<small style="font-size:13px;margin-right:6px">${w.name}</small>` + (w.melee ? '' : A.reloadT > 0 ? '换弹中' : `${a.clip}<small> / ${a.reserve}</small>`); }
+    this.put(this.$('cashv'), 'textContent', '$' + P.money.toLocaleString('en-US'));
+    { const A = G.arsenal, w = A.cur, a = A.ammo(); this.put(this.$('ammo'), 'innerHTML', `<small style="font-size:13px;margin-right:6px">${w.name}</small>` + (w.melee ? '' : A.reloadT > 0 ? '换弹中' : `${a.clip}<small> / ${a.reserve}</small>`)); }
     const v = this.$('veh');
-    if (P.car) { v.innerHTML = Math.round(Math.abs(P.car.speed) * 3.6) + '<small>km/h</small>'; v.style.opacity = 1; } else v.style.opacity = 0;
-    this.$('cross').style.display = P.onFoot && (G.mouse.aim || G.mouse.down) ? 'block' : 'none';
-    document.querySelector('#hp i').style.width = Math.max(0, P.health) + '%';
-    document.querySelector('#ar i').style.width = Math.max(0, P.armor) + '%';
-    document.querySelector('#st i').style.width = this.stam + '%';
+    if (P.car) { this.put(v, 'innerHTML', Math.round(Math.abs(P.car.speed) * 3.6) + '<small>km/h</small>'); this.sty(v, 'opacity', 1); } else this.sty(v, 'opacity', 0);
+    this.sty(this.$('cross'), 'display', P.onFoot && (G.mouse.aim || G.mouse.down) ? 'block' : 'none');
+    this.sty(this.hpI || (this.hpI = document.querySelector('#hp i')), 'width', Math.round(Math.max(0, P.health)) + '%');
+    this.sty(this.arI || (this.arI = document.querySelector('#ar i')), 'width', Math.round(Math.max(0, P.armor)) + '%');
+    this.sty(this.stI || (this.stI = document.querySelector('#st i')), 'width', Math.round(this.stam) + '%');
     // area name: fades in for a few seconds when the district changes (no permanent label)
     const x = P.pos.x, z = P.pos.z; let a = districtAt(x, z) || AREAS.find((r) => r.test(x, z)); if (CYBER && !a.cy) a = { name: cyName(a.name), sub: cyName(a.sub), cy: 1 };
     const h = window.__G ? window.__G.hour : 18; const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
     if (a.name !== this.lastArea) { this.lastArea = a.name; this.areaT = 5; }
     this.areaT -= dt;
-    this.$('area').innerHTML = `<b>${a.name}</b><span>${a.sub} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}</span>`;
+    this.put(this.$('area'), 'innerHTML', `<b>${a.name}</b><span>${a.sub} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}</span>`);
     show('area', this.areaT > 0);
     // police search zone (GTA6 shows an area, not police dots)
     if (G.wanted > 0 && G.wantedFlash) { if (!this.searchPos) this.searchPos = (G.lastSeen || P.pos).clone(); } else this.searchPos = null;
