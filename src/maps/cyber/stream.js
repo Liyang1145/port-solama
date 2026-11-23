@@ -13,6 +13,7 @@ import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconi
 import { CLUT_CTX } from './clutcap.js'; // b_clutter
 import { SVC_CTX } from './svcface.js'; // b_alleyface2
 import { PY_OFF, yardContainers } from './portyard.js'; // r6.4 b_portyard
+import { farCrown, setCrownParcel } from './crown.js';
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
@@ -141,6 +142,8 @@ function impostor(W, p) {
   polyCap(v, [P(-mx - 3, mz + 2), P(-mx + 3, mz + 2), P(-mx + 3, mz - 2), P(-mx - 3, mz - 2)].map((q) => q), top + 2.2, {}, [0.62, 0.62, 0.6]);
   prismWalls(v, [P(-mx - 3, mz + 2), P(-mx + 3, mz + 2), P(-mx + 3, mz - 2), P(-mx - 3, mz - 2)], top, top + 2.2, null, [0.58, 0.58, 0.56]);
   if (k > 1) { const q = [P(mx - 2, -mz + 2), P(mx + 2, -mz + 2), P(mx + 2, -mz - 2), P(mx - 2, -mz - 2)]; prismWalls(v, q, top, top + (tall ? 6 : 3), null, [0.45, 0.47, 0.5]); polyCap(v, q, top + (tall ? 6 : 3), {}, [0.4, 0.42, 0.45]); }
+  // r6.4 b_tower2: megatower crowns read from afar (helipad / mast / billboard / fin screen / spire + aviation lights)
+  if (st === 'downtown' && h >= 90) farCrown(W, P, p, top, sx, sz);
 }
 
 export class Stream {
@@ -152,7 +155,7 @@ export class Stream {
     let tris = 0;
     for (const c of this.chunks.values()) {
       const W = mkWorld(); for (const p of c.parcels) impostor(W, p);
-      c.far = W.build(this.group, mats, { building: { cast: true } }); for (const m of c.far) tris += m.geometry.index.count / 3;
+      c.far = W.build(this.group, mats, { building: { cast: true }, neon: { cast: false } }); for (const m of c.far) tris += m.geometry.index.count / 3;
     }
     this.farTris = tris;
   }
@@ -161,10 +164,10 @@ export class Stream {
     const W = mkWorld();
     for (const p of c.parcels) {
       if (p.far) continue;
-      const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [] };
+      const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
       const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
       SVC_CTX.p = p; SVC_CTX.log = []; // b_alleyface2: service faces on the lot's back / slot sides (city.js svcEdgesLot)
-      withSeed(p.seed, () => genParcel(ctx, p)); CLUT_CTX.m = null;
+      setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); CLUT_CTX.m = null; // b_tower3: crown sizes/content from the seed
       { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
         p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
