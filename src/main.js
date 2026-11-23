@@ -30,7 +30,7 @@ import { rolledLights, precompile } from './loadfast.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
-import { OLD, cubeStepper, cullSmall, probeLod, makeDRS, releaseCpuAttrs, releasedMB } from './perf.js';
+import { OLD, PASS, cubeStepper, cullSmall, probeLod, makeDRS, releaseCpuAttrs, releasedMB } from './perf.js';
 import { prof, PROF, wrap, profRenderer, profPasses, setScope } from './prof.js'; // perf_debug1: ?prof frame profiler
 import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_verify: test-only ?shotfast (screenshot first frame)
 
@@ -150,7 +150,7 @@ async function load() {
     if (sprobe.step && !force) { // perf_debug1: amortized (1 face / frame, PMREM on the 7th frame), at most every 3 s
       if (sprobe.pending) { sprobe.pending = false; const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0); return; }
       if (sprobe.step.busy) { if (SPN && (++sprobe.n % SPN.every)) return; const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; let vis = null; const hid = [];
-        const shown = []; if (sprobe.step.step(() => { if (pl) { vis = pl.visible; pl.visible = false; } if (SPN && SPN.lodD && city.region) probeLod(city.region, sprobe.cam.position, SPN.lodD, hid, shown); if (SPN) cullSmall(scene, sprobe.cam.position, SPN, hid); }, () => { if (pl) pl.visible = vis; for (const o of hid) o.visible = true; for (const o of shown) o.visible = false; })) sprobe.pending = true; return; }
+        const shown = []; if (sprobe.step.step(() => { if (pl) { vis = pl.visible; pl.visible = false; } if (SPN && !OLD.sprobeInst) PASS.probe = true; if (SPN && SPN.lodD && city.region) probeLod(city.region, sprobe.cam.position, SPN.lodD, hid, shown); if (SPN) cullSmall(scene, sprobe.cam.position, SPN, hid); }, () => { PASS.probe = false; if (pl) pl.visible = vis; for (const o of hid) o.visible = true; for (const o of shown) o.visible = false; })) sprobe.pending = true; return; }
       if (probe.step && probe.step.busy) { if (probe.step.step()) probe.finish(); return; } // the city probe takes the same slot
       const p = camera.position; if (SPN ? (sprobe.t < SPN.t0 || (sprobe.t < SPN.t1 && sprobe.pos.distanceTo(p) < SPN.r)) : (sprobe.t < 3 || (sprobe.t < 8 && sprobe.pos.distanceTo(p) < 40))) return;
       sprobe.t = 0; sprobe.pos.copy(p); sprobe.cam.position.set(p.x, 2.2, p.z); sprobe.step.start(); return;
@@ -163,7 +163,7 @@ async function load() {
   };
   for (const l of [env.sun, env.sunFar]) if (l.shadow.camera.layers.mask & 0xFFFFFFFE) l.shadow.camera.layers.enable(3); // a shadow camera with its own layers must also see CHAR_LAYER
   mark('post+probes');
-  if (!CYBER && city.region && !OLD.tpwarm) city.region.async = { renderer, camera, scene, sync: false }; if (!CYBER && city.region && city.region.detail && !OLD.tpwarm) city.region.detail.gate = (d, f) => city.region.gate(d, f); // perf_debug5: streamed chunks swap in after their programs compiled (?oldtpwarm)
+  if (!CYBER && city.region && !OLD.tpwarm) city.region.async = { renderer, camera, scene, sync: false }; if (!CYBER && city.region && city.region.detail && !OLD.tpwarm) { city.region.detail.gate = (d, f) => city.region.gate(d, f); city.region.detail.reg = city.region; } // perf_debug5: streamed chunks swap in after their programs compiled (?oldtpwarm)
   const game = new Game({ renderer, scene, camera, env, city, G, T, props, Q, SNAP });
   let hour = Q.has('hour') ? +Q.get('hour') : CYBER ? 21.6 : 18.3; // r6.0: 霓港 opens at night
   env.setHour(hour, true); mark('game');
