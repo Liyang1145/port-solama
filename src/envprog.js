@@ -270,7 +270,7 @@ function gwrap(g, code) { return g ? `\n#if ${g}\n${code}\n#endif` : '\n' + code
 
 // perf_debug6: cross-hook duplicate check for buildUber's declaration pass (see there). true = already declared at or before (n, j)
 const OLDX = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldxdedup');
-export const xdedupStats = { reused: 0, moved: 0 };
+export const xdedupStats = (envStats.xdedup = { reused: 0, moved: 0 });
 function xdup(order, D, pend, n, j, s) { const pos = (h, k) => order.indexOf(h) * 2 + k; const me = pos(n, j);
   for (const h in D) for (const k of [0, 1]) { const L = D[h][k]; const i = L.findIndex((x) => nrm(x) === s); if (i < 0) continue;
     if (pos(h, k) <= me) { xdedupStats.reused++; return true; } L.splice(i, 1); xdedupStats.moved++; return false; }
