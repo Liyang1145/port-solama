@@ -444,12 +444,17 @@ export class Game {
     // 60 s drive); now at most one per call (manage runs every 0.5 s; the slots start 25 m out, so the fill-in is out of view)
     // (the first call and a jump of > 60 m since the last call, i.e. start / teleport / respawn, still fill every slot at once)
     const jump = !this._mgPos || Math.hypot(P.pos.x - this._mgPos.x, P.pos.z - this._mgPos.z) > 60; this._mgPos = { x: P.pos.x, z: P.pos.z };
-    let parkNew = OLDMANAGE || jump ? 1e9 : 1;
+    // fix_pt2 (?oldmanage2 = old: a jump filled every slot in one call -> first frame after load / respawn / teleport g:manage ~177 ms,
+    // map B): a jump now fills the nearest 3 slots per call and re-runs manage every 0.05 s until the ring is full (~0.3 s, all >= 25 m away)
+    const OM2 = this._om2 ?? (this._om2 = typeof location !== 'undefined' && /[?&]oldmanage2\b/.test(location.search));
+    const burst = !OM2 && (jump || this._mgBacklog); let parkNew = OLDMANAGE || (jump && OM2) ? 1e9 : burst ? 3 : 1; let nearFirst = null;
+    if (burst) { nearFirst = new Set(); const C = []; for (const s of this.city.parking || []) { if (s.car || !s.fill) continue; const d = Math.hypot(s.x - P.pos.x, s.z - P.pos.z); if (d < 115 && d > 25) C.push([d, s]); }
+      C.sort((a, b) => a[0] - b[0]); for (let i = 0; i < Math.min(3, C.length); i++) nearFirst.add(C[i][1]); this._mgBacklog = C.length > 3; if (this._mgBacklog) this.spawnT = 0.05; }
     for (const s of this.city.parking || []) {
       const d = Math.hypot(s.x - P.pos.x, s.z - P.pos.z);
       if (s.car && !this.traffic.cars.includes(s.car)) s.car = null;
       if (s.car && (s.car.driver === 'player' || Math.hypot(s.car.x - s.x, s.car.z - s.z) > 3)) { s.car = null; continue; }
-      if (!s.car && s.fill && d < 115 && d > 25 && parkNew > 0) { parkNew--; const v = new Vehicle(this.scene, pick(['sedan', 'suv', 'sport2', 'pickup', 'van', 'taxi'])); v.place(s.x, s.z, s.yaw); v.ai = null; v.parked = true; this.traffic.cars.push(v); s.car = v; }
+      if (!s.car && s.fill && d < 115 && d > 25 && parkNew > 0 && (!nearFirst || nearFirst.has(s))) { parkNew--; const v = new Vehicle(this.scene, pick(['sedan', 'suv', 'sport2', 'pickup', 'van', 'taxi'])); v.place(s.x, s.z, s.yaw); v.ai = null; v.parked = true; this.traffic.cars.push(v); s.car = v; }
       else if (s.car && d > 150 && s.car !== P.car) { this.traffic.removeCar(s.car); s.car = null; }
     }
     // pedestrians
