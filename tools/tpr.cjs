@@ -12,23 +12,23 @@ const HOOK = `(() => { const P = WebGL2RenderingContext.prototype; const A = win
     if (g === 'up' && (k === 'bufferData' || k === 'bufferSubData') && a[1] && a[1].byteLength) A.upB += a[1].byteLength; } }; } })();`;
 srv.listen(0, async () => {
   const b = await chromium.launch({ executablePath: process.env.CHROME_BIN, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1300'] });
-  const ctx = await b.newContext({ viewport: { width: +(process.env.VW || 960), height: +(process.env.VH || 540) }, deviceScaleFactor: +(process.env.DSF || 1) });
+  const ctx = await b.newContext({ viewport: { width: +(process.env.VW || 640), height: +(process.env.VH || 360) }, deviceScaleFactor: +(process.env.DSF || 1) });
   await ctx.addInitScript(HOOK); const p = await ctx.newPage(); p.setDefaultTimeout(1100000); let perr = 0;
   p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
   const t0 = Date.now();
   await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&prof&map=gta&hour=${process.env.HOUR || 15}&${process.env.Q || ''}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
   console.log('ready', (Date.now() - t0) / 1000 | 0, 's');
-  const r = await p.evaluate(`(async () => { const G = __G, g = G.game, A = __GLT, R = G.city.region; G.profInit(); G.rb = 1;
+  await p.evaluate(`(() => { const G = __G, g = G.game, A = __GLT, R = G.city.region; G.profInit(); G.rb = 1;
     const { wrap, prof } = { wrap: (o, k, l) => { if (!o || typeof o[k] !== 'function') return; const f = o[k]; o[k] = function (...a) { const t = performance.now(); try { return f.apply(this, a); } finally { G.prof && (G._sub[l] = (G._sub[l] || 0) + performance.now() - t); } }; } };
     G._sub = {}; wrap(R, 'finish', 'region.finish'); wrap(R, 'unload', 'region.unload'); wrap(R, 'step', 'region.step'); if (R.detail) { wrap(R.detail, 'update', 'detail.update'); } if (R.marina) wrap(R.marina, 'update', 'marina.update');
     const gl = G.renderer.getContext(); const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
     const one = (lbl, i) => { for (const k in A) if (typeof A[k] === 'number') A[k] = 0; A.n = {}; G._sub = {}; const p0 = G.renderer.info.programs.length; const t = performance.now(); const f = G.tick(1/30, true); const ts = performance.now(); sync(); const syncMs = performance.now() - ts;
       return { at: lbl, i, ms: Math.round(performance.now() - t), sync: Math.round(syncMs), newProg: G.renderer.info.programs.length - p0, calls: f.calls, gl: { comp: Math.round(A.comp), up: Math.round(A.up), upMB: +(A.upB / 1048576).toFixed(1), draw: Math.round(A.draw), nBuf: A.n.bufferData || 0, nTex: (A.n.texImage2D || 0) + (A.n.texStorage2D || 0), nLink: A.n.linkProgram || 0 },
         T: Object.entries(f.T).filter(([k, v]) => v > 8).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + '=' + Math.round(v)).join(' '), sub: Object.entries(G._sub).filter(([k, v]) => v > 3).map(([k, v]) => k + '=' + Math.round(v)).join(' '), loaded: R.stats.loaded, loads: R.stats.loads }; };
-    const out = []; for (let i = 0; i < 4; i++) out.push(one('warm', i));
-    for (const [x, z] of [[-300, 200], [600, -400], [281, 14], [-150, -350]]) { g.tp(x, z, 0); for (let i = 0; i < ${NF}; i++) out.push(one(x + ',' + z, i)); }
-    return out; })()`);
+    window.__one = one; return 0; })()`);
+  const r = []; const rec = async (lbl, i) => { const f = await p.evaluate(`__one(${JSON.stringify(lbl)}, ${i})`); r.push(f); if (f.ms > 120 || f.i < 2) console.log(TAG, JSON.stringify(f)); };
+  for (let i = 0; i < 3; i++) await rec('warm', i);
+  for (const [x, z] of [[-300, 200], [600, -400], [-150, -350]]) { await p.evaluate(`__G.game.tp(${x}, ${z}, 0)`); for (let i = 0; i < NF; i++) await rec(x + ',' + z, i); }
   fs.mkdirSync(path.join(root, 'shots/pd5'), { recursive: true }); fs.writeFileSync(path.join(root, 'shots/pd5/tpr_' + TAG + '.json'), JSON.stringify(r, null, 0).replace(/},{/g, '},\n{'));
-  for (const f of r) if (f.ms > 120 || f.i < 2) console.log(TAG, JSON.stringify(f));
   console.log('PAGEERROR', perr); await b.close(); process.exit(0);
 });
