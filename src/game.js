@@ -417,9 +417,10 @@ export class Game {
         if (-rv > 5) { a.health -= -rv * 1.5; b.health -= -rv * 1.5; if ((a.driver === 'player' || b.driver === 'player')) { this.sfx.crash(Math.min(1, -rv / 20)); const other = a.driver === 'player' ? b : a; if (other.type === 'police') this.crime(Math.max(this.wanted, 1), '撞击警车'); } } }
     }
     // cars vs pedestrians / cops
+    const walkers = this.peds.list.concat(this.cops); // perf_debug1: was rebuilt per moving car per frame (GC churn)
     for (const v of cars) {
       const sp = Math.abs(v.speed); if (sp < 3.5) continue; const f = v.forward();
-      for (const c of [...this.peds.list, ...this.cops]) {
+      for (const c of walkers) {
         if (c.dead) continue; const ddx = c.pos.x - v.x, ddz = c.pos.z - v.z; const al = ddx * f.x + ddz * f.z, lt = ddx * f.z - ddz * f.x;
         if (Math.abs(al) < v.dims.L / 2 + 0.3 && Math.abs(lt) < v.dims.W / 2 + 0.3) { c.kill(al > 0 ? -1 : 1); c.pos.x += f.x * 1.5; c.pos.z += f.z * 1.5; if (v.driver === 'player') { if (c.isCop) this.crime(Math.max(this.wanted + 1, 3), '撞倒警察'); else if (this.policeNear(60) || rng() < 0.5) this.crime(Math.max(this.wanted, 1), '肇事'); this.dropCash(c.pos); } else this.peds.panic(c.pos, 20); }
       }

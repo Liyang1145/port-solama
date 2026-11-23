@@ -6,10 +6,12 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
   // turn the camera with real mouse moves until it looks at (x,z) (camera forward yaw = cam.yaw + PI)
   const face = async (x, z) => { for (let i = 0; i < 6; i++) { const s = await pose(); const want = Math.atan2(x - s.x, z - s.z); let d = want - (s.camYaw + Math.PI); d = Math.atan2(Math.sin(d), Math.cos(d)); if (Math.abs(d) < 0.05) return; const px = -d / 0.0024; await look(Math.max(-40, Math.min(40, px / 6)), 0, 6); } };
   // walk to (x,z) like a player: aim the camera, hold W (+Shift), re-aim every half second
-  const walkTo = async (x, z, { sprint = false, maxF = 900, stop = 1.2 } = {}) => { let f = 0; let s = await pose(); let last = [s.x, s.z]; let stuck = 0;
+  const walkTo = async (x, z, { sprint = false, maxF = 900, stop = 1.2 } = {}) => { let f = 0; let s = await pose(); let last = [s.x, s.z]; let stuck = 0; let side = 0;
     while (f < maxF) { s = await pose(); if (Math.hypot(x - s.x, z - s.z) < stop) break; await face(x, z); await key.down('KeyW'); if (sprint) await key.down('ShiftLeft'); await run(15); f += 15;
-      const n = await pose(); if (Math.hypot(n.x - last[0], n.z - last[1]) < 0.2) stuck++; else stuck = 0; last = [n.x, n.z]; if (stuck > 4) break; }
-    await key.up('KeyW'); await key.up('ShiftLeft'); const e = await pose(); return { dist: +Math.hypot(x - e.x, z - e.z).toFixed(1), frames: f, stuck: stuck > 4 }; };
+      const n = await pose(); if (Math.hypot(n.x - last[0], n.z - last[1]) < 0.2) stuck++; else stuck = 0; last = [n.x, n.z];
+      if (stuck >= 2 && side < 6) { side++; const k = side % 2 ? 'KeyD' : 'KeyA'; await key.down(k); await run(12 + side * 4); await key.up(k); f += 12 + side * 4; stuck = 0; } // blocked: sidestep like a player
+      if (stuck > 4) break; }
+    await key.up('KeyW'); await key.up('ShiftLeft'); const e = await pose(); return { dist: +Math.hypot(x - e.x, z - e.z).toFixed(1), frames: f, stuck: stuck > 4, sidesteps: side }; };
   // drive along waypoints with W/S/A/D only (a keyboard player steers bang-bang)
   const driveTo = async (pts, { maxF = 1800, vmax = 16, reach = 7 } = {}) => { let i = 0, f = 0; const held = new Set(); const set = async (k, on) => { if (on && !held.has(k)) { await key.down(k); held.add(k); } else if (!on && held.has(k)) { await key.up(k); held.delete(k); } };
     let crashes = 0, lastSp = 0;
@@ -22,7 +24,7 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
   const S = {};
   S.walk = async () => { const r = {}; const s0 = await pose();
     await hold(['KeyW'], 90); const s1 = await pose(); r.walk3s = +Math.hypot(s1.x - s0.x, s1.z - s0.z).toFixed(1);
-    await look(-10, 0, 9); // the spawn faces a palm trunk 6.5 m ahead: turn a little like a player would
+    await hold(['KeyS'], 30); await face(300, 30); // the spawn faces a palm trunk + cafe terrace pocket: back off and head for the open road like a player would
     await hold(['KeyW', 'ShiftLeft'], 120); const s2 = await pose(); r.sprint4s = +Math.hypot(s2.x - s1.x, s2.z - s1.z).toFixed(1);
     await key.down('KeyW'); const ys = []; for (let j = 0; j < 3; j++) { await key.tap('Space', 1); for (let q = 0; q < 6; q++) { await run(3); ys.push(await ev('+__G.game.P.pos.y.toFixed(2)')); } } await key.up('KeyW'); r.jumpPeakY = Math.max(...ys);
     await key.down('KeyW'); await look(10, 0, 120); await look(-14, 2, 60); await look(0, -3, 30); await key.up('KeyW'); // walk while sweeping the camera

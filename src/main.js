@@ -209,13 +209,17 @@ async function load() {
     env.update(dt); prof.mark('r:shadowfit');
     if (!OLD.shadow) renderer.shadowMap.needsUpdate = true; // consumed by the first scene render of this frame (mirror or main pass)
     water.update(scene);
-    camera.updateMatrixWorld(); { const k = setScope('water:mirror'); water.renderRefl(renderer, scene, camera); setScope(k); } prof.mark('r:water');
+    const MWU = !Q.has('oldmwu'); // perf_debug1: every renderer.render(scene) re-walked the whole scene graph (~all bones of ~90 characters,
+    // every prop) to update world matrices: mirror + main + probe face = 3 walks / frame -> one walk, after the props / lights moved
+    if (OLD.mirrorOrder) { camera.updateMatrixWorld(); { const k = setScope('water:mirror'); water.renderRefl(renderer, scene, camera); setScope(k); } prof.mark('r:water'); }
     if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1); prof.mark('r:region');
     veg.update?.(camera.position); prof.mark('r:veg');
     if (CYBER) { nature.update(camera.position); nature.frame(env, scene); neon.update(env.look.night, U.uTime.value); scene.fog.density = env.look.fogD * nature.fogMul(camera.position); }
     updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night, false, game.trafficPhase || 0); if (blot) blot.update(camera.position, env.look.night); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
     updateNeonLights(props, city.signs, camera.position, env.look.night); prof.mark('r:props');
+    if (MWU) { scene.matrixWorldAutoUpdate = true; scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false; prof.mark('r:matrixWorld'); }
+    if (!OLD.mirrorOrder) { camera.updateMatrixWorld(); { const k = setScope('water:mirror'); water.renderRefl(renderer, scene, camera); setScope(k); } prof.mark('r:water'); } // mirror now after the chunk / prop updates (this frame's state)
     renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;
     { const k = setScope('sprobe'); sprobe.update(false); setScope(k); } prof.mark('r:sprobe');
     const pc = game.P && game.P.car; const kmh = pc ? Math.abs(pc.speed || 0) * 3.6 : 0;
@@ -225,6 +229,7 @@ async function load() {
     post.update(U.uSunDir.value, U.uSunCol.value, env.look.night, U.uTime.value, gold);
     prof.mark('r:postupd');
     if (Q.has('nopost')) renderer.render(scene, camera); else post.render();
+    scene.matrixWorldAutoUpdate = true;
     prof.mark('r:composer');
   }
   window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); post.setSize(window.innerWidth, window.innerHeight); });

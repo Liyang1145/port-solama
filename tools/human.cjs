@@ -53,7 +53,11 @@ const PAGE_HELPERS = `(() => {
 })()`;
 srv.listen(0, async () => {
   const port = srv.address().port; const T0 = Date.now();
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1500', `--window-size=${W},${H}`] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100', `--window-size=${W},${H}`] });
+  // the browser runs in its own session (playwright detaches it): remember it so the runner can kill exactly that session
+  try { const cp = require('child_process').execSync(`ps -o pid= --ppid ${process.pid}`).toString().split(/\s+/).filter(Boolean); fs.writeFileSync(path.join(out, 'browser.pids'), cp.join(' ')); } catch (e) { }
+  const killMine = () => { try { for (const pid of fs.readFileSync(path.join(out, 'browser.pids'), 'utf8').split(' ').filter(Boolean)) require('child_process').execSync(`for q in $(ps -o pid= --sid ${pid}); do kill -9 $q 2>/dev/null; done; true`); } catch (e) { } };
+  process.on('exit', killMine);
   const ctx = await b.newContext({ viewport: { width: W, height: H } }); const p = await ctx.newPage(); p.setDefaultTimeout(1500000);
   let perr = 0, cerr = 0; const errs = [];
   p.on('pageerror', (e) => { perr++; errs.push('PAGEERROR ' + e.message.slice(0, 300)); log('PAGEERROR', e.message.slice(0, 300)); });
@@ -91,5 +95,5 @@ srv.listen(0, async () => {
   }
   try { fs.writeFileSync(path.join(out, 'frames.json'), JSON.stringify(await ev('__G.prof.frames'))); } catch (e) { }
   log('ALLDONE PAGEERRORS', perr, 'CONSOLE-ERR', cerr, ((Date.now() - T0) / 1000).toFixed(0) + 's');
-  await b.close(); srv.close(); process.exit(0);
+  setTimeout(() => process.exit(0), 3000); b.close().catch(() => {}).then(() => process.exit(0)); // the runner kills any leftover chromium of its session
 });
