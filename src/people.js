@@ -18,6 +18,29 @@ function dropDeadMorphs(geo) {
   geo.morphAttributes = {}; DROPPED.geos++;
 }
 export const morphStats = () => ({ ...DROPPED });
+// fix_pt6 #1 (?oldmorph = old): the face / eyes / teeth meshes kept all 34 ARKit / viseme targets although the shipped clips animate only
+// a few of them; three.js builds a float morph texture (verts x 2 texels x targets x 16 B, plus the same Float32Array kept on the CPU)
+// per morphed geometry: 119 of them, 217 MB on the GPU at the A spawn. Keep only the targets some clip drives (|w| > 1e-3), remap the
+// clips' weight tracks; a mesh no clip drives loses its targets. Unchanged pixels: a dropped target always had weight 0.
+const OLDMORPH = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmorph');
+const CMP = { meshes: 0, before: 0, after: 0 };
+function compactMorphs(root, clips) {
+  const list = [...new Set(Object.values(clips).filter(Boolean))]; const seenT = new Set();
+  root.traverse((o) => {
+    const g = o.geometry; if (!o.isMesh || !g || !g.morphAttributes.position || !g.morphAttributes.position.length || !o.morphTargetInfluences) return;
+    const N = g.morphAttributes.position.length; const max = new Float32Array(N); const tracks = []; let ok = true;
+    for (const c of list) for (const t of c.tracks) { if (t.name !== o.name + '.morphTargetInfluences' && t.name !== o.uuid + '.morphTargetInfluences') continue;
+      if (t.values.length !== t.times.length * N) { ok = false; break; } tracks.push(t); const v = t.values; for (let i = 0; i < v.length; i++) { const a = Math.abs(v[i]); if (a > max[i % N]) max[i % N] = a; } }
+    for (let i = 0; i < N; i++) if (Math.abs(o.morphTargetInfluences[i] || 0) > max[i]) max[i] = Math.abs(o.morphTargetInfluences[i]);
+    if (!ok) return; const keep = []; for (let i = 0; i < N; i++) if (max[i] > 1e-3) keep.push(i); if (keep.length === N) return;
+    CMP.meshes++; CMP.before += N; CMP.after += keep.length;
+    for (const t of tracks) { if (seenT.has(t)) continue; seenT.add(t); const K = keep.length, nt = t.times.length; const nv = new t.values.constructor(nt * K); for (let f = 0; f < nt; f++) for (let j = 0; j < K; j++) nv[f * K + j] = t.values[f * N + keep[j]]; t.values = nv; }
+    if (!keep.length) { g.morphAttributes = {}; o.morphTargetInfluences = undefined; o.morphTargetDictionary = undefined; for (const c of list) c.tracks = c.tracks.filter((t) => !tracks.includes(t)); return; }
+    for (const k in g.morphAttributes) g.morphAttributes[k] = keep.map((i) => g.morphAttributes[k][i]);
+    const infl = keep.map((i) => o.morphTargetInfluences[i] || 0); o.morphTargetInfluences = undefined; o.morphTargetDictionary = undefined; o.updateMorphTargets(); for (let j = 0; j < keep.length; j++) o.morphTargetInfluences[j] = infl[j];
+  });
+}
+export const morphCompactStats = () => ({ ...CMP }); if (typeof window !== 'undefined') window.__MORPHC = CMP;
 const LODG = new Map();
 function makeLods(geo) {
   if (LODG.has(geo) || !geo.index) return;
@@ -199,6 +222,7 @@ export function prepareCharacters(G) {
     clips.idle = clips.idle || g.animations[0];
     for (const k of ['walk', 'run']) clips[k] = clips[k] || clips.idle;
     clips.aimU = upper(clips.aim, 'aimUpper'); clips.raimU = upper(clips.raim || clips.aim, 'rifleUpper');
+    if (!OLDMORPH) compactMorphs(g.scene, clips);
     const C = CAST[key]; const P = PROTOS[key] = { scene: g.scene, scale: C.hT && C.h ? C.hT / C.h : 1, sex: C.sex, cop: !!C.cop, clips };
     P.cal = calibrate(P);
   }
