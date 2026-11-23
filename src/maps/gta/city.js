@@ -921,7 +921,8 @@ function marina(ctx) {
     for (let x = p.x0 + 0.5; x < p.x1; x += 1.2) box(v, x - 0.02, 0.15, p.z - p.hw, x + 0.02, 0.152, p.z + p.hw, {}, [0.3, 0.22, 0.15], false); // plank gaps
     for (let x = p.x0 + 1; x < p.x1; x += 4) for (const sz of [-1, 1]) box(v, x - 0.15, L.waterY - 2, p.z + sz * (p.hw - 0.15) - 0.15, x + 0.15, 0.5, p.z + sz * (p.hw - 0.15) + 0.15, {}, [0.3, 0.24, 0.18]);
     // dock lamps on the outer end (night practicals)
-    ctx.lamps.push({ x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock' });
+    // a_portnight: pool = [cx, cz, sx, sz] of the deck this lamp lights (props.js clips the ground light pool to it; no rng)
+    ctx.lamps.push({ x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock', pool: [p.x0 + 5.5, p.z, 11, p.hw * 1.9] });
     // yachts on both sides
     for (const sz of [-1, 1]) for (let x = p.x0 + 8; x < p.x1 - 8; x += rand(13, 17)) {
       if (rng() < 0.25) continue; const Lh = rand(9, 14), Bh = rand(3, 3.8); const zc = p.z + sz * (p.hw + Bh / 2 + 0.8);

@@ -87,6 +87,11 @@ void main(){
 // r5.0 shore-distance map: land mask (mainland, island ends, Deco district, pearl island, causeway embankment) on an 8 m grid,
 // two-pass chamfer distance -> 0 at the shore .. 1 at >= 90 m out. Sampled by the water shader as the bay floor depth.
 const SB = [-2000, -1640, 520, 1640];
+// a_portnight (map A, ?oldaportnight = 0): the island's west edge is a vertical seawall with the marina piers off it, but the
+// distance map started the bay floor at 0 m there too -> 0.1-1 m deep sand-bottomed water (pool turquoise by day, sand showing
+// through, yachts moored in ankle-deep shallows). Island-block cells now seed the distance at 50 m: ~3 m of water at the wall,
+// deep water beyond; natural coasts, causeway embankments and the beach (own profile) keep 0.
+const SEAWALL_OFF = new URLSearchParams(location.search).has('oldaportnight') ? 0 : 50;
 // a_waternight: night water on map A (?oldwaternight = old values; map B always old). Uniforms only, one program either way.
 const OLD_WN = { bodyNight: 0.85, sandNight: 0.85, haze: 0, foamNight: 0, sx: 0.035, sy: 0.035, on: 0, streak: 1 };
 export const WN = (CYBER || new URLSearchParams(location.search).has('oldwaternight')) ? OLD_WN :
@@ -98,7 +103,7 @@ function shoreTexture() {
     const x = SB[0] + (i + 0.5) * C, z = SB[1] + (j + 0.5) * C; const az = Math.abs(z);
     let land = x < shoreX(z) || Math.hypot(x - pr.cx, z - pr.cz) < pr.r || (x > -22 && x < 340 && az < 372) || (az >= 372 && az < ISLE.tip && x > westCoast(z) && x < 340 + beachOff(z));
     if (!land && x < 0 && x > -1000 && az < 120) { sun.path.nearest(x, z, q); const br = x > REGION.bridge.x0 + 4 && x < REGION.bridge.x1 - 4; if (q.dist < sun.hw + (br ? 1 : 10)) land = true; }
-    D[j * nx + i] = land ? 0 : 1e9;
+    D[j * nx + i] = land ? (SEAWALL_OFF && x > -22 && x < 340 && az < 372 ? SEAWALL_OFF : 0) : 1e9;
   }
   const k1 = C, k2 = C * 1.4142;
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { let d = D[j * nx + i]; if (i) d = Math.min(d, D[j * nx + i - 1] + k1); if (j) { d = Math.min(d, D[(j - 1) * nx + i] + k1); if (i) d = Math.min(d, D[(j - 1) * nx + i - 1] + k2); if (i < nx - 1) d = Math.min(d, D[(j - 1) * nx + i + 1] + k2); } D[j * nx + i] = d; }

@@ -151,6 +151,8 @@ export function buildProps(scene, city, T) {
   });
   // a_nightcheck (map A, ?oldanight = off): the 「海风之眼」 wheel's bulb rings lit nothing below -> two extra instances of this pool
   // (same draw, same program): an ellipse along the rim plane on each side of the boarding deck, which hides the centre (landmarks(): x 384, z 352)
+  // a_portnight (map A, ?oldaportnight = off): port-area night fixes
+  const OLD_PN = CYBER || /[?&]oldaportnight\b/.test(typeof location !== 'undefined' ? location.search : '');
   const xPools = CYBER || /[?&]oldanight\b/.test(typeof location !== 'undefined' ? location.search : '') ? [] : [[384, 344.6, 30, 14], [384, 359.4, 30, 14]];
   // a_nightfix (map A, ?oldanight2 / ?oldanight = off): low beach bollards (beach wall along the promenade, both sides of every
   // beach-access ramp foot) and a lamp on each lifeguard tower, each with its pool as more instances of this same pool mesh
@@ -164,7 +166,8 @@ export function buildProps(scene, city, T) {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);
     m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, s1); im.setMatrixAt(i, m4); glow.setMatrixAt(i, m4); const a = m4.clone();
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
-    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
+    if (l.pool && !OLD_PN) { const [px, pz, sx, sz] = l.pool; m4.compose(new THREE.Vector3(px, l.y + 0.04, pz), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); } // a_portnight: marina pier lamp -> pool on the deck only (was a 16 m disc, 78% of it hovering 1.2 m over the water / through the moored yachts)
+    else m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
   xPools.forEach(([x, z, sx, sz, py], k) => { m4.compose(new THREE.Vector3(x, py !== undefined ? py : Math.max(0, city.groundH(x, z)) + 0.16, z), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); pools.setMatrixAt(lamps.length + k, m4); }); // + 0.16: clears the sand ripple
   // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
