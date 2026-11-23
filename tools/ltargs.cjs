@@ -1,6 +1,6 @@
 // fix_pt4: load-time vs browser launch args (ptS harness args vs shot args). usage: node tools/ltargs.cjs <map> <variant>
 // variants: pts = ptS.cjs args exactly (single-process, old-space 900, optimize-for-size, gpu-mem 256); pts1400 = same with old-space 1400;
-// ptshide = pts + --disable-gpu-compositing (ptS HIDECANVAS); env INIT=1 adds ptS's rAF hook
+// ptshide = pts + --disable-gpu-compositing (ptS HIDECANVAS): ready 28.8 -> 95.8 s, but without it ptS pays the same ~115 s as the first GL finish after ready (SwiftShader), so it only moves the cost; env INIT=1 adds ptS's rAF hook
 // ptsmulti = ptS args without --single-process; shot = shotcmp args (old-space 1000, multi-process)
 const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
 const root = path.resolve(__dirname, '..'); const MAPN = process.argv[2] || 'cyber'; const VAR = process.argv[3] || 'pts';
