@@ -231,10 +231,10 @@ export function buildProps(scene, city, T) {
     out.beachNight = { posts: BN.posts.length, pools: BN.pools.length, lenses: BN.lenses.length, tris: bm.geometry.index ? bm.geometry.index.count / 3 * BN.posts.length : 0 }; }
   if (PN && PN.posts.length) { // a_portlamps: pier bollards + gantry flood drums on the street-light material, lenses on the lamp-glow material (same objects -> same programs)
     const pm = new THREE.InstancedMesh(bollardGeo(), lampMat, PN.posts.length); pm.castShadow = true; pm.receiveShadow = true;
-    PN.posts.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); pm.setMatrixAt(i, m4); }); pm.computeBoundingSphere(); scene.add(pm);
+    PN.posts.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); pm.setMatrixAt(i, m4); }); pm.computeBoundingSphere(); pm.name = 'portLamps'; scene.add(pm);
     const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, false); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, PN.lenses.length);
     PN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
-    out.portNight = Object.assign({ posts: PN.posts.length, lenses: PN.lenses.length, pools: PN.pools.length, cones: PN.cones.length }, PN.S); }
+    out.portNight = pm.userData.stats = Object.assign({ posts: PN.posts.length, lenses: PN.lenses.length, pools: PN.pools.length, cones: PN.cones.length }, PN.S); }
   for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
   if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
