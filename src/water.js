@@ -40,7 +40,7 @@ void main(){
   // windows stretch into streaks instead of mirrored blobs; across-view slope keeps the old sideways wobble
   float al = 0.0;
   if (uWS.z > 0.0) { vec2 vd = -V.xz; float vl = length(vd); vd = vl > 1e-4 ? vd / vl : vec2(0.0, 1.0); al = dot(n.xz, vd); float ac = vd.x * n.z - vd.y * n.x;
-    dist2 = mix(dist2, vec2(ac * uWS.x, al * uWS.y) * fade, uWS.z); }
+    dist2 = mix(dist2, vec2(ac * uWS.x, al * uWS.y) * fade, uWS.z * uNight); }
   vec2 uvR = vUvR.xy / vUvR.w + dist2;
   vec3 refl = texture2D(tDiffuse, uvR).rgb;
   // night: bright sources (lamps, lit windows, the lighthouse lantern) also reach the eye from wave facets above / below their
@@ -89,7 +89,7 @@ const SB = [-2000, -1640, 520, 1640];
 // a_waternight: night water on map A (?oldwaternight = old values; map B always old). Uniforms only, one program either way.
 const OLD_WN = { bodyNight: 0.85, sandNight: 0.85, haze: 0, refl: 1, sx: 0.035, sy: 0.035, on: 0, streak: 1 };
 export const WN = (CYBER || new URLSearchParams(location.search).has('oldwaternight')) ? OLD_WN :
-  { bodyNight: 0.96, sandNight: 0.96, haze: 0.7, refl: 1, sx: 0.03, sy: 0.05, on: 1, streak: 3.0 };
+  { bodyNight: 0.96, sandNight: 0.985, haze: 0.7, refl: 1, sx: 0.03, sy: 0.05, on: 1, streak: 3.0 };
 function shoreTexture() {
   const C = 8, nx = Math.round((SB[2] - SB[0]) / C), nz = Math.round((SB[3] - SB[1]) / C); const D = new Float32Array(nx * nz);
   const R = buildRegionData(); const sun = R.byId.sun; const pr = REGION.pearl; const q = {};
