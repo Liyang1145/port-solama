@@ -169,7 +169,16 @@ export class HUD {
       g.beginPath(); g.arc((this.searchPos.x - M.X0) * M.S, (this.searchPos.z - M.Z0) * M.S, 95 * M.S, 0, 7); g.fill();
     }
     // v4.3 map icons: shops (letters in coloured discs) + mission starts (yellow letters)
-    const icon = (x, z, t, col, r = 7) => { const ix = (x - M.X0) * M.S, iz = (z - M.Z0) * M.S; g.save(); g.translate(ix, iz); g.rotate(-(Math.PI + yaw)); g.fillStyle = col; g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 1.2 / zoom; g.beginPath(); g.arc(0, 0, r / zoom, 0, 7); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.font = `bold ${10 / zoom}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, 0, 0.5 / zoom); g.restore(); };
+    const iconOld = (x, z, t, col, r = 7) => { const ix = (x - M.X0) * M.S, iz = (z - M.Z0) * M.S; g.save(); g.translate(ix, iz); g.rotate(-(Math.PI + yaw)); g.fillStyle = col; g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 1.2 / zoom; g.beginPath(); g.arc(0, 0, r / zoom, 0, 7); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.font = `bold ${10 / zoom}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, 0, 0.5 / zoom); g.restore(); };
+    // perf_debug6 (?oldminimap = old): every POI icon (all shops, ATMs, mission starts) was drawn each frame even far off the plate,
+    // each with its own font string `bold ${10 / zoom}px` -> while driving the zoom follows the speed, so the font was re-parsed and
+    // the glyphs re-rasterised for every icon every frame (fillText ~44 % of the CPU samples in a 60 s drive). Now icons off the
+    // plate are skipped and each icon is drawn at a fixed font size under a 1/zoom scale (same size on screen).
+    const OLDMM = this.oldMM ?? (this.oldMM = new URLSearchParams(location.search).has('oldminimap'));
+    const visR = Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) / zoom / M.S, ppx = P.pos.x, ppz = P.pos.z;
+    if (!OLDMM) { g.font = 'bold 10px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; }
+    const icon = OLDMM ? iconOld : (x, z, t, col, r = 7) => { if (Math.hypot(x - ppx, z - ppz) > visR + (r + 2) / zoom / M.S) return; const ix = (x - M.X0) * M.S, iz = (z - M.Z0) * M.S;
+      g.save(); g.translate(ix, iz); g.rotate(-(Math.PI + yaw)); g.scale(1 / zoom, 1 / zoom); g.fillStyle = col; g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.fillText(t, 0, 0.5); g.restore(); };
     for (const p of [POI.gunshop, POI.clothes, POI.modshop, ...POI.stores]) icon(p.x, p.z, p.icon, p.col);
     for (const a of POI.atms) icon(a.x, a.z, '$', '#2f9e5b', 5);
     if (G.missions && !G.missions.active) for (const s of MISSION_STARTS) icon(s.x, s.z, s.letter, '#e0a91f', 8);
