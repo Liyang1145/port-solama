@@ -6,28 +6,45 @@ import { bodyProto } from './carbody.js';
 import { buildInterior, interiorMats, setInteriorNight } from './carinterior.js';
 import { U } from './env.js';
 import { OLDENV2 } from './envprog.js'; // b_envprog2
+import { CYBER } from './mapsel.js';
 import { clamp, lerp, rand, pick, angWrap, rng } from './util.js';
 
 const PAINTS = [0xf2f2ee, 0x101215, 0x8c9096, 0x1d3f7a, 0x7a1418, 0xd7d3c8, 0x2f4f4f, 0xb5b8bb, 0x5b1e3a, 0x0d5c63, 0xe36b2c, 0x2b2b2e, 0xcfc5a8, 0x6b7f99];
 const SPORT_PAINTS = [0xc8102e, 0xf5c400, 0x111111, 0xf0f0f0, 0x00a3ad, 0xff5e1a, 0x7b2cbf, 0x2a6dd9];
 
 const matCache = new Map();
+// r6.4 vehicles3 paint look switches: metallic flake + clear-coat orange peel (both cheap ALU noise, no textures).
+// URL ?carfx=0 turns them off (flat paint, same as r6.3); setCarFx(false) does the same at runtime.
+const CARFX = { uFlake: { value: (typeof location !== 'undefined' && new URLSearchParams(location.search).get('carfx') === '0') ? 0 : 1 } };
+export function setCarFx(on) { CARFX.uFlake.value = on ? 1 : 0; }
+const SOLID = new Set([0xf2f2ee, 0xd7d3c8, 0xcfc5a8, 0xf2c230, 0xf0f0f0, 0xf5c400, 0xf4f4f4, 0xf0efe8, 0xffffff, 0xe36b2c]); // gloss solid colours (no flake)
 function paintMat(color) {
   const k = 'p' + color; if (matCache.has(k)) return matCache.get(k);
   // v3.4: road dust / grime on the lower body (GTA6_REFERENCE §7 — dirt layers on paint), amount varies per paint
   const dirt = { value: 0.18 + ((color * 2654435761) % 1000) / 1000 * 0.55 };
-  const m = prep(new THREE.MeshPhysicalMaterial({ color, metalness: 0.55, roughness: 0.32, clearcoat: 1.0, clearcoatRoughness: 0.04 }), 'paint', (sh) => {
-    sh.uniforms.uDirt = dirt;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPc;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPc = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+  const solid = SOLID.has(color); const metal = { value: solid ? 0 : 1 };
+  const m = prep(new THREE.MeshPhysicalMaterial({ color, metalness: solid ? 0.04 : 0.62, roughness: solid ? 0.36 : 0.3, clearcoat: 1.0, clearcoatRoughness: 0.035 }), solid ? 'paintS' : 'paintM', (sh) => {
+    sh.uniforms.uDirt = dirt; sh.uniforms.uFlake = CARFX.uFlake; sh.uniforms.uMetal = metal;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWPc; varying vec3 vOPc;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPc = (modelMatrix * vec4(transformed, 1.0)).xyz; vOPc = transformed;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
-varying vec3 vWPc; uniform float uDirt;
+varying vec3 vWPc; varying vec3 vOPc; uniform float uDirt; uniform float uFlake; uniform float uMetal;
 float dh(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
-float dn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(dh(i), dh(i+vec2(1,0)), f.x), mix(dh(i+vec2(0,1)), dh(i+vec2(1,1)), f.x), f.y); }`)
+float dn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(dh(i), dh(i+vec2(1,0)), f.x), mix(dh(i+vec2(0,1)), dh(i+vec2(1,1)), f.x), f.y); }
+vec3 fh3(vec3 p){ p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
 float dust = (1.0 - smoothstep(0.22, 0.95, vWPc.y)) * uDirt * (0.55 + 0.7 * dn(vWPc.xz * 5.0 + vWPc.y * 7.0));
 dust = clamp(dust + uDirt * 0.12 * dn(vWPc.xz * 1.3), 0.0, 0.8);
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.40, 0.355, 0.30), dust);`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.8, dust);')
+      // metallic flake: ~2.5 mm cells, each tilts the BASE-layer normal (the clear coat above stays mirror smooth); faded out
+      // once a flake gets smaller than a pixel so distant cars never shimmer
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+if (uFlake * uMetal > 0.0) { vec3 fp = vOPc * 400.0; float fw = length(fwidth(fp)); float fk = (1.0 - smoothstep(0.7, 2.2, fw)) * (1.0 - dust);
+  if (fk > 0.0) { vec3 r = fh3(floor(fp)) - 0.5; normal = normalize(normal + r * 0.55 * fk); } }`)
+      // clear-coat orange peel: a very low-amplitude wobble of the coat normal (bends reflections like real paint)
+      .replace('#include <clearcoat_normal_fragment_maps>', `#include <clearcoat_normal_fragment_maps>
+if (uFlake > 0.0) { vec2 op = vOPc.xz * 38.0 + vOPc.y * 21.0; float e = 0.04; float a0 = dn(op), ax = dn(op + vec2(e, 0.0)), ay = dn(op + vec2(0.0, e));
+  float pk = 1.0 - smoothstep(0.02, 0.2, length(fwidth(vOPc)) * 38.0); clearcoatNormal = normalize(clearcoatNormal + vec3(ax - a0, ay - a0, 0.0) / e * 0.0045 * pk); }`)
       .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\nmaterial.clearcoat *= 1.0 - dust * 0.9;');
   });
   matCache.set(k, m); return m;
@@ -37,9 +54,10 @@ function shared() {
   if (SH) return SH;
   SH = {
     // r6.2 see-through tinted glass: low alpha head-on, Fresnel-driven reflection + opacity at grazing angles (was 0.88 opaque black)
-    glass: prep(new THREE.MeshPhysicalMaterial({ color: 0x1a2226, metalness: 0.0, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0.02, transparent: true, opacity: 0.4, envMapIntensity: 1.8 }), 'cglass2', (sh) => {
+    glass: prep(new THREE.MeshPhysicalMaterial({ color: 0x14211f, metalness: 0.0, roughness: 0.03, clearcoat: 1, clearcoatRoughness: 0.02, transparent: true, opacity: 0.4, envMapIntensity: 1.8 }), 'cglass2', (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
-{ float fr = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 4.0); gl_FragColor.a = clamp(mix(opacity, 0.92, fr) + 0.25 * dot(gl_FragColor.rgb, vec3(0.3, 0.6, 0.1)), 0.0, 0.95); }`);
+{ float fr = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 4.0); gl_FragColor.a = clamp(mix(opacity, 0.92, fr) + 0.25 * dot(gl_FragColor.rgb, vec3(0.3, 0.6, 0.1)), 0.0, 0.95);
+  gl_FragColor.rgb *= mix(vec3(0.86, 1.0, 0.96), vec3(1.0), fr); } // r6.4 faint green-blue body tint, reflections at grazing angles stay neutral`);
     }),
     tire: prep(new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.92 }), 'tire'),
     rim: prep(new THREE.MeshStandardMaterial({ color: 0xb8bcc0, roughness: 0.28, metalness: 0.95 }), 'rim'),
@@ -50,15 +68,78 @@ function shared() {
     plate: prep(new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 }), 'plate'),
     shadow: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false, map: blobTex() }),
     lbRed: new THREE.MeshBasicMaterial({ color: 0xff2020 }), lbBlue: new THREE.MeshBasicMaterial({ color: 0x2050ff }),
+    // r6.4 lamp internals: clear polycarbonate headlamp lens, smoked red tail lens, dark lamp cavity, LED strips, reverse lamps
+    lens: prep(new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.04, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, transparent: true, opacity: 0.16, depthWrite: false, envMapIntensity: 1.6 }), 'clens'),
+    tlens: prep(new THREE.MeshPhysicalMaterial({ color: 0x8a0a0a, roughness: 0.08, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03, transparent: true, opacity: 0.55, depthWrite: false, emissive: 0x400000, emissiveIntensity: 0.2 }), 'ctlens'),
+    lampIn: prep(new THREE.MeshStandardMaterial({ color: 0x1b1c1e, roughness: 0.35, metalness: 0.6, side: THREE.DoubleSide }), 'clampin'),
+    drl: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xeaf2ff, emissiveIntensity: 1.2, roughness: 0.2 }),
+    rev: new THREE.MeshStandardMaterial({ color: 0xd8d8d8, emissive: 0xffffff, emissiveIntensity: 0.0, roughness: 0.15 }),
+    // night glow filling the lamp lenses (additive, invisible by day): headlamps read lit at a distance, not just the small bulbs
+    hglow: new THREE.MeshBasicMaterial({ color: 0xfff1d8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    tglow: new THREE.MeshBasicMaterial({ color: 0xff2414, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
   };
+  SH.lens.renderOrder = 3; SH.hglow.visible = SH.tglow.visible = false; prep(SH.drl, 'cdrl'); prep(SH.rev, 'crev');
   prep(SH.head, 'chead'); prep(SH.tail, 'ctail');
   return SH;
 }
 function blobTex() {
-  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
-  const gr = g.createRadialGradient(32, 32, 4, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = gr; g.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); return t;
+  // r6.4 contact shadow: soft rounded-rectangle footprint (dense core under the floor pan, darker pads under the four tyres)
+  // instead of the old radial blob. Plane is W*1.25 x L*1.15, so the car's footprint is ~80 % x 87 % of the texture.
+  const c = document.createElement('canvas'); c.width = 64; c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = 'rgba(0,0,0,0)'; g.fillRect(0, 0, 64, 128);
+  const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+  g.filter = 'blur(6px)'; g.fillStyle = 'rgba(255,255,255,0.55)'; rr(9, 10, 46, 108, 14); g.fill();
+  g.filter = 'blur(3px)'; g.fillStyle = 'rgba(255,255,255,0.8)'; rr(14, 18, 36, 92, 9); g.fill();
+  g.filter = 'blur(2px)'; g.fillStyle = 'rgba(255,255,255,1)'; for (const [x, y] of [[11, 26], [47, 26], [11, 92], [47, 92]]) { rr(x - 5, y - 9, 10, 18, 4); g.fill(); }
+  g.filter = 'none'; const t = new THREE.CanvasTexture(c); return t;
 }
+// r6.4 licence plates (original designs, no real-state marks): one 4x4 atlas per map, each car picks a cell.
+// 索拉纳港: white with a sunrise band and teal numerals, rear plate only (like the coast it is modelled on); 霓港: dark plate,
+// cyan numerals, magenta edge, front and rear.
+let PLATES = null;
+function plateAtlas() {
+  if (PLATES) return PLATES;
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const g = c.getContext('2d'); let seed = 7;
+  const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647; const AL = 'ABCDEFGHJKLMNPRSTUVWXYZ', DG = '0123456789';
+  const ch = (s) => s[Math.floor(r() * s.length)];
+  for (let i = 0; i < 16; i++) {
+    const x = (i % 4) * 256, y = Math.floor(i / 4) * 128; g.save(); g.translate(x, y);
+    const num = CYBER ? 'NP' + ch(DG) + ch(DG) + '·' + ch(AL) + ch(DG) + ch(AL) : ch(DG) + ch(AL) + ch(AL) + '·' + ch(DG) + ch(DG) + ch(AL);
+    if (!CYBER) {
+      const gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#fbfaf5'); gr.addColorStop(1, '#ece8dc'); g.fillStyle = gr; g.fillRect(2, 2, 252, 124);
+      g.strokeStyle = '#3b4a52'; g.lineWidth = 4; g.strokeRect(4, 4, 248, 120);
+      g.fillStyle = '#f39a3c'; g.beginPath(); g.arc(128, 58, 26, Math.PI, 0); g.fill(); g.fillStyle = 'rgba(243,154,60,0.35)'; g.fillRect(20, 58, 216, 4);
+      g.fillStyle = '#0f6d6a'; g.font = 'bold 20px "WenQuanYi Zen Hei", "Noto Sans CJK SC", sans-serif'; g.textAlign = 'center'; g.fillText('索拉纳港', 128, 30);
+      g.fillStyle = '#123c44'; g.font = 'bold 58px "Anton", "Arial Narrow", sans-serif'; g.fillText(num, 128, 96);
+      g.fillStyle = '#5a6a70'; g.font = '14px "WenQuanYi Zen Hei", sans-serif'; g.fillText('阳光海岸 · 2026', 128, 118);
+    } else {
+      g.fillStyle = '#0b0f1c'; g.fillRect(2, 2, 252, 124); g.strokeStyle = '#d02c8f'; g.lineWidth = 4; g.strokeRect(5, 5, 246, 118);
+      g.fillStyle = '#8fe9ff'; g.font = 'bold 18px "WenQuanYi Zen Hei", sans-serif'; g.textAlign = 'left'; g.fillText('霓港', 16, 30); g.textAlign = 'right'; g.fillStyle = '#d02c8f'; g.fillText('NEOPORT', 240, 30);
+      g.textAlign = 'center'; g.fillStyle = '#7ff0ff'; g.font = 'bold 54px "Anton", "Arial Narrow", sans-serif'; g.fillText(num, 128, 94);
+      for (let k = 0; k < 22; k++) { g.fillStyle = r() < 0.5 ? '#2a3550' : '#47577a'; g.fillRect(20 + k * 10, 106, 4 + (k % 3) * 2, 12); }
+    }
+    g.restore();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  const mat = prep(new THREE.MeshStandardMaterial({ map: t, roughness: 0.42, metalness: 0.15, polygonOffset: true, polygonOffsetFactor: -2 }), 'cplate');
+  const frame = prep(new THREE.MeshStandardMaterial({ color: 0x111214, roughness: 0.5, metalness: 0.3 }), 'cplatefr');
+  PLATES = { mat, frame, geo: new Map() }; return PLATES;
+}
+function plateGeo(w, h, cell) {
+  const P = plateAtlas(); const key = w.toFixed(3) + h.toFixed(3) + '|' + cell; if (P.geo.has(key)) return P.geo.get(key);
+  const g = new THREE.PlaneGeometry(w, h); const uv = g.attributes.uv; const cx = (cell % 4) / 4, cy = 1 - (Math.floor(cell / 4) + 1) / 4;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, cx + uv.getX(i) * 0.25, cy + uv.getY(i) * 0.25);
+  P.geo.set(key, g); return g;
+}
+function addPlates(m, slots, cell) {
+  if (!slots) return; const P = plateAtlas();
+  for (const s of slots) {
+    if (s.front && !CYBER) continue; // the 索拉纳港 coast state issues rear plates only
+    const fr = new THREE.Mesh(GBOX(s.w + 0.03, s.h + 0.03, 0.025), P.frame); fr.position.set(s.x, s.y, s.z - s.dir * 0.012); m.add(fr);
+    const pl = new THREE.Mesh(plateGeo(s.w, s.h, cell), P.mat); pl.position.set(s.x, s.y, s.z + s.dir * 0.002); if (s.dir < 0) pl.rotation.y = Math.PI; m.add(pl);
+  }
+}
+const GBOXC = new Map(); function GBOX(w, h, d) { const k = [w, h, d].join(','); if (!GBOXC.has(k)) GBOXC.set(k, new THREE.BoxGeometry(w, h, d)); return GBOXC.get(k); }
 
 // ---------------------------------------------------------------------------- models ----
 let sportProto = null;
@@ -141,8 +222,9 @@ export function prepareModels(G) {
   // v3.5 procedural lofted bodies (src/carbody.js) for everyday traffic
   const IMt = interiorMats();
   const BM = { liner: IMt.liner, hidden: IMt.hidden, paint: paintMat(0xffffff), glass: S.glass, black: S.black, chrome: S.chrome, head: S.head, tail: S.tail, plate: S.plate, interior: leather,
-    amber: prep(new THREE.MeshStandardMaterial({ color: 0xffa020, emissive: 0x803000, emissiveIntensity: 0.4, roughness: 0.2 }), 'amber') };
-  for (const k of ['sedan', 'suv', 'van', 'pickup']) { const P = bodyProto(k, BM); VP['b_' + k] = P.root; CABIN['b_' + k] = P.cabin; MODEL_SCALE['b_' + k] = 1; MODEL_DIMS['b_' + k] = { L: P.dims.L, W: P.dims.W, H: P.dims.H, wb: P.dims.wb, wr: P.dims.wr }; }
+    amber: prep(new THREE.MeshStandardMaterial({ color: 0xffa020, emissive: 0x803000, emissiveIntensity: 0.4, roughness: 0.2 }), 'amber'),
+    lens: S.lens, tlens: S.tlens, lampIn: S.lampIn, drl: S.drl, rev: S.rev, hglow: S.hglow, tglow: S.tglow };
+  for (const k of ['sedan', 'suv', 'van', 'pickup', 'muscle', 'conv', 'lifted']) { const P = bodyProto(k, BM); VP['b_' + k] = P.root; CABIN['b_' + k] = P.cabin; MODEL_SCALE['b_' + k] = 1; MODEL_DIMS['b_' + k] = { L: P.dims.L, W: P.dims.W, H: P.dims.H, wb: P.dims.wb, wr: P.dims.wr }; }
 }
 // ---- v3.5 procedural wheels: lathe tyre with rounded sidewall + tread grooves, extruded multi-spoke alloy face with bevels,
 // rim barrel, lug nuts, centre cap, brake disc + caliper. Replaces the low-poly ara3d wheels (sized from their bounding box).
@@ -152,8 +234,16 @@ function wheelGeo(r, hw, spokes, style) {
   const V2 = (a, b) => new THREE.Vector2(a, b);
   const tp = [V2(r * 0.66, -hw * 0.9), V2(r * 0.8, -hw * 0.98), V2(r * 0.92, -hw), V2(r * 0.975, -hw * 0.88), V2(r, -hw * 0.66), V2(r, -hw * 0.42), V2(r * 0.982, -hw * 0.36), V2(r * 0.982, -hw * 0.3), V2(r, -hw * 0.24),
     V2(r, -0.03 * hw), V2(r * 0.982, 0), V2(r, 0.03 * hw), V2(r, hw * 0.24), V2(r * 0.982, hw * 0.3), V2(r * 0.982, hw * 0.36), V2(r, hw * 0.42), V2(r, hw * 0.66), V2(r * 0.975, hw * 0.88), V2(r * 0.92, hw), V2(r * 0.8, hw * 0.98), V2(r * 0.66, hw * 0.9)];
-  const tyre = new THREE.LatheGeometry(tp, 32); tyre.rotateY(Math.PI / 32);
-  const rr = r * 0.655; // rim radius
+  if (style === 2) for (const p of tp) { p.x = r * 0.58 + (p.x - r * 0.66) * (r - r * 0.58) / (r - r * 0.66); } // tall off-road sidewall
+  let tyre = new THREE.LatheGeometry(tp, 32); tyre.rotateY(Math.PI / 32);
+  const rr = r * (style === 2 ? 0.575 : 0.655); // rim radius
+  // r6.4 sidewall: raised moulded lettering ring on the outer face (lathe band 2 mm proud of the sidewall, alpha-tested text)
+  const swp = []; for (let k = 0; k <= 6; k++) { const t = k / 6; const rad = rr * 1.06 + (r * 0.95 - rr * 1.06) * t; let yy = -1; for (let q = tp.length - 1; q > tp.length / 2; q--) { const A = tp[q], B = tp[q - 1]; if ((A.x - rad) * (B.x - rad) <= 0 && A.x !== B.x) { yy = A.y + (B.y - A.y) * (rad - A.x) / (B.x - A.x); break; } } swp.push(new THREE.Vector2(rad, Math.max(yy, hw * 0.9) + 0.0025)); }
+  swp.reverse(); const side = new THREE.LatheGeometry(swp, 48); // outer-to-inner like the tyre profile (same winding)
+  if (style === 2) { // mud-terrain tread blocks
+    const blocks = []; for (let i = 0; i < 26; i++) for (const sd of [-1, 1]) { const a = (i + (sd > 0 ? 0.5 : 0)) / 26 * Math.PI * 2; const b = new THREE.BoxGeometry(0.06, hw * 0.62, 0.075);
+      b.translate(0, sd * hw * 0.38, 0); b.rotateY(-a); b.translate(Math.cos(a) * (r + 0.008), 0, Math.sin(a) * (r + 0.008)); blocks.push(b); }
+    tyre = mergeGeos([tyre, ...blocks]); }
   const barrel = new THREE.CylinderGeometry(rr, rr, hw * 1.8, 28, 1, true);
   // spoke face: disc with N windows between spokes
   const sh = new THREE.Shape(); sh.absarc(0, 0, rr * 0.995, 0, Math.PI * 2, false);
@@ -172,7 +262,8 @@ function wheelGeo(r, hw, spokes, style) {
   const lugs = []; for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const g = new THREE.CylinderGeometry(0.014, 0.014, 0.03, 6); g.translate(Math.cos(a) * rr * 0.25, hw * 0.56, Math.sin(a) * rr * 0.25); lugs.push(g); }
   const disc = new THREE.CylinderGeometry(rr * 0.82, rr * 0.82, 0.028, 28); disc.translate(0, hw * 0.12, 0);
   const cal = new THREE.BoxGeometry(rr * 0.42, 0.07, rr * 0.3); cal.translate(0, hw * 0.24, rr * 0.62);
-  const out = { tyre, rim: mergeGeos([face, lip, cap, ...lugs]), barrel, disc, cal };
+  const valve = new THREE.CylinderGeometry(0.005, 0.006, 0.03, 6); valve.translate(rr * 0.92, hw * 0.75, 0);
+  const out = { tyre, side, rim: mergeGeos([face, lip, cap, valve, ...lugs]), barrel, disc, cal };
   WGEO.set(key, out); return out;
 }
 function mergeGeos(gs) {
@@ -182,12 +273,22 @@ function mergeGeos(gs) {
     if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(off + g.index.getX(i)); else for (let i = 0; i < P.count; i++) idx.push(off + i); off += P.count; }
   const o = new THREE.BufferGeometry(); o.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); o.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3)); o.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); o.setIndex(idx); return o;
 }
+// r6.4 moulded sidewall lettering (original brand / size marks) as an alpha strip wrapped round the tyre
+function sidewallTex() {
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 64; const g = c.getContext('2d'); g.clearRect(0, 0, 2048, 64);
+  g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.font = 'bold 34px "Anton", "Arial Narrow", sans-serif';
+  const put = (t, x, sz) => { g.font = 'bold ' + sz + 'px "Anton", "Arial Narrow", sans-serif'; g.save(); g.translate(x, 32); g.scale(1, -1); g.fillText(t, 0, 0); g.restore(); };
+  for (const o of [0, 1024]) { put('MARLINA', o + 40, 40); put('SEAWAY  TOURING', o + 300, 24); put('245/45 R18  98W', o + 600, 22); put('M+S  RADIAL  TUBELESS', o + 820, 16); }
+  g.fillRect(0, 2, 2048, 3); g.fillRect(0, 59, 2048, 3);
+  const t = new THREE.CanvasTexture(c); t.wrapS = THREE.RepeatWrapping; t.anisotropy = 4; return t;
+}
 let WM = null;
 function wheelMats() {
   if (WM) return WM; const S = shared();
   WM = { tyre: prep(new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.88 }), 'tire'), alloy: prep(new THREE.MeshStandardMaterial({ color: 0xc4c8cc, roughness: 0.25, metalness: 0.95 }), 'rim'),
     dark: prep(new THREE.MeshStandardMaterial({ color: 0x2a2c2e, roughness: 0.4, metalness: 0.9 }), 'rim'), disc: prep(new THREE.MeshStandardMaterial({ color: 0x8a8580, roughness: 0.5, metalness: 0.9 }), 'rim'),
-    calR: prep(new THREE.MeshStandardMaterial({ color: 0xa01818, roughness: 0.45 }), 'std'), calK: prep(new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 }), 'std'), barrel: S.black };
+    calR: prep(new THREE.MeshStandardMaterial({ color: 0xa01818, roughness: 0.45 }), 'std'), calK: prep(new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 }), 'std'), barrel: S.black,
+    side: prep(new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.75, map: sidewallTex(), alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -1 }), 'tside') };
   return WM;
 }
 function detailWheels(m, sc, spokes, style, darkRim, redCal) {
@@ -197,7 +298,7 @@ function detailWheels(m, sc, spokes, style, darkRim, redCal) {
     bb.makeEmpty(); o.traverse((c) => { if (c.isMesh) { c.geometry.computeBoundingBox(); bb.union(c.geometry.boundingBox); c.visible = false; } });
     const sz = bb.getSize(new THREE.Vector3()); const r = Math.max(sz.y, sz.z) / 2 * 1.0, hw = Math.min(sz.x / 2, r * 0.45);
     const G = wheelGeo(r, hw, spokes, style); const grp = new THREE.Group();
-    const parts = [[G.tyre, M.tyre], [G.rim, darkRim ? M.dark : M.alloy], [G.barrel, M.barrel], [G.disc, M.disc], [G.cal, redCal ? M.calR : M.calK]];
+    const parts = [[G.tyre, M.tyre], [G.side, M.side], [G.rim, darkRim ? M.dark : M.alloy], [G.barrel, M.barrel], [G.disc, M.disc], [G.cal, redCal ? M.calR : M.calK]];
     for (const [g, mt] of parts) { const me = new THREE.Mesh(g, mt); me.castShadow = true; me.receiveShadow = true; grp.add(me); }
     const outward = o.position.x >= 0 ? 1 : -1; grp.rotation.z = -outward * Math.PI / 2;
     const ctr = bb.getCenter(new THREE.Vector3()); grp.position.copy(ctr); o.add(grp);
@@ -205,10 +306,24 @@ function detailWheels(m, sc, spokes, style, darkRim, redCal) {
   });
 }
 
+// r6.4 body variants: a share of everyday sedans are drawn as the muscle coupe or the convertible, a share of pickups as the
+// lifted off-road truck (same vehicle type, handling and AI; only the look). Picked from a counter hash, so the game's
+// rng sequence is untouched. Vehicle.vis.force = 'muscle' | 'conv' | 'lifted' pins the next car (shots / tests).
+export const VIS = { force: null }; let VARN = 0;
+function bodyVariant(k, type) {
+  if (VIS.force && VP['b_' + VIS.force]) { const f = 'b_' + VIS.force; if ((k === 'b_sedan' && f !== 'b_lifted') || (k === 'b_pickup' && f === 'b_lifted')) return f; }
+  const h = ((VARN++ * 2654435761) >>> 0) % 100;
+  if (k === 'b_sedan' && type === 'sedan') return h < 16 ? 'b_muscle' : h < 30 ? 'b_conv' : k;
+  if (k === 'b_pickup' && type === 'pickup') return h < 45 ? 'b_lifted' : k;
+  return k;
+}
 function cloneModel(k, color, type) {
+  k = bodyVariant(k, type);
   const g = new THREE.Group(); const m = VP[k].clone(true); const sc = MODEL_SCALE[k]; m.scale.setScalar(sc); g.add(m);
   const wheels = []; const d = MODEL_DIMS[k];
-  { const h = Math.abs(Math.sin((typeof color === 'number' ? color : 1) * 0.37 + k.length)); detailWheels(m, sc, type === 'police' || k === 'b_pickup' ? 6 : h < 0.5 ? 5 : 10, h < 0.5 ? 0 : 1, k === 'b_pickup' || type === 'police' || h > 0.85, k === 'sports'); }
+  { const h = Math.abs(Math.sin((typeof color === 'number' ? color : 1) * 0.37 + k.length)); if (k === 'b_lifted') detailWheels(m, sc, 6, 2, true, false); else if (k === 'b_muscle') detailWheels(m, sc, 5, 0, h > 0.6, h < 0.3); else
+    detailWheels(m, sc, type === 'police' || k === 'b_pickup' ? 6 : h < 0.5 ? 5 : 10, h < 0.5 ? 0 : 1, k === 'b_pickup' || type === 'police' || h > 0.85, k === 'sports');
+    addPlates(m, m.userData.plates, ((VARN * 7 + Math.round(h * 97)) >>> 0) % 16); }
   m.traverse((o) => { if (o.isMesh && o.userData.paint) { if (Array.isArray(o.material)) { o.material = o.material.slice(); o.material[o.userData.paintSlot || 0] = paintMat(color); } else o.material = paintMat(color); } if (/^wheel_(f|r)(l|r)$/.test(o.name)) { o.rotation.order = 'YXZ'; wheels.push({ node: o, front: o.name[6] === 'f', r: d.wr }); } });
   let lightbar = null;
   if (type === 'police') {
@@ -312,6 +427,7 @@ function buildProcCar(type, color) {
 // --------------------------------------------------------------------------- Vehicle ----
 let VID = 0;
 export class Vehicle {
+  static get vis() { return VIS; }
   constructor(scene, type, color) {
     this.id = VID++; this.type = type; this.scene = scene;
     const m = type === 'sport' || type === 'sport2' ? cloneSport(color ?? pick(SPORT_PAINTS)) : MODEL_OF[type] ? cloneModel(MODEL_OF[type], color ?? (type === 'taxi' ? 0xf2c230 : type === 'police' ? 0x15181d : type === 'sport2' ? pick(SPORT_PAINTS) : pick(PAINTS)), type) : buildProcCar(type, color ?? (type === 'taxi' ? 0xf2c230 : type === 'police' ? 0x111318 : pick(PAINTS)));
@@ -606,9 +722,9 @@ export class Traffic {
   }
 }
 
-export function setCarNight(n) { setInteriorNight(n); const S = shared(); S.head.emissiveIntensity = 0.3 + n * 10; S.tail.emissiveIntensity = 0.4 + n * 5; }
+export function setCarNight(n) { setInteriorNight(n); const S = shared(); S.head.emissiveIntensity = 0.3 + n * 10; S.tail.emissiveIntensity = 0.4 + n * 5; S.drl.emissiveIntensity = 1.2 + n * 3.5; S.tlens.emissiveIntensity = 0.2 + n * 1.6; S.hglow.opacity = n * 0.85; S.tglow.opacity = n * 0.6; S.hglow.visible = S.tglow.visible = n > 0.02; }
 // v4.0: local street-level reflection probe for paint / glass / chrome (main.js refreshes it around the camera)
 export function setCarEnv(tex, k = 1) {
-  const S = shared(); const ms = [...matCache.values(), S.glass, S.chrome, S.rim];
+  const S = shared(); const ms = [...matCache.values(), S.glass, S.chrome, S.rim, S.lens, S.tlens];
   for (const m of ms) { if (m.envMap !== tex) { m.envMap = tex; m.needsUpdate = true; } m.envMapIntensity = k; }
 }
