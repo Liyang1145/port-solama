@@ -142,7 +142,7 @@ async function load() {
   // perf_debug4 (?oldsprobe = old): one face drew up to 1877 calls / 9 M tris. Now: 64 px faces, meshes culled per face
   // (cullSmall: > 380 m, < 0.03 rad, low flat ground/kerbs beyond 35 m, instanced sets of < 8 m props: furniture, palms, parked cars), a face every 2nd frame, refresh every 6 s (15 s if moved < 60 m).
   const SPN = OLD.sprobe ? null : { D: 380, K: 0.03, flatY: LAYOUT.waterY + 1.4, flatNear: 35, instR: 8, every: 2, t0: 6, t1: 15, r: 60 };
-  const sprobe = { rt: new THREE.WebGLCubeRenderTarget(SPN ? 64 : 128, { type: THREE.HalfFloatType }), pm: probe.pm, tex: null, t: 99, pos: new THREE.Vector3(1e9, 0, 0), n: 0 };
+  const sprobe = { rt: new THREE.WebGLCubeRenderTarget(SPN ? 64 : 128, { type: THREE.HalfFloatType }), pm: probe.pm, tex: null, t: 99, pos: new THREE.Vector3(1e9, 0, 0), n: 0, spn: SPN };
   sprobe.cam = new THREE.CubeCamera(0.5, 900, sprobe.rt); scene.add(sprobe.cam);
   sprobe.step = OLD.probe ? null : cubeStepper(renderer, scene, sprobe.cam);
   sprobe.update = (force) => {
