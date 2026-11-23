@@ -777,15 +777,15 @@ function mats(M) {
           float frame = step(0.40, max(abs(q.x * 1.36), abs(q.y))); float vis = step(0.30, q.y) * step(abs(q.x), 0.36) * (1.0 - step(0.47, q.y));
           float sym; vec3 lc; float on;
           if (k > 0.5) { // raised hand (orange): palm + four fingers + thumb
-            vec2 h = q; float palm = step(abs(h.x), 0.13) * step(-0.20, h.y) * step(h.y, 0.04);
+            vec2 h = q * 0.6; float palm = step(abs(h.x), 0.13) * step(-0.20, h.y) * step(h.y, 0.04);
             float fg = 0.0; for (int i = 0; i < 4; i++) { float fx = -0.105 + float(i) * 0.07; float ft2 = 0.20 + 0.04 * (1.0 - abs(float(i) - 1.5) / 1.5); fg = max(fg, step(abs(h.x - fx), 0.026) * step(0.0, h.y) * step(h.y, ft2)); }
             float th2 = step(fsgD(h, vec2(-0.13, -0.08), vec2(-0.22, 0.04)), 0.032);
             sym = max(max(palm, fg), th2); lc = vec3(1.0, 0.46, 0.08); on = step(pst, 0.5); }
           else { // walking figure (white): head, torso, arms, legs mid-stride
-            vec2 w = q; float hd = step(length(w - vec2(0.03, 0.24)), 0.055);
+            vec2 w = q * 0.6; float hd = step(length(w - vec2(0.03, 0.24)), 0.055);
             float bd = min(fsgD(w, vec2(0.02, 0.15), vec2(-0.01, -0.04)), min(fsgD(w, vec2(-0.01, -0.04), vec2(-0.11, -0.24)), fsgD(w, vec2(-0.01, -0.04), vec2(0.09, -0.24))));
             bd = min(bd, min(fsgD(w, vec2(0.02, 0.12), vec2(-0.09, 0.0)), fsgD(w, vec2(0.02, 0.12), vec2(0.11, 0.03))));
-            sym = max(hd, step(bd, 0.032)); lc = vec3(0.95, 0.96, 0.92); on = step(0.5, pst) * step(pst, 1.5); }
+            sym = max(hd, step(bd, 0.036)); lc = vec3(0.95, 0.96, 0.92); on = step(0.5, pst) * step(pst, 1.5); }
           sym *= 1.0 - frame; diffuseColor.rgb = mix(diffuseColor.rgb * 0.55, mix(lc * 0.07, lc, on), sym); diffuseColor.rgb *= 1.0 - 0.5 * vis; fEm = sym * on * 1.25; } }
       else if (dot(fn.xz, dv) > 0.7) { float cell = vIH / 3.0; float k = floor(fy / cell); vec2 q = vec2(lu, fy - (k + 0.5) * cell); float rr = length(q);
         vec3 lc = k > 1.5 ? vec3(0.95, 0.10, 0.06) : k > 0.5 ? vec3(1.0, 0.62, 0.05) : vec3(0.10, 0.95, 0.55); float on = step(abs(k - (2.0 - lt)), 0.1);
