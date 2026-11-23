@@ -424,7 +424,7 @@ function nightPools(K, p) { const pm = K.pm, L = K.lotPools, Wp = K.walkPools, S
   if (!at || at[2] !== L.length + Wp.length + Sp.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length + Wp.length + Sp.length]; let k = 0; const A = pm.instanceMatrix.array;
     for (let i = 0; i + 2 < L.length && k < 256; i += 3) if (Math.hypot(L[i] - p.x, L[i + 1] - p.z) < LOT_R) putPool(A, k++, L[i], L[i + 1], L[i + 2], LOT_D, LOT_D, 0.07);
     for (let i = 0; i + 5 < Wp.length && k < CP; i += 6) if (Math.hypot(Wp[i] - p.x, Wp[i + 1] - p.z) < WALK_R) putPool(A, k++, Wp[i], Wp[i + 1], Wp[i + 2], Wp[i + 3], Wp[i + 4], Wp[i + 5]);
-    { const C = []; for (let i = 0; i + 5 < Sp.length; i += 6) { const d = Math.hypot(Sp[i] - p.x, Sp[i + 1] - p.z); if (d < WALK_R) C.push([d, i]); } // a_shopnight2 (empty with ?oldashop2)
+    { const C = []; for (let i = 0; i + 5 < Sp.length; i += 6) { const d = Math.hypot(Sp[i] - p.x, Sp[i + 1] - p.z); if (d < WALK_R && Sp[i + 3] > 0) C.push([d, i]); } // a_shopnight2 (empty with ?oldashop2)
       if (C.length > CP - k) C.sort((a, b) => a[0] - b[0]); for (const [, i] of C) { if (k >= CP) break; putPool(A, k++, Sp[i], Sp[i + 1], Sp[i + 2], Sp[i + 3], Sp[i + 4], Sp[i + 5]); } }
     pm.count = k; if (k) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); } }
   pm.visible = U.uNight.value > 0.03 && pm.count > 0; }

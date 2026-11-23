@@ -9,6 +9,7 @@ import { World, prismWalls, polyCap, box } from '../../geo.js';
 import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, pointInPoly, smooth } from './mapgeo.js';
 import { REGION } from './mapdata.js';
 import { rng, rand, randi, pick, clamp } from '../../util.js';
+import { shopMural } from './shoppools.js'; // a_shopnight2
 
 const SW = REGION.sw, DY = REGION.deckY;
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -519,7 +520,7 @@ function murals(ctx, L, y0, y1, r, all) {
     const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2; if ((mx - L.cx) * ox + (mz - L.cz) * oz < 0) { ox = -ox; oz = -oz; }
     const facesStreet = ox * L.face[0] + oz * L.face[1] > 0.6; if (!all && facesStreet) continue; if (r() < (all ? 0.15 : 0.35)) continue;
     const m = 'mural' + Math.floor(r() * 6); const bk = ctx.W.b(m, mx, mz, {});
-    const i0 = len * R01(r, 0.04, 0.18), i1 = len * R01(r, 0.82, 0.96); const ya = y0, yb = Math.min(y1, y0 + (i1 - i0) * 0.62 + r() * 2);
+    const i0 = len * R01(r, 0.04, 0.18), i1 = len * R01(r, 0.82, 0.96); if (y0 < 1) shopMural(a, b, i0, i1); /* a_shopnight2: no shop-front pool under a mural */ const ya = y0, yb = Math.min(y1, y0 + (i1 - i0) * 0.62 + r() * 2);
     const A = [a[0] + ux * i0 + ox * 0.045, a[1] + uz * i0 + oz * 0.045], Bq = [a[0] + ux * i1 + ox * 0.045, a[1] + uz * i1 + oz * 0.045];
     const v0 = V3(A[0], ya, A[1]), v1 = V3(Bq[0], ya, Bq[1]), v2 = V3(Bq[0], yb, Bq[1]), v3 = V3(A[0], yb, A[1]);
     const n = new THREE.Vector3().subVectors(v1, v0).cross(new THREE.Vector3().subVectors(v3, v0));

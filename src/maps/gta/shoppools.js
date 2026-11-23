@@ -10,7 +10,7 @@ export const OLD_ASHOP2 = CYBER || (typeof location !== 'undefined' && /[?&]olda
 export const SHOP_OPEN_P = 0.86, SHOP_MAXU = 20;
 // pools: island list (props.js street-lamp pool mesh, the island already draws that program) and mainland list (strip.js K.pm, the
 // fabGlow program the mainland fabric already draws). Records: x, z, angle, width, depth, y (6 floats, the K.walkPools layout).
-export const SHOPS = { isl: [], ml: [], keys: new Set(), units: [], stats: { edges: 0, units: 0, open: 0, closed: 0, fallbackEdges: 0, fallbackUnits: 0 } };
+export const SHOPS = { isl: [], ml: [], keys: new Set(), units: [], stats: { edges: 0, units: 0, open: 0, closed: 0, fallbackEdges: 0, fallbackUnits: 0, muralUnits: 0 }, byEdge: new Map() };
 const isIsland = (x, z) => x > -60 && x < 370 && Math.abs(z) < 400;
 function h99(seed, e, u) { // integer hash of (seed, edge, unit), stream 99
   let h = Math.imul(Math.round(seed * 1e5) | 0, 0x27d4eb2d) ^ Math.imul(e + 1, 0x165667b1) ^ Math.imul(u + 7, 0x9e3779b1) ^ 99;
@@ -30,7 +30,13 @@ export function shopEdge(style, p, q, len, nBays, seed, e, y0) {
     // glass line, 8.4 m -> about the same visible spill)
     const isl = isIsland(p[0] + dx * ac, p[1] + dz * ac), off = isl ? 0.2 : -0.8, D = isl ? 8.4 : 9.6;
     const cx = p[0] + dx * ac + ox * off, cz = p[1] + dz * ac + oz * off; SHOPS.units.push([cx, cz, on ? 1 : 0, isl ? 1 : 0, +w.toFixed(2), Math.atan2(-dz, dx), y0]);
-    if (on) { SHOPS.stats.open++; (isl ? SHOPS.isl : SHOPS.ml).push(cx, cz, Math.atan2(-dz, dx), w * 0.9, D, Math.max(y0, 0.15) + 0.04); } else SHOPS.stats.closed++; }
+    const ek = `${p[0].toFixed(2)},${p[1].toFixed(2)},${q[0].toFixed(2)},${q[1].toFixed(2)}`; let EL = SHOPS.byEdge.get(ek); if (!EL) SHOPS.byEdge.set(ek, EL = []);
+    const L = isl ? SHOPS.isl : SHOPS.ml; EL.push({ L: on ? L : null, j: on ? L.length : -1, a0: b0 * ww, a1: b1 * ww, u: SHOPS.units.length - 1 });
+    if (on) { SHOPS.stats.open++; L.push(cx, cz, Math.atan2(-dz, dx), w * 0.9, D, Math.max(y0, 0.15) + 0.04); } else SHOPS.stats.closed++; }
   return style + 8 * (1 + mask);
 }
+// region.js murals() paints a mural over part of a side wall, storefront band included (0.4 m up): units mostly under it have no
+// visible window, so their pool is dropped (width 0 = skipped by both fillers) and the unit is marked (units[i][7] = 1)
+export function shopMural(a, b, i0, i1) { if (OLD_ASHOP2) return; const EL = SHOPS.byEdge.get(`${a[0].toFixed(2)},${a[1].toFixed(2)},${b[0].toFixed(2)},${b[1].toFixed(2)}`); if (!EL) return;
+  for (const e of EL) { const ov = Math.min(e.a1, i1) - Math.max(e.a0, i0); if (ov < 0.5 * (e.a1 - e.a0) || SHOPS.units[e.u][7]) continue; SHOPS.units[e.u][7] = 1; SHOPS.stats.muralUnits++; if (e.L) e.L[e.j + 3] = 0; } }
 if (typeof window !== 'undefined' && !OLD_ASHOP2) window.__SHOPS2 = SHOPS; // read-only, for the shop-night tests

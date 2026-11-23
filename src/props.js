@@ -438,7 +438,7 @@ export function buildProps(scene, city, T) {
 // refilled every 25 m moved; the fixed lamp / bollard instances stay in front, so the lamp pools are untouched
 const SHOP_R = 200, _sq = new THREE.Quaternion(), _sY = new THREE.Vector3(0, 1, 0), _sv = new THREE.Vector3(), _ss = new THREE.Vector3(), _sm = new THREE.Matrix4();
 function shopPools(S, p) { const L = SHOPS.isl; if (S.at && S.at[2] === L.length && Math.hypot(p.x - S.at[0], p.z - S.at[1]) <= 25) return; S.at = [p.x, p.z, L.length];
-  const C = []; for (let i = 0; i + 5 < L.length; i += 6) { const d = Math.hypot(L[i] - p.x, L[i + 1] - p.z); if (d < SHOP_R) C.push(d, i); }
+  const C = []; for (let i = 0; i + 5 < L.length; i += 6) { const d = Math.hypot(L[i] - p.x, L[i + 1] - p.z); if (d < SHOP_R && L[i + 3] > 0) C.push(d, i); }
   const ord = []; for (let j = 0; j < C.length; j += 2) ord.push(j); if (ord.length > S.cap) ord.sort((a, b) => C[a] - C[b]); // nearest first when over capacity
   let k = 0; for (const j of ord) { if (k >= S.cap) break; const i = C[j + 1];
     _sm.compose(_sv.set(L[i], L[i + 5], L[i + 1]), _sq.setFromAxisAngle(_sY, L[i + 2]), _ss.set(L[i + 3] / 16, 1, L[i + 4] / 16)); S.m.setMatrixAt(S.nFix + k++, _sm); }
