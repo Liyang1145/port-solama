@@ -30,7 +30,7 @@ import { rolledLights, precompile } from './loadfast.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
-import { OLD, cubeStepper, makeDRS } from './perf.js';
+import { OLD, cubeStepper, makeDRS, releaseCpuAttrs, releasedMB } from './perf.js';
 import { prof, PROF, wrap, profRenderer, profPasses, setScope } from './prof.js'; // perf_debug1: ?prof frame profiler
 import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_verify: test-only ?shotfast (screenshot first frame)
 
@@ -185,7 +185,7 @@ async function load() {
     pick(px, py, w = 1280, h = 720, n = 3) { const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(px / w * 2 - 1, 1 - py / h * 2), camera);
       return rc.intersectObjects(scene.children, true).filter((i) => i.object.visible && i.object.material && !i.object.material.isShaderMaterial || i.object.name).slice(0, n).map((i) => { const pth = []; for (let o = i.object; o && pth.length < 5; o = o.parent) pth.push(o.name || o.type);
         const m = Array.isArray(i.object.material) ? i.object.material[0] : i.object.material; return { path: pth.join('<'), mat: m && (m.name || m.type), color: m && m.color && m.color.getHexString(), dist: +i.distance.toFixed(1), point: i.point.toArray().map((v) => +v.toFixed(2)), inst: i.instanceId, tris: i.object.geometry && i.object.geometry.index ? i.object.geometry.index.count / 3 : 0 }; }); },
-    THREE, // perf_debug1: probes
+    THREE, releasedMB, // perf_debug1: probes
     stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length, ...(CYBER ? { stream: stream.tris() } : { chunks: { ...city.region.stats } }) }; },
   };
 
@@ -203,7 +203,9 @@ async function load() {
     if (!noRender) renderFrame(dt);
     if (PROF) W.profEnd(dt, noRender);
   }
+  let rfN = 0;
   function renderFrame(dt) {
+    if (!CYBER && ++rfN % 60 === 0) releaseCpuAttrs(scene); // perf_debug3: newly streamed chunks too
     if (CYBER) { stream.update(camera.position, 1); if (SNAP) stream.sync(camera.position); } // 霓港: detailed chunks before the mirror pass (wet-road / sea reflections)
     prof.mark('r:pre');
     env.update(dt); prof.mark('r:shadowfit');
@@ -235,7 +237,11 @@ async function load() {
   window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); post.setSize(window.innerWidth, window.innerHeight); });
   document.getElementById('load').style.display = SNAP ? 'none' : 'flex';
   const st = document.getElementById('start'); st.style.display = 'block';
-  st.onclick = () => { document.getElementById('load').style.display = 'none'; game.start(); };
+  // perf_debug3 (?nowarm = old): game.start() spawns the player / traffic / peds whose ~39 shader programs (+ shadow-depth and
+  // mirror variants) were first compiled inside the first gameplay frame (~3 s hitch in SwiftShader). Now: compile them
+  // (parallel where KHR_parallel_shader_compile exists) and draw one hidden warm-up frame while the loading screen is still up.
+  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); renderFrame(0); LT.warm = Math.round(performance.now() - t); };
+  st.onclick = async () => { if (st.dataset.busy) return; st.dataset.busy = 1; game.start(); await warm(); document.getElementById('load').style.display = 'none'; };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
   if (PROF) {
     W.prof = prof;
@@ -256,7 +262,7 @@ async function load() {
   }
   mark('ready'); LT.programs = renderer.info.programs.length;
   W.firstFrame = () => { const t = performance.now(); renderFrame(0); renderer.getContext().readPixels(0, 0, 1, 1, renderer.getContext().RGBA, renderer.getContext().UNSIGNED_BYTE, new Uint8Array(4)); LT.firstFrame = Math.round(performance.now() - t); LT.programs = renderer.info.programs.length; return LT; };
-  if (SNAP) { game.start(true); W.ready = true; return; }
+  if (SNAP) { game.start(true); await warm(); W.ready = true; return; }
   let nf = 0;
   const drs = W.drs = makeDRS((s) => post.setScale(s)); let lastT = performance.now();
   renderer.setAnimationLoop(() => { clock.update(); const now = performance.now(); const raw = now - lastT; lastT = now; drs.tick(raw);

@@ -73,3 +73,18 @@ export function makeDRS(apply) {
     D.scale = +s.toFixed(2); D.cool = 2000; D.log.push([Math.round(performance.now()), D.scale, +D.avg.toFixed(1)]); if (D.log.length > 50) D.log.shift(); apply(D.scale); };
   return D;
 }
+
+// perf_debug3 (?keepgeo = old): the CPU copies of static vertex attributes stayed in the JS heap after the GPU upload
+// (~305 MB of attribute arrays at the gta spawn). Map A only: normal / uv / uv1 / uv2 / color arrays of static, non-skinned,
+// non-instanced meshes are released once uploaded (attribute.onUpload). position / index and every custom attribute (aK fades,
+// landmark position edits) stay, so bounding volumes, collision builders and the code that rewrites attributes are unaffected.
+const DROP = new Set(['normal', 'uv', 'uv1', 'uv2', 'color']); let dropped = 0; const reg = new WeakSet();
+function freeArr() { dropped += this.array.byteLength; this.array = new this.array.constructor(0); }
+export function releaseCpuAttrs(scene) {
+  if (Q.has('keepgeo')) return 0; let n = 0;
+  scene.traverse((o) => { if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || o.morphTargetInfluences) return; const g = o.geometry; if (!g || reg.has(g)) return; reg.add(g);
+    if (Object.keys(g.morphAttributes).length) return; if (!g.boundingSphere) g.computeBoundingSphere(); if (!g.boundingBox) g.computeBoundingBox();
+    for (const k in g.attributes) { const a = g.attributes[k]; if (!DROP.has(k) || a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute || a.usage !== THREE.StaticDrawUsage || !a.array || a.array.length < 3000) continue; a.onUpload(freeArr); n++; } });
+  return n;
+}
+export const releasedMB = () => +(dropped / 1048576).toFixed(1);
