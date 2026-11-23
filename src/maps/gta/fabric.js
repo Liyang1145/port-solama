@@ -555,6 +555,22 @@ float fh12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx +
 float fnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(fh12(i),fh12(i+vec2(1,0)),f.x), mix(fh12(i+vec2(0,1)),fh12(i+vec2(1,1)),f.x), f.y); }
 `;
 // a_houses: seven-segment digit (house numbers) and a 4x4 ordered dither (pool screens), body program only
+// a_shopnight: a shop room behind flat glazing, read along the view ray (same idea as the a_downtown2 lobby): ceiling with troffer rows at
+// 3.0 m, a gondola-shelf line 2.2 m in (aisles every 2.6 m, packed shelves), a pale floor, the back wall 9 m in. Returns a light level
+// (~0.6 average, troffers ~2.6) that scales the glass's night glow; it falls back to the average with the pixel footprint (no shimmer).
+const SHOPIN = `
+vec3 sTint = vec3(1.0); // colour of what the ray hit (muted packaging / a brand band on the back wall)
+float shopIn(vec2 uv0, vec3 dV, vec3 fn, vec2 ft, float sd) {
+  float dn = max(-dot(dV, fn), 0.12 * length(dV)); vec2 pr = vec2(dot(dV.xz, ft), dV.y) / dn;
+  float tC = pr.y > 0.002 ? (3.0 - uv0.y) / pr.y : 99.0, tF = pr.y < -0.002 ? -uv0.y / pr.y : 99.0; float t = min(9.0, min(tC, tF)); float lv;
+  vec2 s2 = uv0 + pr * 2.2; float sx = s2.x / 2.6 + sd * 7.0;
+  if (t > 2.2 && s2.y < 1.65 && fract(sx) < 0.62) { vec2 g = floor(vec2(s2.x / 0.32, s2.y / 0.42)); lv = (0.45 + 0.5 * fh12(g + sd * 13.0)) * (1.0 - 0.6 * step(fract(s2.y / 0.42), 0.12)); t = 2.2; sTint = mix(vec3(1.0), 0.35 + 0.9 * vec3(fh12(g * 1.3 + 2.1), fh12(g + 7.7), fh12(g * 0.7 + sd)), 0.5); }
+  else if (t == tC) { vec2 c = uv0 + pr * tC; lv = 0.42 + 2.2 * step(abs(fract(c.x / 2.4 + sd) - 0.5), 0.2) * step(abs(fract(tC / 2.1) - 0.5), 0.14); }
+  else if (t == tF) { vec2 f = uv0 + pr * tF; lv = 0.62 + 0.12 * step(0.5, fract(f.x / 0.6) + 0.0 * f.y); }
+  else { vec2 b = uv0 + pr * 9.0; lv = 0.78 - 0.3 * step(b.y, 1.9) * step(0.4, fract(b.x / 1.3 + sd)); sTint = mix(vec3(1.0), 0.3 + 0.8 * vec3(fh12(vec2(sd, 1.0)), fh12(vec2(sd, 2.0)), fh12(vec2(sd, 3.0))), step(abs(b.y - 2.35), 0.22)); }
+  lv *= 1.0 - 0.28 * clamp(t / 9.0, 0.0, 1.0); float nr = 1.0 - smoothstep(0.06, 0.3, length(fwidth(vFW))); sTint = mix(vec3(1.0), sTint, nr);
+  return mix(0.66, lv, nr); }
+`;
 const HKFN = `
 float hkSeg(vec2 p, int d){ int m = d==0?63: d==1?6: d==2?91: d==3?79: d==4?102: d==5?109: d==6?125: d==7?7: d==8?127:111; float t = 0.16; float s = 0.0;
   if (p.x < 0.0 || p.x > 1.0) return 0.0;
@@ -583,9 +599,9 @@ function mats(M) {
     s.uniforms.tPl = { value: tPl }; s.uniforms.uNight = U.uNight;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aK; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvK = aK; vFN = normalize((modelMatrix * vec4(normalize(mat3(instanceMatrix) * normal), 0.0)).xyz);' + IVERT);
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH + HKFN)
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH + HKFN + (OLD_ASHOP ? '' : SHOPIN))
       .replace('#include <color_fragment>', `#include <color_fragment>
-  float fk = floor(vK.x + 0.5), fsd = vK.y; if (vK.x < fk - 0.004 && hkBayer(gl_FragCoord.xy + vec2(2.0, 1.0)) < (fk - vK.x) / 0.45) discard; // a_housepolish: kit fade (fraction 0..-0.45)
+  float fk = floor(vK.x + 0.5), fsd = vK.y;${OLD_ASHOP ? '' : ' float fOff = 0.0, fDr = 0.0; if (fsd > 1.5) { fDr = 1.0; fOff = step(3.5, fsd); fsd = fract(fsd); } vec3 fLC = vec3(1.0, 0.72, 0.42);'} if (vK.x < fk - 0.004 && hkBayer(gl_FragCoord.xy + vec2(2.0, 1.0)) < (fk - vK.x) / 0.45) discard; // a_housepolish: kit fade (fraction 0..-0.45)
   vec3 fn = normalize(vFN); float fy = vFW.y - vIB.y; float fGlass = 0.0, fLit = 0.0, fEm = 0.0, fStrip = -1.0; // a_strip: fEm = self-lit (light boxes / lenses), fStrip = shop face class
   vec2 ft = vec2(-fn.z, fn.x); float fu = dot(vFW.xz, ft) + fsd * 37.0;
   vec3 ftex = texture2D(tPl, (abs(fn.y) > 0.5 ? vFW.xz : vec2(fu, vFW.y)) * 0.25).rgb / 0.63;
@@ -661,15 +677,23 @@ function mats(M) {
           float g3 = step(2.3, fy) * step(fy, vIH - 0.06) * step(ax, 1.44) * step(0.04, abs(ax - 0.9)); float g = max(max(g1, g2), g3);
           float bar = inD * step(abs(fy - 1.05), 0.025) * step(leaf, 0.3); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.81, 0.82), bar);
           float hrs = inD * step(abs(ax - 0.62), 0.12) * step(abs(fy - 1.5), 0.1) * step(0.5, fract(fy * 22.0)); // vinyl opening-hours lines
-          fGlass = g * (1.0 - bar) * (1.0 - hrs); fLit = fGlass; diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92), hrs * g); }
-        else if (fk < 16.5) { float e = min(1.0, step(fy, 0.045) + step(vIH - 0.045, fy)); diffuseColor.rgb *= 1.0 - 0.5 * e; fEm = 1.0 - e; } }
+          fGlass = g * (1.0 - bar) * (1.0 - hrs); fLit = fGlass;${OLD_ASHOP ? '' : ' if (fDr > 0.5) { fLit = fGlass * mix(0.40 * mix(0.8, 1.1, smoothstep(0.3, 2.6, fy)), 0.03, fOff); fLC = vec3(0.97, 0.88, 0.76); } /* a_shopnight: door lit with its tenant (open / closed) */'} diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92), hrs * g); }
+        else if (fk < 16.5) { float e = min(1.0, step(fy, 0.045) + step(vIH - 0.045, fy)); diffuseColor.rgb *= 1.0 - 0.5 * e; fEm = 1.0 - e; }${OLD_ASHOP ? '' : `
+        else if (fk > 20.5 && fk < 21.5) { // a_shopnight: strip tenant glazing panel (night only, dithered in with uNight), seed = mullion parity 0.5 + open 0.25 + 0.2 * tone
+          if (hkBayer(gl_FragCoord.xy) > uNight * 1.8 - 0.05) discard;
+          float pPar = step(0.5, fsd), pS = fsd - 0.5 * pPar, pOpen = step(0.25, pS), pT = clamp((pS - 0.25 * pOpen) / 0.2, 0.0, 1.0); float gy = fy + 0.45;
+          float m = fract(lu / 1.5 + 0.5 * pPar); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tb = step(abs(gy - 2.36), 0.03);
+          float frm = max(mul, tb); fGlass = 1.0 - frm; diffuseColor.rgb = mix(vec3(0.20, 0.20, 0.21), vec3(0.08, 0.11, 0.14), fGlass);
+          float lev = (0.24 + 0.12 * pT) * shopIn(vec2(lu, gy), vFW - cameraPosition, fn, ft, pT);
+          fLit = mix(0.035 * smoothstep(2.9, 1.2, gy), lev, pOpen); // closed: only a dim back-of-house light
+          fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.58, fract(pT * 7.13))) * mix(vec3(1.0), sTint, pOpen); }`} }
       else { float bd = 1.0 - step(0.012, abs(fract(lu / 0.15 + 0.5) - 0.5) * 0.15); float rail = step(vIH - 0.12, fy) + step(abs(fy - 0.3), 0.05); diffuseColor.rgb *= mix(1.0, (1.0 - 0.3 * bd) * (1.0 - 0.12 * clamp(rail, 0.0, 1.0)), fNr); }
     } else if (fk < 1.5 && vK.x - fk > 0.02) { // a_strip: strip-mall shop, the lot-side normal angle rides in the fraction (0.05..0.45)
       float th = (vK.x - fk - 0.05) / 0.4 * 6.2831853; float fr = dot(fn.xz, vec2(cos(th), sin(th))); float lu = dot(vFW.xz - vIB.xz, ft);
       float jt = step(abs(fract(lu / 6.0 + 0.5) - 0.5) * 6.0, 0.012); float cap = step(vIH - 0.18, fy), rev = step(abs(fy - (vIH - 0.62)), 0.03);
       if (fr > 0.7) { fStrip = 1.0; // storefront: tile bulkhead, glass 0.45-3.0 m on a 1.5 m mullion grid (the kit's piers / doors sit on it), transom bar, stucco above the canopy
         float m = fract(lu / 1.5); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tb = step(abs(fy - 2.36), 0.03);
-        float gl = step(0.45, fy) * step(fy, 3.0) * (1.0 - mul) * (1.0 - tb); fGlass = gl; fLit = gl * 0.85 * step(0.25, fh12(vec2(floor(lu / 4.5), fsd)));
+        float gl = step(0.45, fy) * step(fy, 3.0) * (1.0 - mul) * (1.0 - tb); fGlass = gl; ${OLD_ASHOP ? 'fLit = gl * 0.85 * step(0.25, fh12(vec2(floor(lu / 4.5), fsd)));' : 'fLit = gl * 0.28 * shopIn(vec2(lu, fy), vFW - cameraPosition, fn, ft, fsd) * step(0.3, fh12(vec2(floor(lu / 4.5), fsd))); fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.5, fh12(vec2(floor(lu / 4.5), fsd * 3.0)))) * sTint;'} // a_shopnight: level ~ island shop rooms, brighter under the ceiling, cool / warm (near: the tenant panels cover it)
         float frm = step(0.42, fy) * step(fy, 3.04) * max(mul, tb); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.20, 0.20, 0.21), frm);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.32, 0.30) * (0.9 + 0.1 * step(0.5, fract(lu / 0.3))), step(fy, 0.42));
         diffuseColor.rgb *= (1.0 - 0.25 * rev) * (1.0 + 0.06 * cap); }
@@ -678,7 +702,7 @@ function mats(M) {
         diffuseColor.rgb *= (1.0 - 0.2 * jt) * (1.0 - 0.15 * (1.0 - smoothstep(0.0, 0.6, fy))) * (1.0 - 0.25 * rev); }
       else { fStrip = 3.0; diffuseColor.rgb *= (1.0 - 0.2 * jt) * (1.0 - 0.25 * rev) * (1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.45, fy))); }
     } else if (fk < 1.5) { // retail: storefront glazing band with mullions, painted sign band, parapet line
-      float mull = step(0.06, fract(fu / 3.0)); float gl = step(0.35, fy) * step(fy, 3.3) * mull; fGlass = gl; fLit = gl * 0.8;
+      float mull = step(0.06, fract(fu / 3.0)); float gl = step(0.35, fy) * step(fy, 3.3) * mull; fGlass = gl; ${OLD_ASHOP ? 'fLit = gl * 0.8;' : 'float rb = floor(fu / 9.0); fLit = gl * (0.24 + 0.1 * fh12(vec2(rb, fsd * 7.0))) * shopIn(vec2(fu, fy), vFW - cameraPosition, fn, ft, fsd + rb * 0.37) * step(0.3, fh12(vec2(rb, fsd * 5.0 + 1.7))); fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.5, fh12(vec2(rb, fsd * 3.0)))) * sTint;'} // a_shopnight: 9 m shop bays, ~70 % open at night
       float sb = step(3.65, fy) * step(fy, 4.75) * step(0.35, fract(fu / 47.0 + fsd));
       vec3 sc = mix(vec3(0.62, 0.16, 0.12), vec3(0.14, 0.34, 0.52), step(0.5, fh12(vec2(floor(fu / 47.0 + fsd), fsd))));
       diffuseColor.rgb = mix(diffuseColor.rgb, sc, sb * 0.85); diffuseColor.rgb *= 1.0 - step(vIH - 0.35, fy) * 0.18;
@@ -770,7 +794,7 @@ function mats(M) {
   vec3 fglassC = mix(vec3(0.07, 0.10, 0.13), vec3(0.14, 0.18, 0.22), fh12(vec2(fsd, fk)));
   diffuseColor.rgb = mix(diffuseColor.rgb, fglassC, fGlass);`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.12, fGlass); if (fk > 5.5 && fk < 6.5) roughnessFactor = 1.0;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * vec3(1.0, 0.72, 0.42) * 1.6 + fEm * uNight * diffuseColor.rgb * 1.1;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * ' + (OLD_ASHOP ? 'vec3(1.0, 0.72, 0.42)' : 'fLC') + ' * 1.6 + fEm * uNight * diffuseColor.rgb * 1.1;');
   });
   const roof = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }), 'fabRoof', (s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
@@ -862,6 +886,8 @@ function inst(geo, mat, n, fill, extra) {
 // into one saturated orange carpet on the dense downtown / arterial grid.
 const _QN = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 export const OLD_ANIGHT = _QN.has('oldanight');
+// a_shopnight: storefront night pass (strip-mall tenants open / closed, glass level + colour, walk / canopy light pools); ?oldashop = before
+export const OLD_ASHOP = _QN.has('oldashop');
 export const FAB_GLOW = OLD_ANIGHT ? { d: 24, c: null } : { d: 17, c: [0.92, 0.57, 0.29] };
 export const LOTZ = { a: new Float32Array(28 * 4), b: new Float32Array(28 * 4) };
 export function fabKit() { return { box: geos().box, body: MATS && MATS.body, flat: geos().flat, glow: MATS && MATS.glow }; }

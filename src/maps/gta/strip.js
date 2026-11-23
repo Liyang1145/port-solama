@@ -19,7 +19,7 @@
 //    InstancedMesh of text decals on the 'fabCar' program: no new shader program. Colliders for every standing piece.
 //  &nostrip switches the layer off, &stripaudit counts / checks everything eagerly (region.stripAudit).
 import * as THREE from 'three';
-import { fabKit, LOTZ, OLD_ANIGHT } from './fabric.js';
+import { fabKit, LOTZ, OLD_ANIGHT, OLD_ASHOP } from './fabric.js';
 import { prep } from '../../mats.js';
 import { U } from '../../env.js';
 import { raster, FONT } from './raster.js';
@@ -30,6 +30,11 @@ const AUDIT = Q.has('stripaudit');
 const RAD = 110, NEAR = 50, FADE = 14, FADE1 = 8, CAP = 2600, NF = 21, TCAP = 9000, TXT_R = 80, TXT_RL = 125, TFADE = 14, TMOVE = 1.5; // a_stripfix: text dissolves over its last 14 m
 const hh = (s, k) => { const x = Math.sin(s * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
 const axes = (a) => [[Math.cos(a), -Math.sin(a)], [Math.sin(a), Math.cos(a)]];
+// a_shopnight: is a tenant open at night? Its own hash sub-stream (k 97, never drawn before; the layout's draws are untouched), with
+// a closing rate by trade: late trades (food, pharmacy, convenience, gym, liquor) mostly open, office-hours trades mostly closed.
+const LATE = new Set(['椰林药房', '鲜果冰沙', '老街面馆', '好运便利', '小岛咖啡', '椰子甜品', '海盐寿司', '活力健身', '街角披萨', '渔夫海鲜', '日落酒铺', '椰香奶茶']);
+const DAYT = new Set(['阳光牙科', '南湾保险', '东湾税务', '湾区房产', '安心诊所', '速印快印', '顺风快递', '海港五金', '鹈鹕洗车', '彩虹干洗', '晨光书店']);
+const shopOpen = (name, seed, i) => hh(seed * 5.17 + i * 0.731 + 0.29, 97) >= (LATE.has(name) ? 0.12 : DAYT.has(name) ? 0.85 : 0.45);
 const fangP = (P, a, b) => { const p = P(a, b), q = P(a + 1, b); return Math.atan2(-(q[1] - p[1]), q[0] - p[0]); };
 class Grid { constructor(C) { this.C = C; this.m = new Map(); }
   add(o, x0, z0, x1, z1) { const C = this.C; for (let i = Math.floor(x0 / C); i <= Math.floor(x1 / C); i++) for (let j = Math.floor(z0 / C); j <= Math.floor(z1 / C); j++) { const k = i * 65536 + j; let l = this.m.get(k); if (!l) this.m.set(k, l = []); l.push(o); } }
@@ -74,7 +79,7 @@ function frameAt(O, a, flip) { const [U, V] = axes(a); const N = flip ? [-V[0], 
 // ---------------------------------------------------------------- prep (before attachFabric) ----
 export function prepStrip(fab) {
   if (STRIP_OFF || !fab || !fab.strips || !fab.strips.length) return null; const T0 = performance.now();
-  const K = { lotPools: [], units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], raise: new Grid(16), stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
+  const K = { lotPools: [], walkPools: [], units: [], ug: new Grid(64), signs: [], sg: new Grid(64), cols: [], raise: new Grid(16), stats: { bands: 0, shops: 0, tenants: 0, doors: 0, signs: 0, columns: 0, piers: 0, rtu: 0, enclosures: 0, poles: 0, pylons: 0, gas: 0, pads: 0, carsDropped: 0, refused: {} } };
   const S = K.stats; const why = (k) => { S.refused[k] = (S.refused[k] || 0) + 1; };
   // test grids from the final records (bodies, trunks, arterial sidewalks, parked cars). a_stripfix: filed lazily per 640 m
   // chunk (only the chunks around a band, when that band is built); the record arrays are kept by reference here because
@@ -225,9 +230,14 @@ export function prepStrip(fab) {
       // per tenant: entrance, light-box sign, rooftop unit
       for (let i = 0; i < bounds.length - 1; i++) { const m0 = bounds[i], m1 = bounds[i + 1], nm = m1 - m0; if (nm < 3) continue; S.tenants++; const ts = hh(seed * 3.1 + i, 5);
         const ni = sh._ni[i], nmT = SHOPS[ni]; // a_stripfix: named in phase A (running count over the bands)
+        const op = OLD_ASHOP || shopOpen(nmT, seed, i); const sc = (m0 + m1) * 0.75; // a_shopnight
         if (nm >= 4) { const jj = nm >= 6 ? (ts < 0.5 ? 2 : nm - 2) : 2; const sd = (m0 + jj) * 1.5; const fc = ts < 0.6 ? [0.22, 0.20, 0.18] : [0.66, 0.67, 0.68];
-          cb(u.F, sd, 0.045, 0, 3.0, 3.0, 0.09, fc, 15); S.doors++; }
-        const sc = (m0 + m1) * 0.75; const wS = Math.min(nm * 1.5 * 0.66, 6.5), hS = 0.74; const st = (ni * 7 + (hh(seed * 5.7 + i, 9) < 0.25 ? 3 : 0)) % SIGNST.length; // one look per shop name (a chain reads the same), a few variants
+          if (OLD_ASHOP) cb(u.F, sd, 0.045, 0, 3.0, 3.0, 0.09, fc, 15); else { const q = F2.W(sd, 0.045); box(u.F, q[0], 0, q[1], 3.0, 3.0, 0.09, F2.a, fc, 15, seed + (op ? 2 : 4)); } S.doors++; }
+        if (!OLD_ASHOP) { // a_shopnight: tenant glazing panel 1.5 cm proud of the glass (night only; open = lit at the tenant's own level / tone, closed = dark)
+          const tone = hh(seed * 2.71 + i * 0.37 + 0.11, 98); const q = F2.W(sc, 0.015); box(u.F, q[0], 0.45, q[1], nm * 1.5, 2.55, 0.02, F2.a, [0.1, 0.12, 0.14], 21, (nm & 1 ? 0.5 : 0) + (op ? 0.25 : 0) + tone * 0.199);
+          S.open = (S.open || 0) + (op ? 1 : 0); S.closed = (S.closed || 0) + (op ? 0 : 1);
+          if (op) { const w = F2.W(sc, 1.9); K.walkPools.push(w[0], w[1], F2.a, nm * 1.5 * 0.92, 4.4, 0.19); } } // shop light on the front walk
+        const wS = Math.min(nm * 1.5 * 0.66, 6.5), hS = 0.74; const st = (ni * 7 + (hh(seed * 5.7 + i, 9) < 0.25 ? 3 : 0)) % SIGNST.length; // one look per shop name (a chain reads the same), a few variants
         cb(u.F, sc, 3.19, 3.18, wS, hS, 0.16, lin(SIGNST[st][0]), 16); S.signs++;
         const p = F2.W(sc, 3.27 + 0.004); const sg = newSign(p[0], p[1], TXT_R); const rs = nameRas(nmT, st);
         if (rs) { const wT = wS * 0.92, hT = Math.min(hS * 0.8, wT * rs.H / rs.W); print(sg, rs, V3(p[0], 3.18 + hS / 2, p[1]), UP, V3(N[0], 0, N[1]), wT * (hT / (wT * rs.H / rs.W)), hT); }
@@ -289,6 +299,7 @@ export function prepStrip(fab) {
         const gi = Math.floor(hh(seed, 1) * GAS.length); const [gn, gbg, gfg, gc] = GAS[gi]; const sgn = gasEnd === 0 ? 1 : -1; // s toward the band interior
         // canopy 26 x 11 over b 7..18 (t -5.8..5.2)
         const tc = -0.3; cb(u.S, 0, tc, 5.1, 26, 0.4, 11, [0.93, 0.93, 0.91]);
+        if (!OLD_ASHOP) for (const so of [-8.6, 0, 8.6]) { const w = fr.W(so, tc); K.walkPools.push(w[0], w[1], fr.a, 13.5, 12.5, 0.07); } // a_shopnight: the lit canopy's light on the apron
         for (const q of [-1, 1]) { cb(u.S, 0, tc + q * 5.5, 5.0, 26.3, 0.95, 0.3, WHT); cb(u.S, q * 13.0, tc, 5.0, 0.3, 0.95, 11.3, WHT); cb(u.F, 0, tc + q * 5.66, 5.3, 26.32, 0.3, 0.02, gc); cb(u.F, q * 13.16, tc, 5.3, 0.02, 0.3, 11.32, gc); }
         for (let i = 0; i < 6; i++) cb(u.F, -10 + i * 4, tc + ((i & 1) ? 2.4 : -2.4), 5.04, 1.3, 0.06, 0.62, WHT, 17);
         for (const so of [-8.5, 0, 8.5]) { const p = fr.W(so, tc); const R = { x: p[0], z: p[1], a: ang, hl: 0.7, hw: 3.85 };
@@ -395,7 +406,7 @@ export function attachStrip(K, scene) { if (!K) return null; const { box: G, bod
   // ?oldanight: not created.
   { const { flat: GF, glow: GM } = fabKit(); if (!OLD_ANIGHT && GF && GM) {
       const mk = (cap) => { const m = new THREE.InstancedMesh(GF, GM, cap); m.renderOrder = 2; m.castShadow = false; m.receiveShadow = false; m.count = 0; m.visible = false; scene.add(m); return m; };
-      K.pm = mk(256); K.pm.userData.at = null; } }
+      K.pm = mk(OLD_ASHOP ? 256 : 512); K.pm.userData.at = null; } }
   K.last = null; K.lastT = null; K.info = { units: 0, boxes: 0, tris: 0, rects: 0 }; K.stats.attachMs = Math.round(performance.now() - T0); return K; }
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attributes.aK.array, sg = K.segs; let lo = 1e9, hi = -1; K.lastF = [p.x, p.z];
@@ -407,9 +418,11 @@ function fadeStrip(K, p, fresh = false) { const m = K.mesh, A = m.geometry.attri
 // the camera (refilled every 25 m moved), so away from the strips it is empty / hidden and no view draws (or compiles) it for nothing.
 const LOT_D = 22, LOT_R = 420;
 function putPool(A, k, x, z, a, sx, sz, y) { const c = Math.cos(a), s = Math.sin(a), j = k * 16; A.fill(0, j, j + 16); A[j] = c * sx; A[j + 2] = -s * sx; A[j + 5] = 1; A[j + 8] = s * sz; A[j + 10] = c * sz; A[j + 12] = x; A[j + 13] = y; A[j + 14] = z; A[j + 15] = 1; }
-function nightPools(K, p) { const pm = K.pm, L = K.lotPools, at = pm.userData.at;
-  if (!at || at[2] !== L.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length]; let k = 0; const A = pm.instanceMatrix.array;
+const WALK_R = 200; // a_shopnight: shop-front / canopy pools within 200 m (after the lot pools; the mesh holds 512 since this pass)
+function nightPools(K, p) { const pm = K.pm, L = K.lotPools, Wp = K.walkPools, at = pm.userData.at, CP = OLD_ASHOP ? 256 : 512;
+  if (!at || at[2] !== L.length + Wp.length || Math.hypot(p.x - at[0], p.z - at[1]) > 25) { pm.userData.at = [p.x, p.z, L.length + Wp.length]; let k = 0; const A = pm.instanceMatrix.array;
     for (let i = 0; i + 2 < L.length && k < 256; i += 3) if (Math.hypot(L[i] - p.x, L[i + 1] - p.z) < LOT_R) putPool(A, k++, L[i], L[i + 1], L[i + 2], LOT_D, LOT_D, 0.07);
+    for (let i = 0; i + 5 < Wp.length && k < CP; i += 6) if (Math.hypot(Wp[i] - p.x, Wp[i + 1] - p.z) < WALK_R) putPool(A, k++, Wp[i], Wp[i + 1], Wp[i + 2], Wp[i + 3], Wp[i + 4], Wp[i + 5]);
     pm.count = k; if (k) { pm.instanceMatrix.needsUpdate = true; pm.computeBoundingSphere(); } }
   pm.visible = U.uNight.value > 0.03 && pm.count > 0; }
 export function updateStrip(K, cam) { if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh, tm = K.tmesh;
