@@ -268,6 +268,14 @@ function applyEdits2(src, E) { for (const n in E) { const inc = `#include <${n}>
 function guardOf(f, stage) { const k = (UBF[f] || '--').replace(/./, (c) => (AUTOI.has(f) ? 'i' : c)); const c = []; if (k[0] === 'i') c.push('defined( EU_INST )'); else if (k[0] === 'm') c.push('!defined( EU_INST )'); if (stage === 'f') { if (k[1] === 'a') c.push('defined( USE_ALPHATEST )'); else if (k[1] === 'n') c.push('!defined( USE_ALPHATEST )'); } return c.join(' && '); }
 function gwrap(g, code) { return g ? `\n#if ${g}\n${code}\n#endif` : '\n' + code; }
 
+// perf_debug6: cross-hook duplicate check for buildUber's declaration pass (see there). true = already declared at or before (n, j)
+const OLDX = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldxdedup');
+export const xdedupStats = { reused: 0, moved: 0 };
+function xdup(order, D, pend, n, j, s) { const pos = (h, k) => order.indexOf(h) * 2 + k; const me = pos(n, j);
+  for (const h in D) for (const k of [0, 1]) { const L = D[h][k]; const i = L.findIndex((x) => nrm(x) === s); if (i < 0) continue;
+    if (pos(h, k) <= me) { xdedupStats.reused++; return true; } L.splice(i, 1); xdedupStats.moved++; return false; }
+  for (const a of pend) if (nrm(a[2]) === s && (a[0] !== n || a[1] !== j) && pos(a[0], a[1]) <= me) { xdedupStats.reused++; return true; }
+  return false; }
 function buildUber(cls) {
   if (UBS[cls]) return UBS[cls]; const bit = cls === 'u' ? 1 : 2;
   const L = THREE.ShaderLib.physical; const VN = incs(L.vertexShader), FN = incs(L.fragmentShader); const PV = probe(VN), PF = probe(FN);
@@ -286,6 +294,10 @@ function buildUber(cls) {
       const add = { VD: [], FD: [] }; const nn = new Map(); let samp = 0, attr = 0, vary = 0;
       for (const [E, D, tag] of [[ev, B.VD, 'VD'], [ef, B.FD, 'FD']]) for (const n in E) { if (!isDecl(n)) continue;
         for (const j of [0, 1]) for (const st of splitTop(stripC(E[n][j]))) { const s = nrm(st); const have = (D[n] && D[n][j].some((x) => nrm(x) === s)) || add[tag].some((a) => a[0] === n && a[1] === j && nrm(a[2]) === s); if (have) continue;
+          // perf_debug6 (?oldxdedup = old): the same statement already declared by another member in a different global hook of
+          // this stage was emitted twice (GLSL 'redefinition' -> invalid program). Earlier (or same) position: reuse it; later
+          // position: move it up here (dropped from the later hook, added in this one).
+          if (!OLDX && xdup(tag === 'VD' ? VN : FN, D, add[tag], n, j, s)) continue;
           for (const nm of declNames(st)) { const o = B.names.get(nm) || nn.get(nm); if (o !== undefined && o !== s && !(nm.startsWith('f:') && false)) throw new Error('conflict ' + nm); nn.set(nm, s); }
           if (/^uniform\s/.test(s) && /\bsampler\w*\b/.test(s)) samp += declNames(st).length;
           if (/^attribute\s/.test(s)) attr += declNames(st).length;
