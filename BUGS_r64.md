@@ -63,3 +63,15 @@ cyber 图的真人场景本轮未跑完（时间/内存），仅跑回归 B。
 
 daynight：开跑约 10 s 被沙箱 OOM 杀（同 #3/#10）；session3min / cyber 真人场景：本轮未跑。
 回归：A plans/r5_regress.json 11/11，PAGEERROR 0；B plans/r6_cyber_smoke.json 7/7，PAGEERROR 0（missions 第一次失败、重试通过，见 #11）。
+
+## perf_debug5 更新（同分支，详见 /workspace/work/patches/perf_debug5.md）
+回归：A plans/r5_regress.json **11/11**、B plans/r6_cyber_smoke.json **7/7**，PAGEERROR 0（后台运行器 tools/bg.sh，shots/pd5/A、B）。
+
+| # | 状态 | 问题 | 归属 |
+|---|---|---|---|
+| 7（处理） | 已摊开 | 瞬移尖峰定位：第 1 帧 r:sprobe 244 ms（探针面里同步编译 2 个新程序 + 上传 2.9 MB）+ detail.update 67 ms（bldgdetail 一整格同帧生成）。改：region.gate（新网格隐藏→compileAsync / 每帧 ≤1 个链接→再显示）+ bldgdetail 3 ms 分片（?oldtpwarm）。(−300,200) 最坏帧 sprobe+region 312→109 ms，新程序每帧 ≤1 | Hark |
+| 3（更新） | 部分解决 | JS 堆 1027→803 MB：索拉纳港 World 桶 JS 数组构建后不丢（geom 175.7 MB + quad 35 MB），buildStreet 返回闭包保住 4 个桶（77 MB）→ 构建后清空（?keepjs）。剩余无单一大头（≤16 MB/项） | Hark |
+| 12（新，已修） | 已修 | marina 浮码头材质在 envprog2 合并程序上再声明 `uniform float uTime` → 'uTime : redefinition'，瞬移到 (−300,200) 一带时程序无效（?oldmarinadecl） | Hark |
+| 13（新，已修） | 已修 | GLSL smoothstep(edge0>edge1) 32 处（规范未定义）→ 1.0-smoothstep(lo,hi,x)，数学等价 | Hark |
+| 14（新） | 待查 | A police 回归：第二、三段 crime(2,'test') 未让通缉生效（escalated 0 / 3000 帧，loseFrames 0），清通缉 200 帧后仍有 5 警车 6 警察 + 直升机；perf_debug3 同测正常（3 / 1921）。只跑逻辑帧，与渲染改动无关，疑随机/状态残留 | GPT |
+| 15（新） | 低 | 探针远景 LOD（?oldsprobelod）只作用于远西大陆 34 个 region 区块，出生点/(−300,200) 无收益；剩余探针三角形来自 fabric/houses/downtown 城市级合并网格与实例集 | Hark |
