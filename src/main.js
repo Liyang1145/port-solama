@@ -17,13 +17,20 @@ import { CYBER, MAP } from './mapsel.js';
 import { POI, MISSION_STARTS } from './mapdata.js';
 // r6.0 map 霓港 (cyberpunk): streamed districts, wild nature, neon night (src/maps/cyber/)
 import { Stream } from './maps/cyber/stream.js';
+import { rolledLights, precompile } from './loadfast.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
 
+// loadtime: staged boot timing (ms since navigation start) -> window.__LT, shown on the load screen and in the console
+const LT = window.__LT = { marks: [], t: {} };
+let ltPrev = performance.now();
+function mark(name) { const n = performance.now(); LT.marks.push([name, Math.round(n - ltPrev), Math.round(n)]); LT.t[name] = Math.round(n - ltPrev); ltPrev = n; }
+mark('html+bundle');
 const Q = new URLSearchParams(location.search);
 const SNAP = Q.has('snap');
 if (SNAP) document.body.classList.add('snap');
+if (!Q.has('unrolled')) rolledLights(); // loadtime: lit shaders keep a real light loop (A/B: ?unrolled)
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SNAP });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.has('dpr') ? +Q.get('dpr') : 1.5));
@@ -52,16 +59,18 @@ async function load() {
   // publishing hosts may keep assets/ or flatten every file next to index.html: try assets/ first, then the bare name
   const loadTex = (f) => new Promise((res, rej) => tl.load(AP(f), res, undefined, () => (window.__A && window.__A[f]) ? rej(new Error(f)) : tl.load(f, res, undefined, () => rej(new Error('missing ' + f)))));
   await Promise.all(texList.map((f) => loadTex(f).then((t) => { T[f.replace(/\.(jpg|png)$/, '')] = t; tick(); })));
+  mark('textures');
   const gl = new GLTFLoader(); gl.setMeshoptDecoder(MeshoptDecoder);
   const G = {};
   await Promise.all(Object.entries(glbList).map(([k, f]) => gl.loadAsync(AP(f)).catch(() => gl.loadAsync(f)).then((g) => { G[k] = g; tick(); })));
+  mark('glb');
   try { await document.fonts.load('40px Anton'); } catch (e) { }
   return { T, G };
 }
 
 (async function boot() {
   const { T, G } = await load();
-  await charLodReady;
+  await charLodReady; mark('font+simplifier');
   const env = new Env(renderer, scene, camera, { day: T.sky_day, golden: T.sky_golden, sunset: T.sky_sunset, dusk: T.sky_dusk });
   setCSM(env.csm, Math.min(8, renderer.capabilities.getMaxAnisotropy()));
   simpleMats(T);
@@ -69,18 +78,22 @@ async function load() {
   if (Q.has('nowater')) water.mesh.visible = false;
   M.building = buildingMaterial(T);
   M.road = roadMaterial(T, water.shared);
-  const city = buildCity(scene, M, T);
+  mark('env+mats+water');
+  const city = buildCity(scene, M, T); mark('buildCity');
   const meshes = city.world.build(scene, M, { neon: { cast: false }, road: { cast: false }, sidewalk: { cast: false }, pavers: { cast: false }, grass: { cast: false }, land: { cast: false }, landc: { cast: false }, sand: { cast: false }, glassRail: { cast: false } });
   let stream = null, nature = null, neon = null;
   if (CYBER) { water.setBed(bedTexture(city.bedH)); stream = new Stream(scene, M, city.parcels); city.stream = stream; }
+  mark('world.build+stream');
   addStreetTrees(city);
   if (!CYBER) city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
   const veg = buildVegetation(scene, city, T);
   if (CYBER) nature = buildNature(scene, city, T, city.wild);
+  mark('trees+region+veg+nature');
   const props = buildProps(scene, city, T);
   buildFurniture(scene, city, G);
   const street = buildStreet(scene, city); const shopSigns = buildShopSigns(scene, city);
   if (CYBER) neon = buildNeon(scene, city);
+  mark('props+furniture+street+neon');
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
   post.shaftLight = env.sunFar; post.shaft = U.uShaft.value; // light2 volumetric sun shafts (far cascade)
 
@@ -106,10 +119,15 @@ async function load() {
     sprobe.cam.update(renderer, scene); if (pl) pl.visible = vis;
     const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0);
   };
+  mark('post+probes');
   const game = new Game({ renderer, scene, camera, env, city, G, T, props, Q, SNAP });
   let hour = Q.has('hour') ? +Q.get('hour') : CYBER ? 21.6 : 18.3; // r6.0: 霓港 opens at night
-  env.setHour(hour, true);
-  probe.update(); probe.hour = hour;
+  env.setHour(hour, true); mark('game');
+  const lp = document.querySelector('#load p'); const lp0 = lp ? lp.innerHTML : '';
+  const pre = (all) => precompile(renderer, scene, camera, { rt: post.composer.renderTarget1, all, onProgress: (d, n) => { lbar.style.width = (100 * d / Math.max(1, n)) + '%'; if (lp) lp.innerHTML = '正在准备画面 ' + d + ' / ' + n; } });
+  if (!Q.has('noprecompile')) { LT.precompile = await pre(false); mark('precompile'); } // loadtime: what the first frames draw, in parallel
+  probe.update(); probe.hour = hour; mark('probe(first compile)');
+  if (!Q.has('noprecompile')) { LT.precompile2 = await pre(false); if (lp) lp.innerHTML = lp0; mark('precompile(envmap variants)'); }
 
   const W = window.__G = {
     game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, poi: POI, missionStarts: MISSION_STARTS, stream, nature, neon,
@@ -163,7 +181,14 @@ async function load() {
   const st = document.getElementById('start'); st.style.display = 'block';
   st.onclick = () => { document.getElementById('load').style.display = 'none'; game.start(); };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
+  mark('ready'); LT.programs = renderer.info.programs.length;
+  W.firstFrame = () => { const t = performance.now(); renderFrame(0); renderer.getContext().readPixels(0, 0, 1, 1, renderer.getContext().RGBA, renderer.getContext().UNSIGNED_BYTE, new Uint8Array(4)); LT.firstFrame = Math.round(performance.now() - t); LT.programs = renderer.info.programs.length; return LT; };
   if (SNAP) { game.start(true); W.ready = true; return; }
-  renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), 1 / 20); frame(dt); });
+  let nf = 0;
+  renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), 1 / 20); frame(dt);
+    if (++nf === 1) { mark('first frame'); LT.programs = renderer.info.programs.length; console.log('[loadtime]', JSON.stringify(LT));
+      // loadtime: then the hidden rest (far LOD, streamed chunks, night props) in the background, only where it cannot block
+      if (!Q.has('noprecompile') && renderer.extensions.get('KHR_parallel_shader_compile')) setTimeout(() => precompile(renderer, scene, camera, { rt: post.composer.renderTarget1, all: true }).then((r) => { LT.precompileBg = r; }), 1500);
+    } });
   W.ready = true;
 })().catch((e) => { console.error(e); document.querySelector('#load p').textContent = /WebGL/i.test(e.message) ? '无法创建 WebGL2 画面：请用开启了硬件加速的 Chrome / Edge / Safari 打开' : '载入失败: ' + e.message; });

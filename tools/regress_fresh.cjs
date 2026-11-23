@@ -8,7 +8,7 @@ const types = { '.html': 'text/html', '.js': 'text/javascript', '.jpg': 'image/j
 const srv = http.createServer((q, s) => { const p = path.join(root, decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': types[path.extname(p)] || 'application/octet-stream' }); s.end(d); }); });
 srv.listen(0, async () => {
   const port = srv.address().port; let perr = 0;
-  const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', `--window-size=${W},${H}`] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', `--window-size=${W},${H}`] });
   for (const s of plan.shots) {
     const ctx = await b.newContext({ viewport: { width: W, height: H } }); const p = await ctx.newPage(); p.setDefaultTimeout(1200000);
     p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', s.name, e.message); });
