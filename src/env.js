@@ -121,7 +121,7 @@ void main(){
   vec3 c = mix(dec(tA, uv), dec(tB, uv), mixAB) * skyScale;
   // stars at night
   if (uNightK > 0.0 && d.y > 0.0 && envMode < 0.5) { vec3 q = d*420.0; vec3 id = floor(q); float h = h21(id.xy+id.z*7.13);
-    float st = step(0.9965, h) * smoothstep(0.5, 0.0, length(fract(q)-0.5)); c += vec3(0.8,0.85,1.0)*st*uNightK*(0.5+h21(id.yz)*2.0)*smoothstep(0.0,0.25,d.y); }
+    float st = step(0.9965, h) * (1.0 - smoothstep(0.0, 0.5, length(fract(q)-0.5))); c += vec3(0.8,0.85,1.0)*st*uNightK*(0.5+h21(id.yz)*2.0)*smoothstep(0.0,0.25,d.y); }
   float cs = dot(d, uSunDir);
   if (envMode < 0.5) {
     c += uSunCol * (smoothstep(0.99993, 0.99997, cs) * 22.0);  // sun disc (r6.1: 60 -> 22; the bloom of a 60x disc whited out backlit dunes/towers)
@@ -146,9 +146,9 @@ void main(){
   }
   // r6.1: IBL lower hemisphere = sun + sky light bounced off the ground (warm sand / stucco on 索拉纳港, wet grey concrete on 霓港),
   // so shadowed walls, eyebrow soffits and the undersides of awnings get a warm fill instead of a flat blue-grey
-  if (envMode > 0.5 && d.y < 0.0) c = mix(c, groundC, smoothstep(0.0, -0.15, d.y));
+  if (envMode > 0.5 && d.y < 0.0) c = mix(c, groundC, (1.0 - smoothstep(-0.15, 0.0, d.y)));
   // r6.1 view below the horizon beyond the far water edge (aerials): continue the sea into the haze instead of the panorama's ground
-  if (envMode < 0.5 && d.y < 0.0) { vec3 sea = mix(fogC * vec3(0.55, 0.66, 0.78), fogC, 0.5) + fogSunC * pow(max(cs, 0.0), 7.0) * 0.4; c = mix(c, sea, smoothstep(0.0, -0.03, d.y)); }
+  if (envMode < 0.5 && d.y < 0.0) { vec3 sea = mix(fogC * vec3(0.55, 0.66, 0.78), fogC, 0.5) + fogSunC * pow(max(cs, 0.0), 7.0) * 0.4; c = mix(c, sea, (1.0 - smoothstep(-0.03, 0.0, d.y))); }
   // v4.5 cyberpunk city glow: magenta light pollution hugging the horizon, cyan higher up
 ${CYBER ? `if (uNightK > 0.0) { float yy = max(d.y, 0.0); c += uNightK * (vec3(0.50, 0.06, 0.40) * exp(-yy * 7.0) * 0.07 + vec3(0.04, 0.20, 0.30) * exp(-yy * 2.2) * 0.022); }` : ''}
   c = min(c, vec3(48.0)); // r6.1 cap so the sun never floods the bloom chain

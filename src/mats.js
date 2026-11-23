@@ -2,18 +2,39 @@
 import * as THREE from 'three';
 import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
+import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
+import { envReg, envPatch, envFamily, envMerger, envUberWrap, OLDENV, OLDENV2, ENVDBG } from './envprog.js'; // b_envprog: merged environment programs
+import { OLD_ASHOP2 } from './maps/gta/shoppools.js'; // a_shopnight2
 
 export const M = {}; // material registry
+// a_interior: shop-kind grid (R = kind + 1, G = variant + 1 per 1 m cell; box = x0, z0, 1/(cell*size), 0) — map A only, filled by street.js
+export const SHOPK = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0, 0, 0) } };
+{ const t = new THREE.DataTexture(new Uint8Array(4), 1, 1); t.needsUpdate = true; SHOPK.tex.value = t; }
 let CSMREF = null; let ANISO = 8;
 export function setCSM(csm, aniso) { CSMREF = csm; ANISO = aniso; }
 
+const NODEDUP = typeof location !== 'undefined' && /[?&]nodedup/.test(location.search); // loadtime A/B switch
 export function prep(mat, key = 'std', patch = null) {
-  mat.onBeforeCompile = (s, r) => {
+  const p2 = envUberWrap(patch, key); // b_envprog2: opaque environment families compile into one merged program (?oldenvmat2: off)
+  mat.onBeforeCompile = function (s, r) {
     s.uniforms.uSunDir = U.uSunDir; s.uniforms.uFogSunCol = U.uFogSunCol; s.uniforms.uFogFalloff = U.uFogFalloff;
-    if (patch) patch(s);
+    if (p2) p2(s, this);
+    if (this.userData.envOn) envPatch(s, this, U); // b_envprog: normalised environment material (see envprog.js)
   };
-  mat.customProgramCacheKey = () => key;
+  // b_verify ?shotfast (test only): unpatched names share one program ('std'): same shader text, so the same pixels, fewer SwiftShader JITs
+  // b_envprog: normalised materials share one program per family, 'std' for every unpatched name (?oldenvmat: old keys)
+  const k0 = (SHOTFAST || !NODEDUP) && !patch ? 'std' : key, ke = envFamily(key, !!patch) + '|e'; // loadtime: unpatched names dedup to 'std' even with envOn off (?nodedup: off)
+  mat.customProgramCacheKey = function () { return this.userData.envOn ? (p2 && p2.envKey ? p2.envKey(this) : ke) : k0; }; // envKey: merged patch family
+  envReg(mat, key, !!patch);
   return mat;
+}
+
+// b_envprog2: hand-made environment materials (own onBeforeCompile + cache key) join the merged programs. They never got prep()'s fog
+// uniforms, so their height fog read uSunDir / uFogSunCol / uFogFalloff as 0 -> those stay 0 explicitly (same pixels). ?oldenvmat2: untouched
+const FOG0 = { uSunDir: { value: new THREE.Vector3(0, 0, 0) }, uFogSunCol: { value: new THREE.Color(0, 0, 0) }, uFogFalloff: { value: 0 } };
+export function envAdopt(mat, key) {
+  if (OLDENV2 || ENVDBG.includes('noadopt') || ENVDBG.includes('na_' + key)) return mat; const ob = mat.onBeforeCompile;
+  return prep(mat, key, (s) => { ob(s); Object.assign(s.uniforms, FOG0); });
 }
 
 export function texSet(T, name, rep = 1, opts = {}) {
@@ -30,6 +51,8 @@ float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix
 
 // r6.3 street pass: storefront interiors as real parallax rooms (ray-traced box room + furniture boxes + people cut-outs),
 // one room per 2-bay shop unit, 5 shop kinds with their own fit-out and lighting; lit all day, ~86 % stay lit at night
+// a_interior (r6.4): map A adds diner / bar and laundromat rooms, ceiling fans, menu light boxes, cooler LEDs, more fit-out boxes;
+// the shop kind follows the sign over the shop (SHOPK grid written by street.js), hash fallback elsewhere
 const SHOPROOM = `
 float gLod = 0.0; // 0 = full shelf detail, 1 = averaged (grazing views / far: compressed side-wall shelving read as colour stripes)
 vec2 sBox(vec3 ro, vec3 ird, vec3 b0, vec3 b1) { vec3 t0 = (b0 - ro) * ird, t1 = (b1 - ro) * ird; vec3 tn = min(t0, t1), tf = max(t0, t1);
@@ -43,11 +66,24 @@ vec3 sGoods(vec2 p, float pitch, float sd, vec3 shelfC) {
   float h = h12(vec2(ix, row) + sd); vec3 c = 0.18 + 0.62 * vec3(h12(vec2(ix * 1.3, row + sd)), h12(vec2(ix + 7.1, row * 2.3 + sd)), h12(vec2(ix * 0.7 - 3.0, row + sd * 1.7)));
   c = mix(c, vec3(dot(c, vec3(0.33))), 0.25); // packaging, not candy
   float ih = 0.45 + 0.42 * h; float item = step(0.10, fx) * step(fx, 0.94) * step(0.09, fy) * step(fy, 0.09 + ih) * step(0.12, h);
-  float lip = smoothstep(0.09, 0.0, fy); float label = step(abs(fy - (0.09 + ih * 0.55)), ih * 0.14) * item;
+  float lip = (1.0 - smoothstep(0.0, 0.09, fy)); float label = step(abs(fy - (0.09 + ih * 0.55)), ih * 0.14) * item;
   vec3 back = shelfC * 0.55;
   vec3 o = mix(back, c * (0.85 + 0.3 * step(0.5, fx)), item); o = mix(o, mix(o, vec3(0.92), 0.6), label * step(0.5, h12(vec2(ix, row * 3.0))));
   o = mix(o, shelfC * 1.1, lip);
   return mix(o, shelfC * 0.5 + vec3(0.17, 0.16, 0.14), gLod);
+}
+// a_interior: back-lit menu / promo light box (panels with a food photo + text lines); returns colour, emissive in e
+vec3 sMenu(vec2 q, vec2 sz, float sd, out float e) {
+  vec2 u = q / sz; float np = 3.0 + floor(h12(vec2(sd, 1.7)) * 2.0); float pi = floor(u.x * np); vec2 f = vec2(fract(u.x * np), u.y);
+  float edge = step(0.04, f.x) * step(f.x, 0.96) * step(0.06, f.y) * step(f.y, 0.94);
+  vec3 bg = mix(vec3(0.93, 0.90, 0.82), vec3(0.12, 0.10, 0.09), step(0.55, h12(vec2(sd, 3.3))));
+  float ph = step(abs(f.x - 0.5), 0.36) * step(0.48, f.y) * step(f.y, 0.88);
+  vec3 food = mix(vec3(0.78, 0.42, 0.16), vec3(0.85, 0.66, 0.30), h12(vec2(pi, sd))) * (0.75 + 0.35 * vnoise(q * 18.0 + pi));
+  food = mix(food, vec3(0.30, 0.55, 0.20), step(0.72, vnoise(q * 11.0 + sd)) * 0.7);
+  float tl = step(f.y, 0.40) * step(0.10, f.y) * step(0.35, fract(f.y * 9.0)) * step(abs(f.x - 0.45), 0.36 * (0.5 + 0.5 * h12(vec2(pi, floor(f.y * 9.0)) + sd)));
+  vec3 txt = mix(vec3(0.15), vec3(0.95, 0.9, 0.75), step(0.5, dot(bg, vec3(0.33)) < 0.5 ? 1.0 : 0.0));
+  vec3 c = mix(bg, food, ph); c = mix(c, txt, tl); c = mix(vec3(0.05), c, edge);
+  e = edge * 1.0; return c;
 }
 // a person standing behind the glass (cut-out facing the window): legs, torso, arms, head; returns coverage, colour in c
 float sPerson(vec2 q, float sd, out vec3 c) {
@@ -64,55 +100,123 @@ float sPerson(vec2 q, float sd, out vec3 c) {
   c = legs > 0.5 ? bot : skin; if (torso + arms * step(1.1, q.y) + hip > 0.5) c = top; if (hip > 0.5) c = bot; if (hair > 0.5 && q.y > 1.6) c = vec3(0.06, 0.045, 0.035);
   return clamp(head + neck + torso + arms + hip + legs, 0.0, 1.0);
 }
-// st: 0 grocery/pharmacy, 1 café, 2 boutique, 3 office/bank; sv: per-unit variation; on: lights on; n: night
-vec3 shopRoom(vec2 ro2, vec3 rd, float RW, float RH, float RD, float st, float sv, float n, float on) {
+// a_interior: ceiling fan (4 blades + hub on a plane, down-rod) — composited over col where the ray passes it before t
+void sFan(vec3 ro, vec3 rds, float t, vec3 c, float RH, float sd, vec3 lc, float lev, inout vec3 col) {
+  if (abs(rds.y) > 1e-4) { float tf = (c.y - ro.y) / rds.y;
+    if (tf > 0.0 && tf < t) { vec2 q = (ro + rds * tf).xz - c.xz; float r = length(q); float ang = atan(q.y, q.x) + uTime * 4.0 + sd * 6.0;
+      float bl = step(abs(sin(2.0 * ang)) * r, 0.075 + 0.02 * r) * step(0.08, r) * step(r, 0.64);
+      float hub = step(r, 0.11); float blur = step(r, 0.64) * 0.18;
+      vec3 fc = mix(vec3(0.30, 0.20, 0.12), vec3(0.85, 0.84, 0.80), step(0.5, sd));
+      float m = max(max(bl, hub), blur); col = mix(col, fc * lc * lev * (0.55 + 0.25 * hub), m); } }
+  float tz = (c.z - ro.z) / rds.z; if (tz > 0.0 && tz < t) { vec3 p = ro + rds * tz; if (abs(p.x - c.x) < 0.014 && p.y > c.y && p.y < RH) col = vec3(0.02); }
+}
+// st: 0 grocery/pharmacy/electronics, 1 café, 2 boutique, 3 office/bank, 4 restaurant / bar, 5 laundromat
+// sv: per-unit variation; sub: variant (<0: from sv); on: lights on; n: night
+vec3 shopRoom(vec2 ro2, vec3 rd, float RW, float RH, float RD, float st, float sv, float n, float on, float subIn) {
   vec3 ro = vec3(ro2, 0.0);
   vec3 rds = vec3(rd.x >= 0.0 ? max(rd.x, 1e-4) : min(rd.x, -1e-4), rd.y >= 0.0 ? max(rd.y, 1e-4) : min(rd.y, -1e-4), max(rd.z, 0.05)); vec3 ird = 1.0 / rds;
   float tx = rds.x > 0.0 ? (RW - ro.x) * ird.x : -ro.x * ird.x; float ty = rds.y > 0.0 ? (RH - ro.y) * ird.y : -ro.y * ird.y; float tz = RD * ird.z;
   float t = min(min(tx, ty), tz); vec3 nrm = t == tz ? vec3(0.0, 0.0, -1.0) : (t == ty ? vec3(0.0, -sign(rds.y), 0.0) : vec3(-sign(rds.x), 0.0, 0.0));
   float id = t == tz ? 3.0 : (t == ty ? (rds.y > 0.0 ? 1.0 : 2.0) : 0.0); // 0 side, 1 ceiling, 2 floor, 3 back, 4+ furniture
-  vec3 b0[3]; vec3 b1[3];
-  float sub = floor(sv * 3.0); // grocery / pharmacy / electronics within kind 0
+  vec3 b0[8]; vec3 b1[8];
+  for (int i = 0; i < 8; i++) { b0[i] = vec3(-9.0); b1[i] = vec3(-9.0); }
+  float sub = subIn >= 0.0 ? subIn : floor(sv * 3.0); // kind 0: grocery / pharmacy / electronics; kind 4: diner / bar
+  if (st == 4.0 && subIn < 0.0) sub = step(0.62, sv);
   if (st == 0.0) { float gl = RD - 1.3; b0[0] = vec3(RW * 0.34 - 0.42, 0.0, 1.6); b1[0] = vec3(RW * 0.34 + 0.42, sub == 2.0 ? 1.05 : 1.55, gl);
-    b0[1] = vec3(RW * 0.70 - 0.42, 0.0, 1.6); b1[1] = vec3(RW * 0.70 + 0.42, sub == 2.0 ? 1.05 : 1.55, gl); b0[2] = vec3(RW - 1.9, 0.0, 0.55); b1[2] = vec3(RW - 0.25, 1.0, 1.15); }
-  else if (st == 1.0) { b0[0] = vec3(0.6, 0.0, RD - 1.6); b1[0] = vec3(RW - 0.4, 1.08, RD - 1.0); // bar counter
-    b0[1] = vec3(RW * 0.22 - 0.38, 0.72, 1.2); b1[1] = vec3(RW * 0.22 + 0.38, 0.76, 1.95); b0[2] = vec3(RW * 0.62 - 0.38, 0.72, 2.2); b1[2] = vec3(RW * 0.62 + 0.38, 0.76, 2.95); }
+    b0[1] = vec3(RW * 0.70 - 0.42, 0.0, 1.6); b1[1] = vec3(RW * 0.70 + 0.42, sub == 2.0 ? 1.05 : 1.55, gl); b0[2] = vec3(RW - 1.9, 0.0, 0.55); b1[2] = vec3(RW - 0.25, 1.0, 1.15);
+    b0[3] = vec3(RW - 1.25, 1.0, 0.72); b1[3] = vec3(RW - 0.88, 1.30, 0.98); // till / card terminal
+    b0[4] = vec3(RW - 1.86, 1.0, 0.58); b1[4] = vec3(RW - 1.50, 1.38, 0.74); // impulse rack on the counter
+    if (sub == 0.0) { b0[5] = vec3(0.30, 0.0, 0.85); b1[5] = vec3(1.35, 0.84, 1.55); } // ice-cream chest freezer
+    b0[6] = vec3(RW * 0.34 - 0.40, 0.0, 1.18); b1[6] = vec3(RW * 0.34 + 0.40, 0.78, 1.58); } // drinks-case end-cap stack
+  else if (st == 1.0) { b0[0] = vec3(0.6, 0.0, RD - 1.6); b1[0] = vec3(RW - 0.4, 1.06, RD - 1.0); // bar counter
+    b0[1] = vec3(RW * 0.22 - 0.38, 0.72, 1.2); b1[1] = vec3(RW * 0.22 + 0.38, 0.76, 1.95); b0[2] = vec3(RW * 0.62 - 0.38, 0.72, 2.2); b1[2] = vec3(RW * 0.62 + 0.38, 0.76, 2.95);
+    b0[3] = vec3(RW * 0.22 - 0.035, 0.0, 1.54); b1[3] = vec3(RW * 0.22 + 0.035, 0.72, 1.61); b0[4] = vec3(RW * 0.62 - 0.035, 0.0, 2.54); b1[4] = vec3(RW * 0.62 + 0.035, 0.72, 2.61); // pedestals
+    b0[5] = vec3(RW * 0.52, 1.06, RD - 1.55); b1[5] = vec3(RW * 0.52 + 1.3, 1.46, RD - 1.08); // pastry case
+    b0[6] = vec3(RW * 0.22 - 0.36, 1.06, RD - 1.42); b1[6] = vec3(RW * 0.22 + 0.36, 1.52, RD - 1.12); // espresso machine
+    b0[7] = vec3(RW * 0.22 + 0.48, 0.0, 1.40); b1[7] = vec3(RW * 0.22 + 0.90, 0.46, 1.80); } // chair
   else if (st == 2.0) { b0[0] = vec3(RW * 0.5 - 0.7, 0.0, RD * 0.45); b1[0] = vec3(RW * 0.5 + 0.7, 0.82, RD * 0.45 + 0.9); // display table
     b0[1] = vec3(RW - 1.7, 0.0, RD - 1.2); b1[1] = vec3(RW - 0.3, 1.0, RD - 0.65); b0[2] = vec3(0.4, 0.0, 0.5); b1[2] = vec3(0.95, 0.12, 1.05); } // till, plinth
-  else { b0[0] = vec3(RW * 0.25, 0.0, RD * 0.58); b1[0] = vec3(RW * 0.75, 1.1, RD * 0.58 + 0.7); // reception / teller desk
+  else if (st == 3.0) { b0[0] = vec3(RW * 0.25, 0.0, RD * 0.58); b1[0] = vec3(RW * 0.75, 1.1, RD * 0.58 + 0.7); // reception / teller desk
     b0[1] = vec3(RW - 0.9, 0.0, 0.7); b1[1] = vec3(RW - 0.45, 0.45, 1.15); b0[2] = vec3(0.3, 0.0, RD * 0.3); b1[2] = vec3(0.7, 0.44, RD * 0.3 + 1.6); } // planter, bench
-  for (int i = 0; i < 3; i++) { vec2 h = sBox(ro, ird, b0[i], b1[i]); if (h.x < t) { t = h.x; id = 4.0 + float(i); nrm = sBoxN(ro + rds * t, b0[i], b1[i]); } }
-  // table legs / bar stools for the café (thin boxes would be lost: draw as the table's shadow column on the floor instead)
+  else if (st == 4.0) {
+    if (sub < 0.5) { // diner / taquería: counter down the right wall, booths on the left
+      b0[0] = vec3(RW - 1.40, 0.0, 1.5); b1[0] = vec3(RW - 0.80, 1.06, RD - 1.0);
+      b0[1] = vec3(0.0, 0.0, 1.05); b1[1] = vec3(1.30, 1.15, 1.28); b0[2] = vec3(0.10, 0.72, 1.45); b1[2] = vec3(1.10, 0.77, 2.15); b0[3] = vec3(0.0, 0.0, 2.32); b1[3] = vec3(1.30, 1.15, 2.55);
+      b0[4] = vec3(0.10, 0.72, 2.72); b1[4] = vec3(1.10, 0.77, 3.42); b0[5] = vec3(0.0, 0.0, 3.59); b1[5] = vec3(1.30, 1.15, 3.82);
+      b0[6] = vec3(RW * 0.48 - 0.4, 0.72, 1.4); b1[6] = vec3(RW * 0.48 + 0.4, 0.76, 2.1); b0[7] = vec3(RW * 0.48 - 0.04, 0.0, 1.71); b1[7] = vec3(RW * 0.48 + 0.04, 0.72, 1.79); }
+    else { // bar / lounge: bar along the back, high-top tables
+      b0[0] = vec3(0.5, 0.0, RD - 1.7); b1[0] = vec3(RW - 0.5, 1.10, RD - 1.1);
+      b0[1] = vec3(RW * 0.25 - 0.35, 1.02, 1.3); b1[1] = vec3(RW * 0.25 + 0.35, 1.06, 2.0); b0[2] = vec3(RW * 0.25 - 0.04, 0.0, 1.61); b1[2] = vec3(RW * 0.25 + 0.04, 1.02, 1.69);
+      b0[3] = vec3(RW * 0.62 - 0.35, 1.02, 2.3); b1[3] = vec3(RW * 0.62 + 0.35, 1.06, 3.0); b0[4] = vec3(RW * 0.62 - 0.04, 0.0, 2.61); b1[4] = vec3(RW * 0.62 + 0.04, 1.02, 2.69); }
+  } else { // 5 laundromat: washer bank on the right wall, folding table, seats + change machine on the left
+    b0[0] = vec3(RW - 0.72, 0.0, 0.9); b1[0] = vec3(RW, 0.92, RD - 0.45);
+    b0[1] = vec3(RW * 0.36, 0.0, 1.9); b1[1] = vec3(RW * 0.36 + 0.85, 0.9, max(RD - 1.7, 2.8));
+    b0[2] = vec3(0.0, 0.0, 1.3); b1[2] = vec3(0.48, 0.46, min(RD - 0.6, 3.6));
+    b0[3] = vec3(0.0, 0.0, 0.30); b1[3] = vec3(0.70, 1.80, 0.92);
+    b0[4] = vec3(RW * 0.62, 0.0, 1.15); b1[4] = vec3(RW * 0.62 + 0.52, 0.86, 1.62); }
+  for (int i = 0; i < 8; i++) { vec2 h = sBox(ro, ird, b0[i], b1[i]); if (h.x < t) { t = h.x; id = 4.0 + float(i); nrm = sBoxN(ro + rds * t, b0[i], b1[i]); } }
+  // bar / diner stools: four short boxes along the counter
+  if (st == 4.0) for (int k = 0; k < 4; k++) {
+    vec3 c = sub < 0.5 ? vec3(RW - 1.70, 0.0, 1.9 + float(k) * 0.75) : vec3(RW * (0.2 + 0.2 * float(k)), 0.0, RD - 1.95);
+    vec2 h = sBox(ro, ird, c - vec3(0.17, 0.0, 0.17), c + vec3(0.17, 0.76, 0.17)); if (h.x < t) { t = h.x; id = 12.0; nrm = sBoxN(ro + rds * t, c - vec3(0.17, 0.0, 0.17), c + vec3(0.17, 0.76, 0.17)); } }
   vec3 p = ro + rds * t;
-  vec3 wallC = st == 0.0 ? vec3(0.74, 0.75, 0.73) : (st == 1.0 ? vec3(0.62, 0.46, 0.34) : (st == 2.0 ? vec3(0.80, 0.77, 0.72) : vec3(0.66, 0.68, 0.70)));
+  vec3 wallC = st == 0.0 ? vec3(0.74, 0.75, 0.73) : (st == 1.0 ? vec3(0.62, 0.46, 0.34) : (st == 2.0 ? vec3(0.80, 0.77, 0.72) : (st == 4.0 ? (sub < 0.5 ? vec3(0.86, 0.82, 0.70) : vec3(0.30, 0.20, 0.14)) : (st == 5.0 ? vec3(0.84, 0.86, 0.85) : vec3(0.66, 0.68, 0.70)))));
   wallC *= 0.9 + 0.2 * sv;
-  vec3 lc = st == 1.0 ? vec3(1.0, 0.76, 0.52) : (st == 2.0 ? vec3(1.0, 0.92, 0.80) : vec3(0.93, 0.97, 1.0));
+  vec3 lc = st == 1.0 ? vec3(1.0, 0.76, 0.52) : (st == 2.0 ? vec3(1.0, 0.92, 0.80) : (st == 4.0 ? (sub < 0.5 ? vec3(1.0, 0.86, 0.68) : vec3(1.0, 0.68, 0.42)) : vec3(0.93, 0.97, 1.0)));
   if (st == 0.0 && sub == 1.0) wallC = vec3(0.92, 0.95, 0.95);
   vec3 alb = wallC; float emi = 0.0;
+  // a_interior: one merchandise + one light-box evaluation per pixel (each helper inlined once: smaller shader, cheaper compile)
+  vec2 wq0 = id == 3.0 ? p.xy : vec2(p.z, p.y); float k2 = id - 4.0;
+  float rightW = step(RW * 0.5, p.x) * step(id, 0.5);
+  bool chill = st == 0.0 && sub == 0.0 && (id == 3.0 || (id == 0.0 && rightW < 0.5 && p.z > RD * 0.45));
+  bool backbar = st == 0.0 && rightW > 0.5 && p.z < 2.0;
+  vec2 gq = vec2(wq0.x + id * 3.1, wq0.y - 0.12); float gP = sub == 2.0 ? 0.5 : 0.36, gS = sv * 13.0 + id; vec3 gC = vec3(0.82);
+  if (chill) { gq = vec2(wq0.x, wq0.y - 0.15); gP = 0.38; gS = sv * 9.0; gC = vec3(0.75, 0.78, 0.8); }
+  else if (backbar) { gq = vec2(wq0.x * 2.2, wq0.y - 0.9); gP = 0.18; gS = sv * 5.0 + 11.0; gC = vec3(0.3, 0.28, 0.26); }
+  if (id > 3.5 && id < 11.5) { vec2 fq = abs(nrm.x) > 0.5 ? vec2(p.z, p.y) : vec2(p.x, p.y);
+    if (st == 2.0) { gq = vec2(p.x * 1.4, (p.z - RD * 0.45) * 0.9); gP = 0.3; gS = sv + 3.0; gC = vec3(0.7); }
+    else if (k2 < 1.5) { gq = fq + k2 * 2.3; gP = sub == 2.0 ? 0.5 : 0.34; gS = sv * 7.0 + k2; gC = vec3(0.8); }
+    else if (k2 < 4.5) { gq = vec2(p.x * 3.0, (p.y - 1.0) * 1.6); gP = 0.14; gS = sv + 2.0; gC = vec3(0.5); }
+    else { gq = p.xz * vec2(1.5, 2.5); gP = 0.12; gS = sv + 4.0; gC = vec3(0.85, 0.9, 0.95); } }
+  vec3 GD = vec3(0.0); if (st == 0.0 || (st == 2.0 && id == 4.0)) GD = sGoods(gq, gP, gS, gC);
+  vec2 mq = vec2(wq0.x - 0.1, wq0.y - 2.0), msz = vec2(1.9, 0.6); float mS = sv * 3.0 + 5.0;
+  if (st == 4.0) { if (sub < 0.5) { mq = vec2(wq0.x - RW * 0.12, wq0.y - 2.05); msz = vec2(RW * 0.76, 0.7); mS = sv * 7.0; } else { mq = vec2(wq0.x - RW * 0.3, wq0.y - 2.5); msz = vec2(RW * 0.4, 0.4); mS = sv * 5.0; } }
+  else if (st == 5.0) { mq = vec2(wq0.x - RW * 0.5 + 1.1, wq0.y - 2.15); msz = vec2(2.2, 0.55); mS = sv + 9.0; }
+  float mE = 0.0; vec3 MN = vec3(0.0); if ((id == 3.0 || id == 0.0) && (st == 0.0 || st > 3.5)) MN = sMenu(mq, msz, mS, mE);
   if (id == 2.0) { // floor
-    if (st == 1.0) { vec2 pl = vec2(p.x / 0.18, p.z / 1.2 + floor(p.x / 0.18) * 0.37); alb = vec3(0.42, 0.28, 0.17) * (0.8 + 0.3 * h12(floor(pl))) * (1.0 - 0.3 * smoothstep(0.04, 0.0, fract(pl.x))); }
-    else { vec2 tl = p.xz / 0.6; float ck = mod(floor(tl.x) + floor(tl.y), 2.0); float gr = smoothstep(0.03, 0.0, min(fract(tl.x), fract(tl.y)));
-      alb = (st == 2.0 ? vec3(0.62, 0.61, 0.6) : (st == 3.0 ? vec3(0.72, 0.68, 0.62) : vec3(0.82, 0.82, 0.8))) * (0.94 + 0.06 * ck) * (1.0 - 0.25 * gr); }
+    if (st == 1.0 || (st == 4.0 && sub > 0.5)) { vec2 pl = vec2(p.x / 0.18, p.z / 1.2 + floor(p.x / 0.18) * 0.37); alb = (st == 4.0 ? vec3(0.24, 0.15, 0.09) : vec3(0.42, 0.28, 0.17)) * (0.8 + 0.3 * h12(floor(pl))) * (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.04, fract(pl.x)))); }
+    else if (st == 4.0) { vec2 tl = p.xz / 0.3; float ck = mod(floor(tl.x) + floor(tl.y), 2.0); alb = mix(vec3(0.85, 0.84, 0.80), vec3(0.06, 0.06, 0.07), ck); }
+    else { vec2 tl = p.xz / 0.6; float ck = mod(floor(tl.x) + floor(tl.y), 2.0); float gr = (1.0 - smoothstep(0.0, 0.03, min(fract(tl.x), fract(tl.y))));
+      alb = (st == 2.0 ? vec3(0.62, 0.61, 0.6) : (st == 3.0 ? vec3(0.72, 0.68, 0.62) : (st == 5.0 ? vec3(0.78, 0.74, 0.66) : vec3(0.82, 0.82, 0.8)))) * (0.94 + 0.06 * ck) * (1.0 - 0.25 * gr); }
   } else if (id == 1.0) { // ceiling + fixtures
-    alb = st == 1.0 ? vec3(0.16, 0.15, 0.14) : vec3(0.88, 0.88, 0.87);
-    if (st == 0.0 || st == 3.0) { vec2 tr = vec2(p.x / 1.2, p.z / 1.8); vec2 fr = fract(tr); float fx = step(0.3, fr.x) * step(fr.x, 0.7) * step(0.25, fr.y) * step(fr.y, 0.75); emi = fx * 2.4; alb *= 1.0 - 0.3 * smoothstep(0.02, 0.0, min(fr.x, fr.y)); }
-    if (st == 2.0) { float track = step(abs(fract(p.x / (RW * 0.5)) - 0.5), 0.012); vec2 sp = vec2(fract(p.x / (RW * 0.5)) - 0.5, fract(p.z / 1.1) - 0.5); emi = smoothstep(0.06, 0.03, length(sp * vec2(RW * 0.5, 1.1))) * 4.0; alb *= 1.0 - track * 0.8; }
+    alb = st == 1.0 || (st == 4.0 && sub > 0.5) ? vec3(0.16, 0.15, 0.14) : vec3(0.88, 0.88, 0.87);
+    if (st == 0.0 || st == 3.0 || st == 5.0) { vec2 tr = vec2(p.x / 1.2, p.z / 1.8); vec2 fr = fract(tr); float fx = step(0.3, fr.x) * step(fr.x, 0.7) * step(0.25, fr.y) * step(fr.y, 0.75); emi = fx * (st == 0.0 ? mix(2.4, 1.7, n) : 2.2); alb *= 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.02, min(fr.x, fr.y))); }
+    if (st == 2.0 || (st == 4.0 && sub < 0.5)) { float track = step(abs(fract(p.x / (RW * 0.5)) - 0.5), 0.012) * step(st, 2.5); vec2 sp = vec2(fract(p.x / (RW * 0.5)) - 0.5, fract(p.z / 1.1) - 0.5); emi = (1.0 - smoothstep(0.03, 0.06, length(sp * vec2(RW * 0.5, 1.1)))) * 4.0; alb *= 1.0 - track * 0.8; }
   } else if (id == 3.0 || id == 0.0) { // walls
     vec2 wq = id == 3.0 ? p.xy : vec2(p.z, p.y);
     float skirt = step(wq.y, 0.12);
     if (st == 0.0) {
-      if (id == 3.0 && sub == 0.0) { // chiller doors along the back wall: framed glass, cool-lit stock behind
+      if (chill) { // walk-in cooler doors: framed glass, stock behind, LED strip on every mullion
         float dx = fract(wq.x / 0.8); float door = step(0.05, dx) * step(dx, 0.95) * step(0.15, wq.y) * step(wq.y, 2.05);
-        vec3 g = sGoods(vec2(wq.x, wq.y - 0.15), 0.38, sv * 9.0, vec3(0.75, 0.78, 0.8));
-        alb = mix(vec3(0.75, 0.77, 0.78), g, door); emi = door * 0.9 * step(0.15, wq.y); alb = mix(alb, alb * vec3(0.85, 0.95, 1.1), door);
-      } else if (wq.y < 2.0) { alb = sGoods(vec2(wq.x + id * 3.1, wq.y - 0.12), sub == 2.0 ? 0.5 : 0.36, sv * 13.0 + id, vec3(0.82)); if (sub == 2.0) alb = mix(alb, vec3(0.05), step(0.55, fract(wq.y / 0.5)) * step(0.3, h12(floor(wq / vec2(0.5)) + sv)) * 0.85); }
-      if (id == 3.0 && wq.y > 2.25 && wq.y < 2.7) { alb = sub == 1.0 ? vec3(0.1, 0.55, 0.3) : vec3(0.75, 0.15, 0.12); alb = mix(alb, vec3(0.95), step(0.5, h12(floor(vec2(wq.x / 0.18, wq.y / 0.15)))) * step(abs(wq.y - 2.475), 0.12)); }
+        vec3 g = GD;
+        alb = mix(vec3(0.75, 0.77, 0.78), g, door); emi = door * 0.9; alb = mix(alb, alb * vec3(0.85, 0.95, 1.1), door);
+        float led = step(abs(dx - 0.05), 0.012) + step(abs(dx - 0.95), 0.012); emi += led * step(0.2, wq.y) * step(wq.y, 2.0) * 2.6;
+        alb = mix(alb, vec3(0.75, 0.88, 1.0), led * step(wq.y, 2.0));
+        if (wq.y > 2.05 && wq.y < 2.2) alb = vec3(0.12);
+      } else if (backbar) { // behind the till: cigarette / lottery backbar, promo light box above
+        alb = GD; if (wq.y < 0.9) alb = vec3(0.28, 0.27, 0.26);
+        if (wq.y > 2.0 && wq.y < 2.6) { alb = MN; emi = mE * 1.4; }
+      } else if (wq.y < 2.0) { alb = GD; if (sub == 2.0) alb = mix(alb, vec3(0.05), step(0.55, fract(wq.y / 0.5)) * step(0.3, h12(floor(wq / vec2(0.5)) + sv)) * 0.85); }
+      if (id == 3.0 && wq.y > 2.25 && wq.y < 2.7) { // back-wall promo light boxes (were painted bands)
+        float pan = step(0.04, fract(wq.x / 1.6)) * step(fract(wq.x / 1.6), 0.96);
+        alb = sub == 1.0 ? vec3(0.1, 0.55, 0.3) : vec3(0.75, 0.15, 0.12); alb = mix(alb, vec3(0.95), step(0.5, h12(floor(vec2(wq.x / 0.18, wq.y / 0.15)))) * step(abs(wq.y - 2.475), 0.12));
+        alb = mix(vec3(0.08), alb, pan); emi = pan * 1.1; }
     } else if (st == 1.0) {
       alb = mix(wallC, vec3(0.30, 0.20, 0.13), step(wq.y, 1.05)); // wainscot
       if (id == 3.0) { float sh2 = step(1.35, wq.y) * step(wq.y, 2.05); float bt = step(0.5, h12(vec2(floor(wq.x / 0.11), floor(wq.y / 0.35)) + sv)) * step(0.06, fract(wq.y / 0.35)) * step(fract(wq.y / 0.35), 0.7) * step(abs(fract(wq.x / 0.11) - 0.5), 0.3);
         alb = mix(alb, mix(vec3(0.12, 0.08, 0.05), vec3(0.25, 0.45, 0.3) * (0.6 + h12(vec2(floor(wq.x / 0.11), 1.0))), bt), sh2);
         float board = step(abs(wq.x - RW * 0.5), RW * 0.22) * step(2.2, wq.y) * step(wq.y, 2.85); alb = mix(alb, vec3(0.07, 0.08, 0.07), board);
-        alb = mix(alb, vec3(0.9, 0.88, 0.8), board * step(0.55, h12(floor(vec2(wq.x / 0.09, wq.y / 0.11)) + sv)) * step(fract(wq.y / 0.11), 0.4) * 0.8); }
+        alb = mix(alb, vec3(0.9, 0.88, 0.8), board * step(0.55, h12(floor(vec2(wq.x / 0.09, wq.y / 0.11)) + sv)) * step(fract(wq.y / 0.11), 0.4) * 0.8); emi = board * 0.25; }
       else { float fr = step(abs(fract(wq.x / 1.6) - 0.5), 0.17) * step(abs(wq.y - 1.7), 0.25); alb = mix(alb, (0.3 + 0.5 * vec3(h12(vec2(floor(wq.x / 1.6), sv)), h12(vec2(floor(wq.x / 1.6), 2.0)), 0.4)) , fr); }
     } else if (st == 2.0) {
       float rail = step(abs(wq.y - 1.62), 0.012); float cx = fract(wq.x / 0.13); float cl = step(wq.y, 1.6) * step(0.15, cx) * step(cx, 0.9) * step(0.2, h12(vec2(floor(wq.x / 0.13), sv)));
@@ -120,38 +224,107 @@ vec3 shopRoom(vec2 ro2, vec3 rd, float RW, float RH, float RD, float st, float s
         cl *= (1.0 - 0.8 * gLod) * step(1.6 - 0.55 - 0.45 * h12(vec2(floor(wq.x / 0.39), 5.0 + sv)), wq.y); // garments hang 0.55-1.0 m below the rail
         if (id == 3.0) { float poster = step(abs(wq.x - RW * 0.5), 0.6) * step(1.0, wq.y) * step(wq.y, 2.6); alb = mix(wallC, vec3(0.55, 0.5, 0.46) * (0.6 + 0.6 * vnoise(wq * 3.0 + sv)), poster); alb = mix(alb, cc, cl * (1.0 - poster)); alb = mix(alb, vec3(0.08), rail * (1.0 - poster)); }
         else { alb = mix(wallC, cc, cl); alb = mix(alb, vec3(0.08), rail); }
+    } else if (st == 4.0) {
+      if (sub < 0.5) { // diner: tiled wainscot, framed photos, kitchen pass + menu light box on the back wall
+        vec2 tq = wq / vec2(0.15, 0.075); float tg = smoothstep(0.08, 0.0, min(fract(tq.x + 0.5 * mod(floor(tq.y), 2.0)), fract(tq.y)));
+        vec3 tileC = mix(vec3(0.10, 0.42, 0.42), vec3(0.62, 0.12, 0.12), step(0.5, sv));
+        alb = mix(wallC, tileC * (1.0 - 0.3 * tg), step(wq.y, 1.2)); alb = mix(alb, vec3(0.75, 0.75, 0.78), step(abs(wq.y - 1.22), 0.025));
+        if (id == 3.0) { float pass = step(abs(wq.x - RW * 0.42), RW * 0.2) * step(1.15, wq.y) * step(wq.y, 1.85);
+          vec3 kit = mix(vec3(0.72, 0.72, 0.70), vec3(0.95, 0.90, 0.78), step(1.6, wq.y)) * (0.7 + 0.3 * vnoise(wq * 6.0));
+          kit = mix(kit, vec3(0.08), step(abs(wq.y - 1.5), 0.02)); alb = mix(alb, kit, pass); emi = pass * 0.55;
+          if (wq.y > 2.05 && wq.y < 2.75 && abs(wq.x - RW * 0.5) < RW * 0.38) { alb = MN; emi = mE * 1.3; } }
+        else { float fr = step(abs(fract(wq.x / 1.4) - 0.5), 0.16) * step(abs(wq.y - 1.75), 0.22); alb = mix(alb, mix(vec3(0.1), (0.25 + 0.5 * vec3(h12(vec2(floor(wq.x / 1.4), sv)), 0.45, h12(vec2(floor(wq.x / 1.4), 3.0)))), step(abs(fract(wq.x / 1.4) - 0.5), 0.13) * step(abs(wq.y - 1.75), 0.19)), fr); }
+      } else { // bar: back-lit bottle shelves + mirror behind the bar, dark wood panelling
+        alb = mix(wallC, vec3(0.16, 0.10, 0.06), step(wq.y, 1.1));
+        if (id == 3.0 && wq.y > 1.15 && wq.y < 2.45) { float row = fract((wq.y - 1.15) / 0.43); float bx = fract(wq.x / 0.09); float bh = h12(vec2(floor(wq.x / 0.09), floor((wq.y - 1.15) / 0.43)) + sv);
+          float bot = step(0.08, row) * step(row, 0.55 + 0.3 * bh) * step(abs(bx - 0.5), 0.32 - 0.18 * step(0.75 * (0.55 + 0.3 * bh), row)) * step(0.15, bh);
+          vec3 bc = mix(vec3(0.55, 0.28, 0.06), mix(vec3(0.10, 0.35, 0.12), vec3(0.75, 0.78, 0.74), step(0.6, h12(vec2(bh, 2.0)))), step(0.45, bh));
+          alb = mix(vec3(0.95, 0.75, 0.45), bc, bot); alb = mix(alb, vec3(0.2, 0.13, 0.08), smoothstep(0.06, 0.0, row)); emi = 0.9 * (1.0 - bot * 0.6) * step(0.06, row); }
+        if (id == 3.0 && wq.y > 2.5 && wq.y < 2.9) { alb = MN * step(abs(wq.x - RW * 0.5), RW * 0.2); emi = mE * 0.7 * step(abs(wq.x - RW * 0.5), RW * 0.2); }
+        if (id == 0.0) { float fr = step(abs(fract(wq.x / 1.8) - 0.5), 0.18) * step(abs(wq.y - 1.75), 0.3); alb = mix(alb, vec3(0.5, 0.42, 0.3) * (0.5 + 0.5 * vnoise(wq * 4.0 + sv)), fr); }
+      }
+    } else if (st == 5.0) { // laundromat: stacked dryers on the back wall, price board above, light-blue tiles
+      alb = mix(wallC, vec3(0.55, 0.72, 0.80), step(wq.y, 1.0));
+      if (id == 3.0 && wq.y < 1.95) { vec2 dq = vec2(fract(wq.x / 0.78), wq.y / 0.9); float row = floor(dq.y); vec2 dc = vec2((dq.x - 0.5) * 0.78, (fract(dq.y) - 0.52) * 0.9);
+        float dr = length(dc); float body = step(0.03, dq.x) * step(dq.x, 0.97); vec3 st_ = vec3(0.72, 0.74, 0.76) * (0.9 + 0.1 * step(0.5, dq.x));
+        alb = mix(vec3(0.2), st_, body); alb = mix(alb, vec3(0.88), step(dr, 0.31) * step(0.25, dr)); // chrome ring
+        float spin = step(0.6, h12(vec2(floor(wq.x / 0.78), row) + sv)); vec3 load = mix(vec3(0.08, 0.09, 0.10), (0.3 + 0.5 * vec3(h12(vec2(row, sv)), 0.4, 0.6)) * (0.6 + 0.4 * vnoise(dc * 20.0 + uTime)), spin);
+        alb = mix(alb, load, step(dr, 0.25)); alb = mix(alb, vec3(0.05), step(abs(dc.y - 0.37), 0.025) * step(abs(dc.x), 0.25));
+        emi = step(abs(dc.y - 0.37), 0.02) * step(abs(dc.x - 0.18), 0.05) * 1.5 * spin; }
+      if (id == 3.0 && wq.y > 2.15 && wq.y < 2.7 && abs(wq.x - RW * 0.5) < 1.1) { alb = MN; emi = mE; }
     } else {
       if (id == 3.0) { float logo = step(abs(wq.x - RW * 0.5), RW * 0.2) * step(abs(wq.y - 1.9), 0.32); vec3 ac = mix(vec3(0.05, 0.22, 0.42), vec3(0.45, 0.08, 0.1), step(0.5, sv));
         alb = mix(wallC, ac, logo); alb = mix(alb, vec3(0.92), logo * step(abs(wq.y - 1.9), 0.05) * step(abs(wq.x - RW * 0.5), RW * 0.15)); emi = logo * 0.4; }
       else { float dr = step(abs(fract(wq.x / 2.5) - 0.5), 0.2) * step(wq.y, 2.2); alb = mix(wallC, vec3(0.35, 0.33, 0.3), dr); }
     }
     alb = mix(alb, alb * 0.5, skirt);
+  } else if (id > 11.5) { // stools: chrome post, coloured seat
+    alb = p.y > 0.68 ? (sub < 0.5 ? mix(vec3(0.65, 0.12, 0.10), vec3(0.10, 0.40, 0.42), step(0.5, sv)) : vec3(0.18, 0.11, 0.07)) : vec3(0.55, 0.56, 0.58) * (0.4 + 0.6 * step(abs(fract(p.x * 3.0 + p.z * 3.0) - 0.5), 0.12));
   } else { // furniture
-    float k2 = id - 4.0;
-    if (st == 0.0 && k2 < 1.5) { vec2 fq = abs(nrm.x) > 0.5 ? vec2(p.z, p.y) : vec2(p.x, p.y); alb = nrm.y > 0.5 ? vec3(0.4) : sGoods(fq + k2 * 2.3, sub == 2.0 ? 0.5 : 0.34, sv * 7.0 + k2, vec3(0.8)); if (sub == 2.0 && nrm.y > 0.5) { alb = vec3(0.08); emi = step(abs(fract(p.x / 0.6) - 0.5), 0.3) * step(abs(fract(p.z / 0.8) - 0.5), 0.25) * 0.8; } }
-    else if (st == 0.0) alb = nrm.y > 0.5 ? vec3(0.25) : mix(vec3(0.82, 0.83, 0.84), vec3(0.15, 0.35, 0.6), step(0.3, p.y) * step(p.y, 0.55));
-    else if (st == 1.0) alb = k2 < 0.5 ? (nrm.y > 0.5 ? vec3(0.75, 0.73, 0.7) : vec3(0.28, 0.18, 0.11) * (0.8 + 0.4 * step(0.5, fract(p.x / 0.25)))) : vec3(0.32, 0.21, 0.13);
-    else if (st == 2.0) alb = k2 < 0.5 ? (nrm.y > 0.5 ? sGoods(vec2(p.x * 1.4, (p.z - RD * 0.45) * 0.9), 0.3, sv + 3.0, vec3(0.7)) : vec3(0.78, 0.74, 0.68)) : (k2 < 1.5 ? vec3(0.2, 0.19, 0.18) : vec3(0.9));
-    else alb = k2 < 0.5 ? (nrm.y > 0.5 ? vec3(0.65, 0.62, 0.58) : vec3(0.42, 0.36, 0.3)) : (k2 < 1.5 ? (p.y > 0.4 ? vec3(0.08, 0.2, 0.07) : vec3(0.3, 0.3, 0.32)) : vec3(0.2, 0.22, 0.25));
+    if (st == 0.0) {
+      if (k2 < 1.5) { vec2 fq = abs(nrm.x) > 0.5 ? vec2(p.z, p.y) : vec2(p.x, p.y); alb = nrm.y > 0.5 ? vec3(0.4) : GD; if (sub == 2.0 && nrm.y > 0.5) { alb = vec3(0.08); emi = step(abs(fract(p.x / 0.6) - 0.5), 0.3) * step(abs(fract(p.z / 0.8) - 0.5), 0.25) * 0.8; } }
+      else if (k2 < 2.5) alb = nrm.y > 0.5 ? vec3(0.25) : mix(vec3(0.82, 0.83, 0.84), vec3(0.15, 0.35, 0.6), step(0.3, p.y) * step(p.y, 0.55));
+      else if (k2 < 3.5) { alb = vec3(0.06); if (nrm.z < -0.5 && p.y > 1.12) { alb = vec3(0.25, 0.45, 0.6); emi = 0.9; } }
+      else if (k2 < 4.5) alb = GD;
+      else if (k2 < 5.5) { alb = nrm.y > 0.5 ? GD * vec3(0.85, 0.95, 1.1) : vec3(0.9, 0.91, 0.92); emi = nrm.y > 0.5 ? 0.7 : 0.0; if (nrm.y < 0.5) alb = mix(alb, vec3(0.1, 0.3, 0.65), step(abs(p.y - 0.6), 0.09)); }
+      else { vec2 fq = abs(nrm.x) > 0.5 ? vec2(p.z, p.y) : vec2(p.x, p.y); float cs = step(0.06, fract(fq.y / 0.26)); vec3 pc = mix(vec3(0.70, 0.10, 0.08), vec3(0.08, 0.25, 0.60), step(0.5, h12(vec2(floor(fq.y / 0.26), sv))));
+        alb = nrm.y > 0.5 ? vec3(0.55, 0.45, 0.30) : mix(vec3(0.15), pc * (0.85 + 0.3 * step(0.5, fract(fq.x / 0.4))), cs); }
+    }
+    else if (st == 1.0) {
+      if (k2 < 0.5) alb = nrm.y > 0.5 ? vec3(0.75, 0.73, 0.7) : vec3(0.28, 0.18, 0.11) * (0.8 + 0.4 * step(0.5, fract(p.x / 0.25)));
+      else if (k2 < 2.5) alb = nrm.y > 0.5 ? vec3(0.72, 0.70, 0.66) : vec3(0.15);
+      else if (k2 < 4.5) alb = vec3(0.08);
+      else if (k2 < 5.5) { float shelf = step(0.5, fract((p.y - 1.06) / 0.2)); vec3 pastry = mix(vec3(0.78, 0.52, 0.25), vec3(0.55, 0.30, 0.15), h12(floor(p.xz / 0.12) + sv)) * step(0.35, fract(p.x / 0.12));
+        alb = mix(vec3(0.85, 0.80, 0.70), pastry, shelf * step(nrm.y, 0.5)); emi = 0.55; }
+      else if (k2 < 6.5) { alb = mix(vec3(0.70, 0.72, 0.74), vec3(0.55, 0.10, 0.08), step(0.5, sv) * step(p.y, 1.42)); alb = mix(alb, vec3(0.05), step(abs(p.y - 1.2), 0.04) * step(abs(fract(p.x / 0.2) - 0.5), 0.12)); }
+      else alb = mix(vec3(0.32, 0.21, 0.13), vec3(0.06), step(p.y, 0.40) * step(0.06, min(min(p.x - b0[7].x, b1[7].x - p.x), min(p.z - b0[7].z, b1[7].z - p.z))));
+    }
+    else if (st == 2.0) alb = k2 < 0.5 ? (nrm.y > 0.5 ? GD : vec3(0.78, 0.74, 0.68)) : (k2 < 1.5 ? vec3(0.2, 0.19, 0.18) : vec3(0.9));
+    else if (st == 3.0) alb = k2 < 0.5 ? (nrm.y > 0.5 ? vec3(0.65, 0.62, 0.58) : vec3(0.42, 0.36, 0.3)) : (k2 < 1.5 ? (p.y > 0.4 ? vec3(0.08, 0.2, 0.07) : vec3(0.3, 0.3, 0.32)) : vec3(0.2, 0.22, 0.25));
+    else if (st == 4.0) {
+      if (sub < 0.5) {
+        if (k2 < 0.5) { alb = nrm.y > 0.5 ? vec3(0.78, 0.76, 0.72) : mix(vec3(0.62, 0.62, 0.64), vec3(0.72, 0.14, 0.12) * (0.9 + 0.1 * step(0.5, fract(p.z / 0.3))), step(0.12, p.y) * step(p.y, 0.98)); }
+        else if (k2 < 5.5 && mod(k2, 2.0) > 0.5) { vec3 vin = mix(vec3(0.62, 0.10, 0.08), vec3(0.08, 0.38, 0.40), step(0.5, sv)); alb = mix(vin, vin * 0.6, step(abs(fract(p.x / 0.26) - 0.5), 0.03)); if (nrm.y > 0.5) alb = vin * 0.8; }
+        else if (k2 < 6.5 || mod(k2, 2.0) < 0.5 && k2 < 5.5) { alb = nrm.y > 0.5 ? vec3(0.82, 0.80, 0.74) : vec3(0.65, 0.66, 0.68); if (nrm.y > 0.5) alb = mix(alb, vec3(0.9, 0.85, 0.7), step(length(fract(p.xz / 0.35) - 0.5), 0.18) * 0.6); }
+        else alb = vec3(0.55, 0.56, 0.58);
+      } else {
+        if (k2 < 0.5) { alb = nrm.y > 0.5 ? vec3(0.12, 0.07, 0.04) : vec3(0.22, 0.13, 0.07) * (0.8 + 0.3 * step(0.5, fract(p.x / 0.3))); alb = mix(alb, vec3(0.6, 0.5, 0.3), step(abs(p.y - 0.18), 0.02)); }
+        else alb = nrm.y > 0.5 || p.y > 0.98 ? vec3(0.18, 0.11, 0.06) : vec3(0.08);
+      }
+    } else { // laundromat
+      if (k2 < 0.5) { if (nrm.x < -0.5) { vec2 dq = vec2(fract(p.z / 0.72) - 0.5, p.y - 0.48); float dr = length(dq * vec2(0.72, 1.0)); float spin = step(0.55, h12(vec2(floor(p.z / 0.72), sv)));
+          alb = vec3(0.90, 0.91, 0.92) * (1.0 - 0.6 * step(0.47, abs(dq.x))); alb = mix(alb, vec3(0.80), step(dr, 0.25) * step(0.21, dr));
+          alb = mix(alb, mix(vec3(0.07, 0.08, 0.09), (0.3 + 0.45 * vec3(h12(vec2(p.z, 1.0)), 0.5, 0.65)) * (0.6 + 0.4 * vnoise(dq * 25.0 + uTime * 2.0)), spin), step(dr, 0.21));
+          alb = mix(alb, vec3(0.12), step(0.78, p.y) * step(p.y, 0.86) * step(abs(dq.x), 0.3)); emi = step(0.80, p.y) * step(p.y, 0.84) * step(abs(dq.x - 0.18), 0.05) * 1.6 * spin; }
+        else alb = vec3(0.86, 0.87, 0.88); }
+      else if (k2 < 1.5) alb = nrm.y > 0.5 ? vec3(0.82, 0.80, 0.74) : vec3(0.35, 0.36, 0.38) * (1.0 - 0.5 * step(p.y, 0.75) * step(0.06, min(p.x - b0[1].x, b1[1].x - p.x)));
+      else if (k2 < 2.5) { float seat = step(0.04, fract(p.z / 0.52)); alb = mix(vec3(0.1), mix(vec3(0.85, 0.42, 0.10), vec3(0.15, 0.40, 0.65), step(0.5, sv)), seat * step(0.32, p.y)); if (p.y < 0.32) alb = vec3(0.35); }
+      else if (k2 < 3.5) { alb = vec3(0.70, 0.72, 0.74); if (nrm.x > 0.5 && p.y > 0.9 && p.y < 1.6) { alb = mix(vec3(0.20, 0.40, 0.75), vec3(0.95), step(abs(fract(p.y / 0.15) - 0.5), 0.12)); emi = 0.9; } }
+      else alb = mix(vec3(0.70, 0.72, 0.74), vec3(0.15), step(0.5, fract(p.x * 12.0)) * step(0.5, fract(p.y * 12.0)) * 0.5);
+    }
   }
   // lighting: ceiling fixtures (soft top-down + wrap), falling off toward the back of deep / dim rooms, café pendants pool light
   float lev = mix(0.62, 0.27, n) * on + (1.0 - on) * mix(0.3, 0.02, n); // night exposure is ~2x day: keep shops from blooming out
+  if (st == 0.0 || st == 5.0) lev *= mix(1.0, 0.80, n); // bright white fluorescent rooms (grocery / laundromat) read too hot at night
   float il = (0.42 + 0.38 * max(nrm.y, 0.0) + 0.12 * max(-nrm.z, 0.0)) * (1.0 - 0.3 * clamp(p.z / RD, 0.0, 1.0)) * (1.0 - 0.25 * step(p.y, 0.4) * (1.0 - nrm.y));
-  if (st == 1.0) { float pd = 0.0; for (int j = 0; j < 2; j++) { vec2 c = j == 0 ? vec2(RW * 0.22, 1.57) : vec2(RW * 0.62, 2.57); pd += exp(-dot(p.xz - c, p.xz - c) * 1.8) * (1.0 - smoothstep(0.8, 2.6, abs(p.y - 2.0))); }
-    il = il * 0.55 + pd * 0.9 + 0.12 * step(RD - 1.7, p.z) * step(1.2, p.y); }
+  if (st == 1.0 || (st == 4.0 && sub > 0.5)) { float pd = 0.0; for (int j = 0; j < 2; j++) { vec2 c = j == 0 ? vec2(RW * 0.22, 1.57) : vec2(RW * 0.62, 2.57); if (st == 4.0) c = j == 0 ? vec2(RW * 0.25, 1.65) : vec2(RW * 0.62, 2.65); pd += exp(-dot(p.xz - c, p.xz - c) * 1.8) * (1.0 - smoothstep(0.8, 2.6, abs(p.y - 2.0))); }
+    il = il * (st == 4.0 ? 0.42 : 0.55) + pd * 0.9 + 0.12 * step(RD - 1.7, p.z) * step(1.2, p.y); }
   // contact shadow under furniture / at the wall foot
-  il *= 1.0 - 0.3 * smoothstep(0.35, 0.0, min(min(p.x, RW - p.x), RD - p.z)) * step(p.y, 0.3);
+  il *= 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.35, min(min(p.x, RW - p.x), RD - p.z))) * step(p.y, 0.3);
   vec3 col = alb * lc * il * lev + (alb * 0.6 + 0.4) * lc * emi * on * mix(0.55, 0.26, n);
-  // café pendants: small glowing globes hanging over each table
-  if (st == 1.0) for (int j = 0; j < 2; j++) { vec3 c = j == 0 ? vec3(RW * 0.22, RH - 0.85, 1.57) : vec3(RW * 0.62, RH - 0.85, 2.57); vec3 oc = ro - c; float b = dot(oc, rds) / dot(rds, rds);
-    vec3 cp = oc - rds * b; float tq = -b; if (tq > 0.0 && tq * length(rds) < t * length(rds)) { float d = length(cp); col += vec3(1.0, 0.72, 0.42) * (smoothstep(0.09, 0.05, d) * 5.0 + smoothstep(0.3, 0.0, d) * 0.5) * on;
+  // pendants: small glowing globes hanging over each table (café, bar)
+  if (st == 1.0 || (st == 4.0 && sub > 0.5)) for (int j = 0; j < 2; j++) { vec3 c = j == 0 ? vec3(RW * 0.22, RH - 0.85, 1.57) : vec3(RW * 0.62, RH - 0.85, 2.57); if (st == 4.0) c = j == 0 ? vec3(RW * 0.25, RH - 1.1, 1.65) : vec3(RW * 0.62, RH - 1.1, 2.65); vec3 oc = ro - c; float b = dot(oc, rds) / dot(rds, rds);
+    vec3 cp = oc - rds * b; float tq = -b; if (tq > 0.0 && tq * length(rds) < t * length(rds)) { float d = length(cp); col += vec3(1.0, 0.72, 0.42) * ((1.0 - smoothstep(0.05, 0.09, d)) * 5.0 + (1.0 - smoothstep(0.0, 0.3, d)) * 0.5) * on;
     } float cord = step(abs(ro.x + rds.x * ((c.z - ro.z) / rds.z) - c.x), 0.006) * step(c.y, ro.y + rds.y * ((c.z - ro.z) / rds.z)); if ((c.z - ro.z) / rds.z < t) col = mix(col, vec3(0.02), cord); }
+  // ceiling fans (Florida diners / cafés / bars); map A only via SHOP_FANS
+  if (SHOP_FANS > 0.5 && (st == 1.0 || st == 4.0)) { sFan(ro, rds, t, vec3(RW * 0.42, RH - 0.55, min(2.0, RD * 0.4)), RH, sv, lc, lev, col);
+    if (st == 4.0 && RD > 5.0) sFan(ro, rds, t, vec3(RW * 0.42, RH - 0.55, RD - 2.2), RH, sv + 0.3, lc, lev, col); }
   // people: 0-2 cut-outs per unit at their own depth (behind the counter = staff, in the aisle = customers)
   for (int j = 0; j < 2; j++) {
     float hj = h12(vec2(sv * 31.0, float(j) * 4.7));
     if (hj < (j == 0 ? 0.25 : 0.55)) continue;
-    float zp = st == 1.0 && j == 0 ? RD - 0.75 : (st == 3.0 && j == 0 ? RD * 0.58 + 1.0 : 1.1 + hj * (RD - 2.6));
-    float xp = st == 0.0 ? (j == 0 ? RW * 0.52 : RW - 1.1) : RW * (0.2 + 0.6 * fract(hj * 7.3));
+    float zp = st == 1.0 && j == 0 ? RD - 0.75 : (st == 3.0 && j == 0 ? RD * 0.58 + 1.0 : (st == 4.0 && j == 0 && sub > 0.5 ? RD - 0.75 : 1.1 + hj * (RD - 2.6)));
+    float xp = st == 0.0 ? (j == 0 ? RW * 0.52 : RW - 1.1) : (st == 4.0 && sub < 0.5 && j == 0 ? RW - 0.45 : (st == 5.0 && j == 0 ? RW * 0.36 - 0.3 : RW * (0.2 + 0.6 * fract(hj * 7.3))));
     float tp = (zp - ro.z) * ird.z; if (tp <= 0.0 || tp > t) continue;
     vec3 pp = ro + rds * tp; vec3 pc; float m = sPerson(vec2(pp.x - xp, pp.y), hj * 17.0 + sv, pc);
     if (m > 0.5) { float pil = (0.5 + 0.35 * smoothstep(0.6, 1.7, pp.y)) * (1.0 - 0.3 * clamp(zp / RD, 0.0, 1.0)); col = pc * lc * pil * lev; t = tp; }
@@ -169,7 +342,7 @@ export function buildingMaterial(T) {
   const cs = texSet(T, 'concrete', 1);
   const mat = new THREE.MeshStandardMaterial({ map: ts.map, normalMap: ts.normalMap, roughnessMap: ts.roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.6, 0.6) });
   ts.map.repeat.set(0.25, 0.25); ts.normalMap.repeat.set(0.25, 0.25); ts.roughnessMap.repeat.set(0.25, 0.25);
-  const uniforms = { tConc: { value: cs.map }, uNight: U.uNight, uTime: U.uTime, uDbg: { value: +(new URLSearchParams(location.search).get('dbg') || 0) } };
+  const uniforms = { tShopK: SHOPK.tex, uShopKB: SHOPK.box, tConc: { value: cs.map }, uNight: U.uNight, uTime: U.uTime, uDbg: { value: +(new URLSearchParams(location.search).get('dbg') || 0) } };
   return prep(mat, 'building', (s) => {
     Object.assign(s.uniforms, uniforms);
     s.vertexShader = s.vertexShader
@@ -179,12 +352,15 @@ attribute vec4 aWin; attribute vec3 aCol; attribute vec3 aGlass; attribute vec3 
 vWin = aWin; vCol = aCol; vGlass = aGlass; vUp = aUp; vUvM = uv; vWPb = (modelMatrix * vec4(position,1.0)).xyz;`);
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform sampler2D tConc; uniform float uNight; uniform float uTime; uniform float uDbg; flat varying vec4 vWin;
+uniform sampler2D tConc; uniform sampler2D tShopK; uniform vec4 uShopKB; uniform float uNight; uniform float uTime; uniform float uDbg; flat varying vec4 vWin;
+const float SHOP_FANS = ${CYBER ? '0.0' : '1.0'};
 vec3 neonPal(float h){ h = fract(h); return h < 0.3 ? vec3(1.0, 0.17, 0.84) : h < 0.58 ? vec3(0.1, 0.94, 1.0) : h < 0.8 ? vec3(0.55, 0.36, 1.0) : vec3(1.0, 0.32, 0.45); } flat varying vec3 vCol; flat varying vec3 vGlass; flat varying vec3 vUp; varying vec2 vUvM; varying vec3 vWPb;
 ${HASH}${SHOPROOM}`)
       .replace('#include <map_fragment>', `
-float style = floor(vWin.x + 0.5); float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
-vec2 cf = vec2(vUvM.x / ww, vUvM.y / fh); vec2 cid = floor(cf); vec2 f = fract(cf);
+${!CYBER && !OLD_ASHOP2 ? `float wx0_ = floor(vWin.x + 0.5); float shopM = floor(wx0_ / 8.0); float style = wx0_ - shopM * 8.0;` : `float style = floor(vWin.x + 0.5);`} float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
+vec2 cf = vec2(vUvM.x / ww, vUvM.y / fh); vec2 cid = floor(cf); vec2 f = fract(cf);${!CYBER && !OLD_ASHOP2 ? `
+// a_shopnight2: storefront open bits decided in JS (shoppools.js: aWin.x = style + 8 * (1 + mask), one bit per 2-bay unit); -1 = old hash
+float shopOn = shopM > 0.5 ? float(((int(shopM) - 1) >> int(clamp(floor(cid.x * 0.5), 0.0, 23.0))) & 1) : -1.0;` : ``}
 float rnd = h12(cid + seed * 17.0); float rnd2 = h12(cid.yx * 1.7 + seed * 3.1);
 float isGlass = 0.0; float frame = 0.0; float lit = 0.0; float interior = 0.0; float shade = 1.0; float isMetal = 0.0; float posterM = 0.0; vec3 posterC = vec3(1.0);
 vec3 wall = vCol;
@@ -251,7 +427,7 @@ if (style == 0.0) { // curtain wall: glass with thin metal mullions + spandrel b
   shade = 1.0;
 }
 // weathering / dirt streaks at the bottom of walls and under windows
-float grime = vnoise(vec2(vUvM.x * 0.7, vUvM.y * 0.08 + seed)) * 0.07 + smoothstep(2.0, 0.0, vUvM.y) * 0.08;
+float grime = vnoise(vec2(vUvM.x * 0.7, vUvM.y * 0.08 + seed)) * 0.07 + (1.0 - smoothstep(0.0, 2.0, vUvM.y)) * 0.08;
 // r6.1 material layering on both maps (the v4.5 霓港 layer generalised): water streaks running down from each sill,
 // splash-back plinth, macro repaint / sun-bleach variation, per-building age, concrete patches, projecting sill + drop shadow
 float streak = 0.0, sill = 0.0, sillSh = 0.0;
@@ -260,25 +436,25 @@ if (style == 2.0 || style == 5.0) {
   float x0s = style == 5.0 ? 0.0 : 0.2; float x1s = style == 5.0 ? 1.0 : 0.8;
   float fx_ = fract(cf.x), fy_ = fract(cf.y);
   float inCol = step(x0s + 0.02, fx_) * step(fx_, x1s - 0.02);
-  streak = inCol * smoothstep(0.28, 0.0, fy_) * smoothstep(0.45, 0.8, sn0) * ${CYBER ? '0.26' : '0.15'} * (0.5 + age);
+  streak = inCol * (1.0 - smoothstep(0.0, 0.28, fy_)) * smoothstep(0.45, 0.8, sn0) * ${CYBER ? '0.26' : '0.15'} * (0.5 + age);
   sill = step(x0s - 0.04, fx_) * step(fx_, x1s + 0.04) * step(0.245, fy_) * step(fy_, 0.28);
-  sillSh = step(x0s - 0.03, fx_) * step(fx_, x1s + 0.03) * smoothstep(0.245, 0.225, fy_) * step(0.19, fy_);
+  sillSh = step(x0s - 0.03, fx_) * step(fx_, x1s + 0.03) * (1.0 - smoothstep(0.225, 0.245, fy_)) * step(0.19, fy_);
 }
 // long run-off streaks below the parapet / every few floors (stronger on 霓港's rain-soaked concrete)
 float roofStreak = smoothstep(0.55, 0.85, vnoise(vec2(vUvM.x * 1.3, seed * 2.0)) * 0.7 + vnoise(vec2(vUvM.x * 5.1, vUvM.y * 0.05)) * 0.3) * (style == 3.0 || style == 4.0 ? 0.0 : 1.0);
 float macro = vnoise(vUvM * vec2(0.09, 0.05) + seed * 1.7);
 float micro = vnoise(vUvM * vec2(1.9, 2.3) + seed) * 0.6 + vnoise(vUvM * 7.0) * 0.4;
-float plinth = smoothstep(${CYBER ? '1.1' : '0.75'}, 0.0, vUvM.y) * (0.6 + 0.4 * vnoise(vec2(vUvM.x * 2.0, seed)));
+float plinth = (1.0 - smoothstep(0.0, ${CYBER ? '1.1' : '0.75'}, vUvM.y)) * (0.6 + 0.4 * vnoise(vec2(vUvM.x * 2.0, seed)));
 vec3 concP = texture2D(tConc, vUvM * 0.21).rgb * vec3(0.95, 0.93, 0.9);
 float patchC = smoothstep(0.66, 0.72, vnoise(vUvM * 0.33 + seed * 5.0)) * step(style, 2.5) * step(1.5, style);
 vec3 wallCol = baseTex * min(wall, vec3(0.9)) * 0.9 * (1.0 - grime) * shade; // v4.0: stucco albedo capped (sunlit walls no longer clip)
 wallCol *= (0.9 + 0.2 * macro) * (0.95 + 0.1 * micro) * (1.0 - streak) * (1.0 - plinth * ${CYBER ? '0.30' : '0.20'}) * (1.0 - sillSh * 0.3);
-${CYBER ? `wallCol *= 1.0 - roofStreak * smoothstep(30.0, 6.0, mod(vUvM.y, 36.0)) * 0.18 * (0.4 + age); // rain run-off
+${CYBER ? `wallCol *= 1.0 - roofStreak * (1.0 - smoothstep(6.0, 30.0, mod(vUvM.y, 36.0))) * 0.18 * (0.4 + age); // rain run-off
 wallCol = mix(wallCol, concP * 0.8, patchC * 0.55);` : `// 索拉纳港: sun-bleached stucco (paler + less saturated high up and on old buildings), warm dust at the foot
 { float lumW = dot(wallCol, vec3(0.299, 0.587, 0.114)); float bleach = (0.15 + 0.35 * age) * smoothstep(3.0, 18.0, vUvM.y) * (0.6 + 0.4 * macro);
   wallCol = mix(wallCol, vec3(lumW) * vec3(1.06, 1.04, 1.0), bleach * 0.45);
   wallCol = mix(wallCol, wallCol * vec3(0.86, 0.80, 0.72), plinth * 0.5);
-  wallCol *= 1.0 - roofStreak * smoothstep(14.0, 4.0, mod(vUvM.y, 18.0)) * 0.07 * age;
+  wallCol *= 1.0 - roofStreak * (1.0 - smoothstep(4.0, 14.0, mod(vUvM.y, 18.0))) * 0.07 * age;
   wallCol = mix(wallCol, concP * vec3(0.95, 0.92, 0.86), patchC * 0.25 * age); }`}
 wallCol = mix(wallCol, vec3(0.86, 0.85, 0.82) * baseTex, sill * 0.85);
 vec3 frameCol = style == 0.0 || style == 3.0 ? vec3(0.06, 0.065, 0.07) + wall * 0.15 : vec3(0.85, 0.85, 0.82);
@@ -296,13 +472,96 @@ vec2 fw = fwidth(cf); float aa = smoothstep(0.18, 0.6, max(fw.x, fw.y));
 float avgG = style == 0.0 ? 0.80 : (style == 1.0 ? 0.76 : (style == 5.0 ? 0.48 : (style == 3.0 ? 0.70 : (style == 2.0 ? 0.22 : 0.0))));
 isGlass = mix(isGlass, avgG, aa); frame = mix(frame, (1.0 - avgG) * (style == 2.0 || style == 5.0 ? 0.15 : 0.7), aa); shade = mix(shade, 1.0, aa); bl *= 1.0 - aa;
 frameCol *= 0.88 + 0.24 * vnoise(vUvM * vec2(13.0, 17.0) + seed); // r6.1 paint wear / dirt on frames
-vec3 col = mix(wallCol, frameCol, frame);
-reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
+${CYBER ? `// b_alleyface (霓港): style 6 = service frontage of the core's ground floor facing an alley / back yard / gap (city.js svcEdges):
+// sooty concrete + glazed tile dado, roller shutters, steel doors with an exit sign, exhaust louvres, delivery hatches, meter
+// conduits, paper notices, rust run-off. Bay plan = svcface.js (v = (7k + ps) mod 11; vGlass = (ps, alley?, band base y)).
+float svcM = 0.0, svcH = 0.0, svcR = 0.8, svcMet = 0.0; vec3 svcC = vec3(0.0), svcE = vec3(0.0);
+if (style == 6.0) {
+  float yb = vUvM.y - vGlass.z; float uu = vUvM.x; float kb = floor(uu / ww); float lu = uu - (kb + 0.5) * ww;
+  float vv = mod(kb * 7.0 + vGlass.x, 11.0);
+  float t = vv < 1.5 ? 0.0 : (vv < 3.5 ? 1.0 : (vv < 5.5 ? 2.0 : (vv < 7.5 ? 3.0 : (vv < 8.5 ? 4.0 : 5.0))));
+  if (ww < 2.4) t = 0.0;
+  float hs = h12(vec2(kb * 1.31 + 0.7, seed * 0.53));
+  float px = max(max(fwidth(uu), fwidth(yb)), 1e-4); float fine = 1.0 - smoothstep(0.012, 0.04, px);
+  vec3 wc = mix(mix(wallCol, vec3(dot(wallCol, vec3(0.3, 0.59, 0.11))), 0.55), concP * vec3(0.6, 0.6, 0.58), 0.62 + 0.15 * vGlass.y) * (0.92 + 0.16 * hs);
+  float dado = step(yb, 1.25);
+  vec2 tg = vec2(uu / 0.2, yb / 0.15); vec2 tq = abs(fract(tg) - 0.5); float tin = 1.0 - smoothstep(0.43, 0.48, max(tq.x, tq.y));
+  tin = mix(tin, 0.88, 1.0 - fine); float tv = h12(floor(tg) + seed);
+  vec3 tileC = mix(vec3(0.74, 0.76, 0.72), vec3(0.36, 0.52, 0.46), step(0.5, fract(seed * 0.37))) * (0.86 + 0.18 * tv);
+  tileC = mix(tileC * 0.45, tileC, tin); tileC = mix(tileC, wc * 0.55, step(0.972, tv) * fine);
+  tileC *= 1.0 - 0.4 * smoothstep(0.7, 0.0, yb) * (0.6 + 0.4 * vnoise(vec2(uu * 1.7, seed)));
+  wc = mix(wc, tileC, dado); wc *= 1.0 - 0.45 * step(abs(yb - 1.26), 0.022);
+  float stk = smoothstep(0.55, 0.9, vnoise(vec2(uu * 2.3, seed * 1.9)) * 0.7 + vnoise(vec2(uu * 7.1, yb * 0.15)) * 0.3);
+  wc *= 1.0 - stk * 0.28 * (1.0 - dado * 0.6);
+  svcC = wc; svcM = 1.0; svcR = mix(0.88, 0.22 + 0.25 * (1.0 - tin), dado); svcH = dado * (tin - 1.0) * 0.004 * fine;
+  float hw = 0.0, o0 = 0.0, o1 = 0.0;
+  if (t == 2.0) { hw = min(ww * 0.5 - 0.45, 1.5); o1 = 2.55; }
+  else if (t == 5.0) { hw = 0.5; o1 = 2.15; }
+  else if (t == 4.0) { hw = min(0.7, ww * 0.5 - 0.5); o0 = 1.0; o1 = 2.05; }
+  else if (t == 3.0) { hw = 0.6; o0 = 1.9; o1 = 2.7; }
+  float inO = step(abs(lu), hw) * step(o0, yb) * step(yb, o1); float oy = yb - o0;
+  if (t == 2.0 || t == 4.0 || t == 5.0) { // painted steel guide rails / door frame (0.07 m) round the opening
+    float fr = step(hw, abs(lu)) * step(abs(lu), hw + 0.07) * step(o0 - (t == 4.0 ? 0.07 : 0.0), yb) * step(yb, o1 + (t == 2.0 ? 0.0 : 0.07));
+    if (t == 5.0) fr = max(fr, step(abs(lu), hw + 0.07) * step(o1, yb) * step(yb, o1 + 0.07));
+    svcC = mix(svcC, (t == 5.0 ? vec3(0.102, 0.124, 0.156) * 0.9 : vec3(0.24, 0.25, 0.26)) * (0.8 + 0.4 * vnoise(vec2(yb * 3.0, lu))), fr); svcR = mix(svcR, 0.45, fr); svcMet = max(svcMet, 0.5 * fr); svcH += fr * 0.012 * fine; } // b_alleyface2: door frame in the door steel
+  if (t == 3.0 || t == 4.0 || t == 1.0) { float b0 = t == 1.0 ? 1.1 : o0 - 0.08; float hw2 = t == 1.0 ? 0.45 : hw;
+    float run = step(abs(lu), hw2) * step(yb, b0) * smoothstep(b0 - 1.6, b0, yb) * smoothstep(0.3, 0.75, vnoise(vec2(lu * 6.0, hs * 9.0)));
+    svcC = mix(svcC, svcC * vec3(0.55, 0.42, 0.33), run * 0.7); }
+  if (t == 2.0 || t == 4.0) {
+    float sl = fract(oy / 0.075);
+    vec3 sc = mix(vec3(0.52, 0.55, 0.57), vec3(0.34, 0.38, 0.42), step(0.5, hs)) * (0.82 + 0.3 * vnoise(vec2(uu * 2.6, yb * 0.9) + seed));
+    sc *= mix(0.86, 0.68 + 0.36 * smoothstep(0.0, 0.55, sl) * smoothstep(1.0, 0.75, sl), fine);
+    sc = mix(sc, vec3(0.30, 0.19, 0.12), smoothstep(0.7, 0.0, oy) * 0.55 * vnoise(vec2(uu * 4.0, 3.0)));
+    // spray tag: a row of wavy letter strokes + an underline in a 1.6 x 0.5 m box at chest height (35 % of shutters)
+    float tx_ = lu - (fract(hs * 5.3) - 0.5) * max(hw - 0.9, 0.0); float ty_ = oy - (t == 4.0 ? 0.55 : 1.05);
+    float tbox = step(abs(tx_), min(0.8, hw - 0.2)) * step(abs(ty_), 0.26);
+    float tstr = 1.0 - smoothstep(0.05, 0.09, abs(fract(tx_ * 2.6 + 0.3 * sin(ty_ * 11.0 + hs * 40.0) + hs * 3.0) - 0.5));
+    float tag = step(hs, 0.35) * max(tbox * tstr * step(abs(ty_), 0.2), tbox * step(abs(ty_ + 0.23 - 0.03 * sin(tx_ * 6.0)), 0.025)) * fine;
+    sc = mix(sc, neonPal(hs * 3.7) * 0.75 + 0.05, tag * 0.85);
+    sc = mix(sc, vec3(0.12, 0.12, 0.13), step(oy, 0.07));
+    sc = mix(sc, vec3(0.05), step(abs(lu), 0.06) * step(abs(oy - 0.16), 0.05) * step(o0, 0.5));
+    svcC = mix(svcC, sc, inO); svcR = mix(svcR, 0.5 + 0.2 * tag, inO); svcMet = 0.6 * inO * (1.0 - tag);
+    svcH += inO * (smoothstep(0.0, 0.5, sl) * smoothstep(1.0, 0.5, sl) - 0.5) * 0.006 * fine;
+  } else if (t == 5.0) {
+    // b_alleyface2: one steel-door look with alley.js (its door material 0x5a636e, roughness 0.55, metalness 0.45, frame 0.08 m,
+    // kick plate to 0.3 m, lever at 0.39 m and 1.02 m, hood 1.16 by 0.2 m): the painted door and the fitted door read as the same make
+    vec3 dc = vec3(0.102, 0.124, 0.156) * (0.85 + 0.3 * vnoise(vec2(uu * 3.0, yb * 1.3) + seed));
+    float pnl = step(0.06, hw - abs(lu)) * step(abs(abs(lu) - (hw - 0.1)), 0.012) * step(0.3, yb) * step(yb, 2.0);
+    float grl = step(abs(lu), hw - 0.14) * step(0.25, yb) * step(yb, 0.55) * step(0.5, fract(yb / 0.04));
+    float kick = step(yb, 0.3); float lever = step(abs(lu - 0.39), 0.05) * step(abs(yb - 1.02), 0.02);
+    vec3 dcol = mix(dc, dc * 0.55, pnl); dcol = mix(dcol, vec3(0.03), grl * fine); dcol = mix(dcol, dc * 1.3, kick); dcol = mix(dcol, dc * 1.6, lever);
+    dcol *= 1.0 - 0.3 * smoothstep(0.5, 0.0, abs(lu - hw * 0.6)) * smoothstep(0.6, 1.1, yb) * step(yb, 1.5);
+    svcC = mix(svcC, dcol, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.45 * inO;
+    float sgn = step(abs(lu), 0.17) * step(abs(yb - 2.49), 0.07);
+    float gly = sgn * step(0.5, fract(lu * 9.0 + 0.25)) * step(abs(yb - 2.49), 0.035) * fine;
+    svcC = mix(svcC, mix(vec3(0.1, 0.75, 0.35), vec3(0.9), gly), sgn); svcE = vec3(0.15, 1.0, 0.4) * sgn * (1.0 - gly * 0.6) * 2.2;
+  } else if (t == 3.0) {
+    float bl_ = fract(oy / 0.07); float fr_ = clamp(step(hw - 0.05, abs(lu)) + step(oy, 0.05) + step(o1 - 0.05, yb), 0.0, 1.0);
+    vec3 lc = mix(vec3(0.05), vec3(0.46, 0.48, 0.49) * (0.7 + 0.5 * smoothstep(0.2, 0.7, bl_)), mix(0.6, step(0.35, bl_), fine));
+    lc = mix(lc, vec3(0.40, 0.42, 0.43), fr_); lc = mix(lc, lc * vec3(0.7, 0.55, 0.42), 0.4 * vnoise(vec2(lu * 5.0, yb * 4.0)));
+    svcC = mix(svcC, lc, inO); svcR = mix(svcR, 0.55, inO); svcMet = 0.5 * inO; svcH += inO * (bl_ - 0.5) * 0.008 * fine;
+  } else if (t == 1.0) {
+    float cy = step(2.2, yb) * step(yb, fh - 0.05);
+    float cnd = clamp(cy * (step(abs(lu + 0.24), 0.022) + step(abs(lu), 0.028) + step(abs(lu - 0.24), 0.018)), 0.0, 1.0);
+    float clp = cnd * step(0.85, fract(yb / 0.9));
+    svcC = mix(svcC, vec3(0.16, 0.17, 0.18) + clp * 0.25, cnd); svcH += cnd * 0.01 * fine;
+    float lab = step(abs(lu - 0.66), 0.09) * step(abs(yb - 1.75), 0.06); svcC = mix(svcC, vec3(0.85, 0.7, 0.1), lab);
+  } else {
+    float pw = 0.32 + 0.2 * fract(hs * 7.0); float pcx = (fract(hs * 3.3) - 0.5) * max(ww - 1.2, 0.0);
+    float pp = step(0.55, hs) * step(abs(lu - pcx), pw * 0.5) * step(abs(yb - 1.65), 0.24);
+    vec3 pcol = mix(vec3(0.82, 0.8, 0.72), vec3(0.85, 0.3, 0.25), step(0.8, hs)) * (0.7 + 0.3 * vnoise(vec2(uu * 8.0, yb * 8.0)));
+    pcol = mix(pcol, vec3(0.15), step(0.5, fract(yb * 14.0)) * step(abs(lu - pcx), pw * 0.35) * step(abs(yb - 1.62), 0.12) * fine);
+    svcC = mix(svcC, pcol, pp); svcR = mix(svcR, 0.9, pp);
+  }
+  svcH *= 1.0 - smoothstep(0.08, 0.3, px);
+}
+` : ''}vec3 col = mix(wallCol, frameCol, frame);
+${CYBER ? 'col = mix(col, svcC, svcM); // b_alleyface\n' : ''}reveal *= 1.0 - aa; col = mix(col, wallCol * revealK * (1.0 - 0.25 * (1.0 - revealK)), reveal); // r6.1 recess reveal (head soffit darkest)
 col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
 ${CYBER ? `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.36 : 0.42);` : `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.42 : 0.5);`}
-lit = max(lit, step(rnd, litChance));
+lit = max(lit, step(rnd, litChance));${!CYBER && !OLD_ASHOP2 ? ` if (style == 3.0 && shopOn > -0.5) lit = shopOn; // a_shopnight2` : ``}
 `)
       .replace('#include <roughnessmap_fragment>', `
 float roughnessFactor = roughness;
@@ -311,18 +570,18 @@ roughnessFactor *= mix(texelRoughness.g * 0.9 + 0.1, 0.35 + 0.2 * micro, frame);
 roughnessFactor *= 0.9 + 0.2 * micro;
 ${CYBER ? `roughnessFactor = mix(roughnessFactor, 0.32, clamp(streak * 3.0 + roofStreak * 0.5 + plinth * 0.6, 0.0, 1.0) * (0.35 + 0.65 * uNight)); // wet run-off / splash zone` : ``}
 roughnessFactor = mix(roughnessFactor, mix(0.02 + 0.06 * rnd2 + gDirt * 0.25, 0.6, bl), isGlass);
-`)
+${CYBER ? 'roughnessFactor = mix(roughnessFactor, svcR, svcM); // b_alleyface\n' : ''}`)
       .replace('#include <metalnessmap_fragment>', `
 float metalnessFactor = mix(isMetal * 0.7, (style == 0.0 ? 0.9 : (style == 3.0 ? 0.45 : 0.6)) * (1.0 - bl), isGlass);
-`)
+${CYBER ? 'metalnessFactor = max(metalnessFactor, svcMet); // b_alleyface\n' : ''}`)
       .replace('#include <normal_fragment_maps>', `
 #include <normal_fragment_maps>
 normal = normalize(mix(normal, nonPerturbedNormal, max(isGlass, frame)));
 // r6.1 procedural relief on the wall: trowelled stucco (索拉纳港) / board-formed concrete with tie holes (霓港), fades out with distance
 { float wallOnly = (1.0 - isGlass) * (1.0 - frame) * (1.0 - reveal) * (1.0 - aa);
-${CYBER ? `  float hb = (vnoise(vUvM * vec2(3.0, 1.2) + seed) * 0.5 + vnoise(vUvM * 9.0) * 0.25) * 0.006 - smoothstep(0.035, 0.0, abs(fract(vUvM.y / 1.2) - 0.5) - 0.465) * 0.004
-           - smoothstep(0.06, 0.0, length(fract(vUvM / vec2(0.9, 0.6)) - 0.5)) * 0.003;` : `  float hb = (vnoise(vUvM * vec2(2.3, 2.9) + seed) * 0.55 + vnoise(vUvM * 8.5 + 3.0) * 0.3 + vnoise(vUvM * 23.0) * 0.15) * 0.007;`}
-  hb *= wallOnly;
+${CYBER ? `  float hb = (vnoise(vUvM * vec2(3.0, 1.2) + seed) * 0.5 + vnoise(vUvM * 9.0) * 0.25) * 0.006 - (1.0 - smoothstep(0.0, 0.035, abs(fract(vUvM.y / 1.2) - 0.5) - 0.465)) * 0.004
+           - (1.0 - smoothstep(0.0, 0.06, length(fract(vUvM / vec2(0.9, 0.6)) - 0.5))) * 0.003;` : `  float hb = (vnoise(vUvM * vec2(2.3, 2.9) + seed) * 0.55 + vnoise(vUvM * 8.5 + 3.0) * 0.3 + vnoise(vUvM * 23.0) * 0.15) * 0.007;`}
+${CYBER ? '  hb += svcH; // b_alleyface\n' : ''}  hb *= wallOnly;
   vec2 dH = vec2(dFdx(hb), dFdy(hb));
   vec3 sX = dFdx(-vViewPosition), sY = dFdy(-vViewPosition); vec3 R1 = cross(sY, normal), R2 = cross(normal, sX);
   float fDet = dot(sX, R1) * faceDirection; vec3 vGrad = sign(fDet) * (dH.x * R1 + dH.y * R2);
@@ -358,6 +617,12 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
   float depthF = 0.55 + 0.45 * smoothstep(0.0, 0.35, abs(f.x - 0.5));
   float furn = step(0.5, h12(vec2(floor(vUvM.x * 1.3), seed))) * step(f.y, 0.42);
   vec3 room = warm * (depthF * (1.0 - furn * 0.6) + ceil * 1.6);
+  // a_interior: shop kind per 2-bay unit — from the sign over it (map A shop-kind grid, sampled at the unit centre), else hashed
+  float shopK = 0.0, shopS = -1.0;
+  if (style == 3.0) { float unitK = floor(cid.x * 0.5); float hk = h12(vec2(seed * 3.7, unitK));
+    shopK = ${CYBER ? 'floor(hk * 4.0)' : 'floor(hk * 6.0); shopK = shopK == 2.0 ? 4.0 : (shopK == 3.0 ? 5.0 : (shopK == 4.0 ? 2.0 : (shopK == 5.0 ? 3.0 : shopK)))'};
+    if (uShopKB.z > 0.0) { vec3 uc = vWPb + rTt * ((unitK * 2.0 + 1.0) * ww - vUvM.x) - rNg * 0.3; vec2 kq = (uc.xz - uShopKB.xy) * uShopKB.z;
+      if (kq.x > 0.0 && kq.y > 0.0 && kq.x < 1.0 && kq.y < 1.0) { vec4 kk = texture2D(tShopK, kq) * 255.0; if (kk.r > 0.5) { shopK = floor(kk.r + 0.5) - 1.0; shopS = floor(kk.g + 0.5) - 1.0; } } } }
   if (style == 3.0) { // v3.4 shop interior: pale back wall, small merchandise on shelf rows, counter, ceiling troffers
     float rows = fract(f.y * 7.0);
     float shelfBand = step(0.10, f.y) * step(f.y, 0.60);
@@ -365,7 +630,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
     vec3 goods = mix(vec3(0.62, 0.58, 0.52), vec3(fract(gh * 7.31), fract(gh * 3.17), fract(gh * 5.73)), 0.5);
     float gx = fract(vUvM.x * 10.0);
     float item = step(0.22, gh) * step(0.12, gx) * step(gx, 0.88) * step(0.18, rows) * step(rows, 0.86);
-    float shelfLine = smoothstep(0.09, 0.0, rows);
+    float shelfLine = (1.0 - smoothstep(0.0, 0.09, rows));
     float aisle = step(0.78, h12(vec2(floor(vUvM.x * 0.45), seed)));
     vec3 wallC = mix(vec3(0.92, 0.88, 0.82), vec3(0.82, 0.88, 0.92), step(0.5, rnd2));
     float troffer = step(0.72, f.y) * step(f.y, 0.75) * step(0.35, fract(vUvM.x * 0.5)) * step(fract(vUvM.x * 0.5), 0.65);
@@ -373,15 +638,15 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
          + vec3(1.0, 0.98, 0.92) * troffer * 1.1 + vec3(0.9, 0.85, 0.78) * step(f.y, 0.2) * aisle * 0.3;
     room *= mix(vec3(1.0), warm, 0.45);
     // r6.1 not every shop is a grocery: per-shop interior type (2-bay units) -> café / boutique / office as well
-    float stype = floor(h12(vec2(seed * 3.7, floor(cid.x * 0.5))) * 4.0);
+    float stype = shopK < 1.5 || shopK == 3.0 ? shopK : (shopK == 4.0 ? 1.0 : (shopK == 5.0 ? 3.0 : 2.0)); // far look: diner -> café, laundromat -> office (cool, bright)
     if (stype == 1.0) { // café / restaurant: warm darker room, table + chair silhouettes, pendant lamps, a counter at the back
       vec3 wc = vec3(0.55, 0.38, 0.26) * (0.8 + 0.4 * rnd2);
       float tx = fract(vUvM.x * 0.55); float table = step(0.28, f.y) * step(f.y, 0.31) * step(0.2, tx) * step(tx, 0.62) + step(f.y, 0.29) * step(abs(tx - 0.41), 0.02);
       float chair = step(f.y, 0.36) * step(0.12, f.y) * (step(abs(tx - 0.12), 0.03) + step(abs(tx - 0.72), 0.03));
-      float pend = smoothstep(0.05, 0.0, length(vec2((tx - 0.41) * 2.0, f.y - 0.6))) ;
+      float pend = (1.0 - smoothstep(0.0, 0.05, length(vec2((tx - 0.41) * 2.0, f.y - 0.6)))) ;
       float cord = step(0.6, f.y) * step(abs(tx - 0.41), 0.004);
       room = wc * mix(0.30, 0.18, uNight) * depthF; room = mix(room, vec3(0.06, 0.04, 0.03), clamp(table + chair + cord, 0.0, 1.0));
-      room += vec3(1.0, 0.72, 0.4) * pend * 2.2 + vec3(1.0, 0.75, 0.45) * smoothstep(0.6, 0.0, abs(f.y - 0.58)) * 0.12;
+      room += vec3(1.0, 0.72, 0.4) * pend * 2.2 + vec3(1.0, 0.75, 0.45) * (1.0 - smoothstep(0.0, 0.6, abs(f.y - 0.58))) * 0.12;
     } else if (stype == 2.0) { // boutique: bright white room, clothes on rails, track spots
       vec3 wc = vec3(0.92, 0.9, 0.88);
       float rail = step(abs(f.y - 0.58), 0.006); float gx = fract(vUvM.x * 4.0); vec2 gid2 = vec2(floor(vUvM.x * 4.0), seed);
@@ -390,7 +655,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
       // vis-sweep: was an L1 distance -> hard white diamonds on every boutique window; now a round track-light head + a soft
       // downward wash on the wall below it
       vec2 sd = vec2((fract(vUvM.x * 0.7) - 0.5) * 0.3, (f.y - 0.73) * 0.6);
-      float spot = smoothstep(0.03, 0.012, length(sd)) + smoothstep(0.16, 0.0, length(vec2(sd.x * 1.5, max(-sd.y, 0.0) * 0.45))) * step(f.y, 0.73) * 0.3;
+      float spot = (1.0 - smoothstep(0.012, 0.03, length(sd))) + (1.0 - smoothstep(0.0, 0.16, length(vec2(sd.x * 1.5, max(-sd.y, 0.0) * 0.45)))) * step(f.y, 0.73) * 0.3;
       room = wc * mix(0.30, 0.22, uNight) * depthF; room = mix(room, cc * 0.45, cloth); room = mix(room, vec3(0.1), rail);
       room += vec3(1.0, 0.95, 0.85) * spot * 0.8;
     } else if (stype == 3.0) { // office / bank: cool white, reception desk, a plant, ceiling panels
@@ -406,12 +671,12 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
     }
   }
   if (style == 3.0 && isGlass > 0.01 && aa < 0.99) { // r6.3 parallax shop room (near); far bays keep the flat interior above
-    float unit = floor(cid.x * 0.5); float st3 = floor(h12(vec2(seed * 3.7, unit)) * 4.0); float sv = h12(vec2(unit * 1.37 + 0.5, seed * 2.9));
+    float unit = floor(cid.x * 0.5); float st3 = shopK; float sv = h12(vec2(unit * 1.37 + 0.5, seed * 2.9));
     float RW = 2.0 * ww; float ux = (cid.x - unit * 2.0 + f.x) * ww; float RD = 4.2 + 3.2 * h12(vec2(seed, unit + 0.5));
-    float onU = max(1.0 - n, step(h12(vec2(unit, seed * 5.3)), 0.86));
+    float onU = max(1.0 - n, ${!CYBER && !OLD_ASHOP2 ? `shopOn > -0.5 ? shopOn : ` : ``}step(h12(vec2(unit, seed * 5.3)), 0.86));
     vec3 rdS = vec3(vt_.xy, max(vt_.z, 0.06));
-    gLod = max(smoothstep(0.42, 0.16, rdS.z / length(rdS)), smoothstep(0.02, 0.06, max(fw.x * ww, fw.y * fh)));
-    vec3 roomS = shopRoom(vec2(clamp(ux, 0.02, RW - 0.02), clamp(f.y * fh, 0.05, fh * 0.86 - 0.05)), rdS, RW, fh * 0.86, RD, st3, sv, n, onU);
+    gLod = max((1.0 - smoothstep(0.16, 0.42, rdS.z / length(rdS))), smoothstep(0.02, 0.06, max(fw.x * ww, fw.y * fh)));
+    vec3 roomS = shopRoom(vec2(clamp(ux, 0.02, RW - 0.02), clamp(f.y * fh, 0.05, fh * 0.86 - 0.05)), rdS, RW, fh * 0.86, RD, st3, sv, n, onU, shopS);
     float fresS = pow(1.0 - clamp(rdS.z / length(rdS), 0.0, 1.0), 4.0);
     totalEmissiveRadiance += roomS * isGlass * (1.0 - aa) * (1.0 - fresS * 0.8) * (1.0 - posterM);
   }
@@ -448,7 +713,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
     float cw = RW * (0.08 + 0.2 * step(0.5, h12(cid + 1.1)));
     float curt = max(step(ro.x, cw), step(RW - cw, ro.x));
     vec3 curtC = mix(vec3(0.85, 0.82, 0.74), vec3(0.75, 0.55, 0.45), step(0.7, rnd2));
-    float lamp = smoothstep(RW * 0.5, 0.0, length(hp.xz - vec2(RW * 0.5, RD * 0.5))) * step(RH2 * 0.9, hp.y);
+    float lamp = (1.0 - smoothstep(0.0, RW * 0.5, length(hp.xz - vec2(RW * 0.5, RD * 0.5)))) * step(RH2 * 0.9, hp.y);
     vec3 nightL = warm * (0.7 * depthK + lamp * 1.5);
     vec3 dayL = vec3(0.95, 0.97, 1.0) * exp(-hp.z / RD * 1.4) * 0.9 + 0.08;
     vec3 roomI = rc * mix(dayL * 0.34, nightL * lit, n);
@@ -460,6 +725,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
   totalEmissiveRadiance += room * inside * k;
 ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner strip on towers, neon fascia over storefronts
   if (n > 0.01) {
+    totalEmissiveRadiance += svcE * n; // b_alleyface: exit signs over the service doors
     vec3 pc = neonPal(seed * 0.137 + 0.05);
     float fl = cid.y;
     if (style == 0.0 || style == 1.0 || (style == 2.0 && vUvM.y > 16.0 && fract(seed * 0.31) < 0.5)) {
@@ -467,14 +733,14 @@ ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner stri
       // bands on absolute height so they stay continuous lines (>= 1.5 px) from the air; chase light runs along the facade
       float per = fh * every; float yy = mod(vUvM.y + floor(seed) * fh, per);
       float bh = max(0.22, fwidth(vUvM.y) * 1.6);
-      float bandM = smoothstep(bh, bh * 0.4, yy) * step(6.0, vUvM.y);
+      float bandM = (1.0 - smoothstep(bh * 0.4, bh, yy)) * step(6.0, vUvM.y);
       float chase = 0.55 + 0.45 * sin(vUvM.x * 0.35 - uTime * 2.2 + seed);
       float cw = max(0.5, fwidth(vUvM.x) * 1.6);
-      float corner = smoothstep(cw, cw * 0.3, vUvM.x) * step(0.5, fract(seed * 0.73)) * step(4.0, vUvM.y);
+      float corner = (1.0 - smoothstep(cw * 0.3, cw, vUvM.x)) * step(0.5, fract(seed * 0.73)) * step(4.0, vUvM.y);
       totalEmissiveRadiance += pc * (bandM * chase * 4.0 + corner * 3.0) * n;
     }
     if (style == 3.0) {
-      float fas = smoothstep(0.835, 0.845, f.y) * smoothstep(0.875, 0.865, f.y);
+      float fas = smoothstep(0.835, 0.845, f.y) * (1.0 - smoothstep(0.865, 0.875, f.y));
       totalEmissiveRadiance += neonPal(seed * 0.21 + cid.x * 0.37) * fas * 6.0 * n;
     }
     // r6.1 neon light actually falling on the surfaces around it: each storefront fascia throws its own colour up the wall
@@ -483,9 +749,9 @@ ${CYBER ? `  // v4.5 cyberpunk night: LED bands every few floors + a corner stri
       float bay = floor(vUvM.x / max(ww, 0.5));
       float yF = style == 3.0 ? fh * 0.855 : 4.0; float dy = vUvM.y - yF;
       float fall = exp(-max(dy, 0.0) / 2.2) * step(-0.2, dy) + exp(min(dy, 0.0) / 1.4) * (1.0 - step(-0.2, dy)) * 0.8;
-      fall *= smoothstep(13.0, 2.0, vUvM.y);
+      fall *= (1.0 - smoothstep(2.0, 13.0, vUvM.y));
       vec3 spillC = neonPal(seed * 0.21 + bay * 0.37);
-      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6; }
+      totalEmissiveRadiance += spillC * diffuseColor.rgb * fall * wallLit * n * 1.6 * (style == 6.0 ? 0.25 : 1.0); } // b_alleyface: weak spill on service faces
   }
 ` : ``}  // coloured facade up-lighting on the Art Deco hotels at night
   float wallM = (1.0 - isGlass) * (1.0 - frame * 0.5);
@@ -502,6 +768,8 @@ if (uDbg == 5.0) gl_FragColor = vec4(diffuseColor.rgb, 1.0);
   });
 }
 
+// r6.4 b_ground (霓港 only): ground-detail shader text in the road / sidewalk programs (?noground = old text)
+const BG = CYBER && !(typeof location !== 'undefined' && /[?&]noground\b/.test(location.search));
 // --------------------------------------------------------------------- road surface ----
 // attributes: aRd = (across m, along m, segment length, kind) ; kind 0 = 4-lane two-way, 1 = intersection, 2 = 2-lane, 3 = 6-lane causeway
 export function roadMaterial(T, refl) {
@@ -520,14 +788,14 @@ vRd = aRd; vRW = (modelMatrix * vec4(position, 1.0)).xyz;`);
       .replace('#include <common>', `#include <common>
 uniform float uWet; uniform float uNight; uniform sampler2D tRefl; uniform mat4 uReflMat; uniform float uReflOn; varying vec4 vRd; varying vec3 vRW; uniform vec4 uLampP[10]; uniform vec3 uLampC[10];
 ${HASH}
-float bandM(float x, float c, float w){ return smoothstep(w*0.5+0.02, w*0.5-0.02, abs(x-c)); }`)
+float bandM(float x, float c, float w){ return 1.0 - smoothstep(w*0.5-0.02, w*0.5+0.02, abs(x-c)); }`)
       .replace('#include <map_fragment>', `
 vec4 texelColor = texture2D(map, vMapUv);
 float u = vRd.x, v = vRd.y, L = vRd.z, kind = floor(vRd.w + 0.5);
 float au = abs(u);
 vec3 paintW = vec3(0.86, 0.86, 0.82), paintY = vec3(0.86, 0.66, 0.16);
 float wpaint = 0.0, ypaint = 0.0, bikeM = 0.0, bikeG = 0.0;
-float wear = vnoise(vRW.xz * 0.35) * 0.6 + vnoise(vRW.xz * 2.3) * 0.4;
+${CYBER ? '' : 'float sgTrW = 0.0; // a_signage: transverse markings (zebra / stop line / arrows) take tyre wear\n'}float wear = vnoise(vRW.xz * 0.35) * 0.6 + vnoise(vRW.xz * 2.3) * 0.4;
 if (kind == 0.0 || kind == 3.0) {
   float hw = kind == 3.0 ? 10.5 : 7.0;
   ypaint = max(bandM(u, 0.18, 0.12), bandM(u, -0.18, 0.12));
@@ -537,16 +805,22 @@ if (kind == 0.0 || kind == 3.0) {
   // crosswalks + stop lines at both ends
   float e = min(v, L - v);
   float zebra = step(0.5, fract(u / 1.1)) * step(1.0, e) * step(e, 4.2) * step(au, hw - 0.5);
-  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
+${BG ? `  // b_ground: worn zebra — paint gone in the wheel paths, ragged stripe ends, a few stripes faded as a whole
+  { float zs = floor(u / 1.1); float zh = h12(vec2(zs, floor(L * 0.37)));
+    float wp = smoothstep(0.42, 0.2, abs(abs(fract(au / 3.5) - 0.5) - 0.25) * 3.5 / 1.4);
+    float zn = vnoise(vRW.xz * 5.5) * 0.55 + vnoise(vRW.xz * 19.0) * 0.45;
+    float keep = step(wp * 0.62 + (1.0 - smoothstep(0.0, 0.9, min(e - 1.0, 4.2 - e))) * 0.35 + zh * 0.25, zn + 0.18);
+    zebra *= keep * mix(1.0, 0.55, step(0.8, zh)); }
+` : ``}  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
   wpaint = max(wpaint, max(zebra, stopl));
-  if (e < 5.4) ypaint *= step(5.4, e);
+${CYBER ? '' : '  sgTrW = max(zebra, stopl);\n'}  if (e < 5.4) ypaint *= step(5.4, e);
   // v3.4 lane arrows before the stop line (GTA6_REFERENCE §6 road markings)
   float laneC = au < 3.5 ? 1.75 : 5.25; float ue = abs(au - laneC);
   float inb = step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, 6.6);
   float shaft = step(ue, 0.11) * step(9.0, e) * step(e, 11.6);
   float head = step(11.6, e) * step(e, 13.0) * step(ue, 0.42 * (13.0 - e) / 1.4);
   wpaint = max(wpaint, (shaft + head) * inb * step(30.0, L));
-  // green bike lanes on island/bayfront streets (not the beachfront drive with its parking lane)
+${CYBER ? '' : '  sgTrW = max(sgTrW, (shaft + head) * inb * step(30.0, L));\n'}  // green bike lanes on island/bayfront streets (not the beachfront drive with its parking lane)
   bikeM = (kind == 0.0 && vRW.x > -620.0 && (vRW.x < 268.0 || vRW.x > 312.0)) ? 1.0 : 0.0;
   float bikeBand = bandM(au, 6.15, 0.95) * bikeM * step(5.4, e);
   float bikeDash = step(e, 22.0) * step(fract(v / 3.0), 0.5);
@@ -557,24 +831,51 @@ if (kind == 0.0 || kind == 3.0) {
   wpaint = bandM(au, 3.9, 0.14);
 }
 float paintMask = clamp(wpaint + ypaint, 0.0, 1.0) * (0.55 + 0.45 * smoothstep(0.25, 0.75, wear));
-vec3 asph = texelColor.rgb * diffuse;
+${CYBER ? '' : `// a_signage (map A): wheel paths 0.85 m either side of each lane centre polish the zebra bars / stop line / arrows down to
+// the asphalt in patches; fine chipping everywhere else on them
+float sgWheel = smoothstep(0.5, 0.12, abs(abs(fract(au / 3.5) * 3.5 - 1.75) - 0.85));
+float sgChip = smoothstep(0.3, 0.8, vnoise(vRW.xz * 6.5)) * 0.7 + smoothstep(0.55, 0.9, vnoise(vRW.xz * 21.0)) * 0.3;
+paintMask *= 1.0 - sgTrW * clamp(sgWheel * (0.3 + 0.55 * sgChip) + (1.0 - sgWheel) * 0.28 * sgChip, 0.0, 0.85);
+`}vec3 asph = texelColor.rgb * diffuse;
 // tyre tracks: darker, smoother bands in each lane centre
 float lanePos = abs(fract((au) / 3.5) - 0.5);
-float tracks = (kind == 1.0) ? 0.0 : smoothstep(0.32, 0.18, abs(lanePos - 0.25)) * 0.2;
+float tracks = (kind == 1.0) ? 0.0 : (1.0 - smoothstep(0.18, 0.32, abs(lanePos - 0.25))) * 0.2;
 // patches / sealed cracks
 float patchN = smoothstep(0.62, 0.66, vnoise(vRW.xz * 0.06 + 3.0));
 asph *= (1.0 - tracks) * (1.0 - patchN * 0.25) * (0.9 + 0.2 * wear);
 ${CYBER ? `// v4.5 sealed crack lines + oil drips down the lane centres + lighter aggregate where the binder wore off
-float crk = smoothstep(0.035, 0.0, abs(vnoise(vRW.xz * 0.35) - 0.5)) * smoothstep(0.5, 0.7, vnoise(vRW.xz * 0.045 + 11.0));
-float oil = (kind == 1.0 ? 0.0 : smoothstep(0.18, 0.0, abs(lanePos - 0.0))) * smoothstep(0.55, 0.8, vnoise(vRW.xz * vec2(0.9, 0.9) + 3.7)) * 0.5;
+float crk = (1.0 - smoothstep(0.0, 0.035, abs(vnoise(vRW.xz * 0.35) - 0.5))) * smoothstep(0.5, 0.7, vnoise(vRW.xz * 0.045 + 11.0));
+float oil = (kind == 1.0 ? 0.0 : (1.0 - smoothstep(0.0, 0.18, abs(lanePos - 0.0)))) * smoothstep(0.55, 0.8, vnoise(vRW.xz * vec2(0.9, 0.9) + 3.7)) * 0.5;
 asph = mix(asph, asph * 0.45, max(crk * 0.8, oil));
 asph *= 1.0 + 0.12 * smoothstep(0.7, 0.9, vnoise(vRW.xz * 1.7));
+` : ``}${BG ? `// b_ground: utility-cut patches (darker newer asphalt, sealed seam, paint cut through) + alligator cracking in the wheel paths
+float bgPatch = 0.0;
+if (kind != 1.0) { float li = floor(au / 3.5); float pv = fract(v / 21.0 + li * 0.37) * 21.0; float pc = floor(v / 21.0 + li * 0.37);
+  vec2 hp = vec2(h12(vec2(pc, li + 3.0)), h12(vec2(pc + 7.1, li))); float uu = au - li * 3.5;
+  float a0 = 3.0 + hp.x * 8.0, a1 = a0 + 2.2 + hp.y * 5.0, b0 = 0.3 + hp.y * 0.8, b1 = b0 + 1.4 + hp.x * 1.2;
+  float inP = step(a0, pv) * step(pv, a1) * step(b0, uu) * step(uu, b1) * step(h12(vec2(pc, li + 11.0)), 0.3);
+  float edge = min(min(pv - a0, a1 - pv), min(uu - b0, b1 - uu));
+  bgPatch = inP; asph = mix(asph, asph * vec3(0.66, 0.66, 0.7), inP); asph *= 1.0 - inP * smoothstep(0.06, 0.0, edge) * 0.55;
+  paintMask *= 1.0 - inP * 0.7;
+  float trk = smoothstep(0.3, 0.12, abs(lanePos - 0.25)) * (1.0 - inP);
+  vec2 cq = vRW.xz * 2.2; vec2 ci = floor(cq), cf = fract(cq); float d1 = 9.0, d2 = 9.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { vec2 o = vec2(float(i), float(j)); vec2 pp = o + vec2(h12(ci + o), h12(ci + o + 17.0)) - cf; float dd = dot(pp, pp); if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd; }
+  float net = smoothstep(0.07, 0.0, sqrt(d2) - sqrt(d1)) * trk * smoothstep(0.55, 0.75, vnoise(vRW.xz * 0.08 + 5.0));
+  asph = mix(asph, asph * 0.5, net * 0.85); }
 ` : ``}vec3 col = mix(asph, wpaint > ypaint ? paintW : paintY, paintMask);
 col = mix(col, vec3(0.16, 0.42, 0.20) * (0.8 + 0.3 * wear), bikeG * (0.7 + 0.3 * smoothstep(0.2, 0.7, wear)));
 paintMask = max(paintMask, bikeG * 0.8);
 // wet: darker, puddles
 float pud = smoothstep(${CYBER ? '0.48, 0.62' : '0.56, 0.68'}, vnoise(vRW.xz * 0.11) * 0.7 + vnoise(vRW.xz * 0.6) * 0.3 + tracks * 0.6); // vis-sweep A: fewer puddles (the whole night road read as a flooded mirror)
-float wet = uWet;
+${BG ? `// b_ground: water collects at the drain inlets (positions = ground.js drainAt) and in the gutter along the kerb
+if (kind == 0.0 || kind == 2.0) { float hwd = kind == 0.0 ? 7.0 : 4.5; float sd = step(0.0, u); float vv = v - sd * 15.0; float dc = floor(vv / 30.0);
+  float dh = fract(dc * 0.6180339887 + sd * 0.37 + fract(L * 0.0137)), dh2 = fract(dc * 0.4142135 + sd * 0.71 + fract(L * 0.0291));
+  float vd = (dc + 0.5 + (dh - 0.5) * 0.5) * 30.0; float ed = min(vd + sd * 15.0, L - vd - sd * 15.0);
+  float rq = length(vec2((vv - vd) * 0.5, (au - (hwd - 0.3)) * 0.95)) + (vnoise(vRW.xz * 1.4) - 0.5) * 0.45;
+  float dpud = smoothstep(1.05, 0.6, rq) * step(0.18, dh2) * step(8.0, ed);
+  float gut = smoothstep(hwd - 1.1, hwd - 0.3, au) * smoothstep(0.5, 0.72, vnoise(vRW.xz * 0.32 + 9.0)) * step(5.4, min(v, L - v));
+  pud = max(pud, max(dpud, gut * 0.9)); }
+` : ``}float wet = uWet;
 col *= mix(1.0, 0.45, wet);
 diffuseColor.rgb = col;
 float paintF = paintMask;
@@ -617,7 +918,7 @@ if (wet > 0.01) {
     vec3 d = lp.xyz - vRW; float dl = length(d); d /= dl;
     float dh = length(rh - normalize(d.xz + 1e-5));             // ~ azimuth error (rad)
     float dv = asin(clamp(R.y, -1.0, 1.0)) - asin(clamp(d.y, -1.0, 1.0));
-    acc += uLampC[i] * lp.w * exp(-dh * dh / (sh * sh) - dv * dv / (sv * sv)) * smoothstep(110.0, 50.0, dl);
+    acc += uLampC[i] * lp.w * exp(-dh * dh / (sh * sh) - dv * dv / (sv * sv)) * (1.0 - smoothstep(50.0, 110.0, dl));
   }
   float fr2 = 0.04 + 0.96 * pow(1.0 - clamp(-V.y, 0.0, 1.0), 5.0);
   totalEmissiveRadiance += acc * wet * mix(${CYBER ? '0.55, 1.6' : '0.30, 1.0'}, pud) * clamp(fr2 * 1.6 + 0.12, 0.0, 1.0) * (1.0 - paintF * 0.5);
@@ -627,51 +928,139 @@ if (wet > 0.01) {
 }
 
 export function simpleMats(T) {
+  // b_envprog: ground materials (sidewalk / sand / lawns / district ground) share one program, branches by uniform (?oldenvmat: off)
+  const GM = OLDENV || !OLDENV2 ? null : envMerger('ground'); /* b_envprog2: by default these join the merged 'envu' program */ const gw = (fn, key) => GM ? GM.wrap(fn, key) : fn;
   const side = texSet(T, 'sidewalk', 1); for (const t of [side.map, side.normalMap, side.roughnessMap]) t.repeat.set(1 / 3, 1 / 3);
-  M.sidewalk = prep(new THREE.MeshStandardMaterial({ map: side.map, normalMap: side.normalMap, roughnessMap: side.roughnessMap, color: 0xffffff, roughness: 1 }), 'sidewalk', (s) => {
+  M.sidewalk = prep(new THREE.MeshStandardMaterial({ map: side.map, normalMap: side.normalMap, roughnessMap: side.roughnessMap, color: 0xffffff, roughness: 1 }), 'sidewalk', gw((s) => {
     s.uniforms.uWet = U.uWet;
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet;')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? '' : `
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uWet;' + (BG ? HASH : ''))
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.25, uWet);\ndiffuseColor.rgb *= mix(1.0, 0.6, uWet);\n{ vec2 g = abs(fract(vSWP.xz / 1.6) - 0.5); float j = smoothstep(0.485, 0.497, max(g.x, g.y)); diffuseColor.rgb *= 1.0 - j * 0.35; }' + (CYBER ? (BG ? `
+{ // r6.4 b_ground 霓港 pavers: slab-to-slab tone, dirtier / wider joints in places, replaced (lighter) and cracked slabs, oily stains
+  vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = h12(cl + 41.0), hs2 = h12(cl + 93.0); vec2 lc = fract(sp / 1.6);
+  diffuseColor.rgb *= 0.9 + 0.2 * hs; diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.18, 1.17, 1.13), step(0.93, hs2));
+  vec2 g2 = abs(lc - 0.5); float jw = 0.485 - 0.012 * step(0.6, vnoise(sp * 0.7)); float jd = smoothstep(jw, jw + 0.01, max(g2.x, g2.y)); diffuseColor.rgb *= 1.0 - jd * 0.22 * vnoise(sp * 2.3 + 4.0);
+  float ck = step(0.8, hs) * smoothstep(0.014, 0.0, abs(lc.y - 0.5 - 0.22 * sin(lc.x * 5.0 + hs * 30.0))) * step(abs(lc.x - 0.5), 0.25 + 0.25 * hs2); diffuseColor.rgb *= 1.0 - ck * 0.45;
+  float stn = smoothstep(0.62, 0.8, vnoise(sp * 0.45 + 2.0)) * smoothstep(0.4, 0.7, vnoise(sp * 3.1)); diffuseColor.rgb *= 1.0 - stn * 0.25; roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.6, stn); }` : '') : `
 { // r6.3 索拉纳港 pavement wear: dark joint-sealant lines get dirtier, flattened gum spots, drip / coffee stains, a few hairline cracks per slab
   vec2 sp = vSWP.xz; vec2 cl = floor(sp / 1.6); float hs = fract(sin(dot(cl, vec2(12.9898, 78.233))) * 43758.5453);
-  vec2 gq = sp * 7.0; vec2 gi = floor(gq); float gh = fract(sin(dot(gi, vec2(41.3, 289.1))) * 15731.7); float gum = step(0.993, gh) * smoothstep(0.32, 0.18, length(fract(gq) - 0.5));
+  vec2 gq = sp * 7.0; vec2 gi = floor(gq); float gh = fract(sin(dot(gi, vec2(41.3, 289.1))) * 15731.7); float gum = step(0.993, gh) * (1.0 - smoothstep(0.18, 0.32, length(fract(gq) - 0.5)));
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, gum);
-  vec2 sq = sp * 0.55; vec2 si = floor(sq); float sh = fract(sin(dot(si, vec2(7.7, 113.3))) * 9134.1); float stain = step(0.82, sh) * smoothstep(0.42, 0.1, length(fract(sq) - 0.5 + (sh - 0.9) * 0.4));
+  vec2 sq = sp * 0.55; vec2 si = floor(sq); float sh = fract(sin(dot(si, vec2(7.7, 113.3))) * 9134.1); float stain = step(0.82, sh) * (1.0 - smoothstep(0.1, 0.42, length(fract(sq) - 0.5 + (sh - 0.9) * 0.4)));
   diffuseColor.rgb *= 1.0 - stain * 0.16;
-  vec2 lc = fract(sp / 1.6); float ck = step(0.72, hs) * smoothstep(0.012, 0.0, abs(lc.y - 0.5 - 0.25 * sin(lc.x * 6.0 + hs * 20.0)) ) * step(abs(lc.x - 0.5), 0.3 + 0.2 * hs);
-  diffuseColor.rgb *= 1.0 - ck * 0.35; }`))
+  vec2 lc = fract(sp / 1.6); float ck = step(0.72, hs) * (1.0 - smoothstep(0.0, 0.012, abs(lc.y - 0.5 - 0.25 * sin(lc.x * 6.0 + hs * 20.0)))) * step(abs(lc.x - 0.5), 0.3 + 0.2 * hs);
+  diffuseColor.rgb *= 1.0 - ck * 0.35;
+  // a_promenade: per-slab tone (pour batches), every third joint a wider tooled expansion joint with dark sealant, spalled
+  // slab corners, and a grime band along the kerb on the island streets (leaf litter, tyre dust, run-off), fading 0-0.9 m
+  diffuseColor.rgb *= 0.965 + 0.07 * hs;
+  vec2 ej = abs(fract(sp / 4.8) - 0.5); float ex = smoothstep(0.4935, 0.499, max(ej.x, ej.y)); diffuseColor.rgb *= 1.0 - ex * 0.42;
+  vec2 cq = abs(lc - 0.5); float sp2 = step(0.55, fract(hs * 7.3)) * smoothstep(0.43, 0.49, min(cq.x, cq.y)) * step(0.46, max(cq.x, cq.y)); diffuseColor.rgb *= 1.0 - sp2 * 0.22;
+  if (sp.x > -22.0 && sp.x < 335.0 && abs(sp.y) < 372.0) {
+    float dk = min(min(abs(abs(sp.x - 50.0) - 7.0), abs(abs(sp.x - 170.0) - 7.0)), abs(abs(sp.x - 290.0) - 7.0));
+    float zr = sp.y - floor((sp.y + 75.0) / 150.0) * 150.0; dk = min(dk, abs(abs(zr) - 7.0));
+    float gn = fract(sin(dot(floor(sp * 3.0), vec2(17.1, 91.7))) * 4375.85);
+    float band = smoothstep(0.95, 0.25, dk) * (0.55 + 0.45 * gn);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 0.75, 0.7), band * 0.6);
+  } }`))
       .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying vec3 vSWP;');
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSWP;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSWP = (modelMatrix * vec4(position,1.0)).xyz;');
-  });
+  }, 'sidewalk'));
   const pav = texSet(T, 'pavers', 1); for (const t of [pav.map, pav.normalMap, pav.roughnessMap]) t.repeat.set(1 / 2.5, 1 / 2.5);
   M.pavers = prep(new THREE.MeshStandardMaterial({ map: pav.map, normalMap: pav.normalMap, roughnessMap: pav.roughnessMap, color: 0xffffff, roughness: 1, ...(CYBER ? { polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -2 } : {}) }), 'pavers');
   const conc = texSet(T, 'concrete', 1); for (const t of [conc.map, conc.normalMap, conc.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
-  M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete');
+  M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete', CYBER ? null : (s) => {
+    // a_promenade (map 索拉纳港): kerb wear on the low kerb geometry only (world y < 0.16): black tyre-rub streaks on the vertical
+    // face, chipped / lighter arris, dirt line at the gutter foot. Same program key, compiled once as before.
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvKW = (modelMatrix * vec4(position, 1.0)).xyz; vKN = normalize(mat3(modelMatrix) * normal);');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;')
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+  if (vKW.y < 0.16) { float al = dot(vKW.xz, vec2(abs(vKN.z), abs(vKN.x))); float h1 = fract(sin(floor(al * 0.7) * 12.989) * 43758.5);
+    float face = 1.0 - abs(vKN.y); float ty = smoothstep(0.02, 0.07, vKW.y) * smoothstep(0.15, 0.09, vKW.y);
+    float rub = step(0.55, h1) * smoothstep(0.0, 0.25, fract(al * 0.7)) * smoothstep(1.0, 0.6, fract(al * 0.7)) * ty * face;
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09, 0.09, 0.1), rub * 0.55); roughnessFactor = mix(roughnessFactor, 0.6, rub * 0.5);
+    float chip = step(0.86, fract(sin(floor(al * 6.0) * 78.23) * 1937.1)) * smoothstep(0.125, 0.15, vKW.y) * (1.0 - vKN.y * 0.5);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.76, 0.72), chip * 0.35);
+    diffuseColor.rgb *= 1.0 - smoothstep(0.035, 0.0, vKW.y) * face * 0.35; }`);
+  });
   const sand = texSet(T, 'sand', 1); for (const t of [sand.map, sand.normalMap, sand.roughnessMap]) t.repeat.set(1 / 6, 1 / 6);
   if (CYBER) {
   // v4.5: sand albedo 1.22 -> 0.98 (noon beach no longer glares), dune-scale tone variation, wind ripples (normal), a wrack line
   // of dark debris at the high-water mark, wet sand darker + glossier toward the sea
-  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(0.90, 0.86, 0.78), roughness: 1 }), 'sand', (s) => {
+  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(0.90, 0.86, 0.78), roughness: 1 }), 'sand', gw((s) => {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandW = (modelMatrix*vec4(position,1.0)).xyz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;' + HASH)
       .replace('#include <map_fragment>', `#include <map_fragment>
-float vSandY = vSandW.y; float wetS = smoothstep(-0.55, -0.9, vSandY);
+float vSandY = vSandW.y; float wetS = (1.0 - smoothstep(-0.9, -0.55, vSandY));
 float dune = vnoise(vSandW.xz * 0.025) * 0.6 + vnoise(vSandW.xz * 0.11) * 0.4;
 diffuseColor.rgb *= mix(vec3(0.93, 0.90, 0.85), vec3(1.04, 1.0, 0.94), dune);
-float wrack = smoothstep(0.12, 0.0, abs(vSandY + 0.42)) * smoothstep(0.45, 0.75, vnoise(vSandW.xz * vec2(0.6, 0.15)));
+float wrack = (1.0 - smoothstep(0.0, 0.12, abs(vSandY + 0.42))) * smoothstep(0.45, 0.75, vnoise(vSandW.xz * vec2(0.6, 0.15)));
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.22, 0.19, 0.12), wrack * 0.55);
 diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
 { float rp = sin(vSandW.x * 2.6 + vnoise(vSandW.xz * 0.3) * 6.0) * (1.0 - wetS) * 0.12; normal = normalize(normal + (viewMatrix * vec4(rp, 0.0, rp * 0.3, 0.0)).xyz); }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
-  });
+  }, 'sand'));
   } else {
-  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(1.22, 1.18, 1.10), roughness: 1 }), 'sand', (s) => {
-    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying float vSandY;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandY = (modelMatrix*vec4(position,1.0)).y;');
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vSandY;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\nfloat wetS = smoothstep(-0.55, -0.9, vSandY); diffuseColor.rgb *= mix(1.0, 0.55, wetS);')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.3, wetS);');
-  });
+  M.sand = prep(new THREE.MeshStandardMaterial({ map: sand.map, normalMap: sand.normalMap, roughnessMap: sand.roughnessMap, color: new THREE.Color().setRGB(1.22, 1.18, 1.10), roughness: 1 }), 'sand', gw((s) => {
+    // a_beach: world-space beach close-up detail on the barrier-island beach (bu = metres seaward of the beach line, same
+    // beachOff curve as mapgeo.js): damp high-tide line with a sargassum / shell wrack strip, swash bubble lines and glossy
+    // wet sand at the water, lifeguard-truck tyre ruts on the firm sand, scattered footprints (albedo + normal), all faded
+    // out by screen-space footprint size so the far beach stays clean. Same 'sand' program as before.
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSandW = (modelMatrix*vec4(position,1.0)).xyz;');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSandW;' + HASH + `
+float bks(float a, float b, float x) { float t = clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); } // order-safe (reversed edges are undefined in GLSL)
+float bkFoot(vec2 p, float dens) {
+  vec2 c = floor(p * 2.0); float h = h12(c + 17.0); if (h > dens) return 0.0;
+  float a = (h12(c + 3.0) < 0.5 ? 0.0 : 3.1416) + (h12(c + 5.0) - 0.5) * 1.4;
+  vec2 o = (c + 0.5 + (vec2(h12(c + 9.0), h12(c + 11.0)) - 0.5) * 0.3) * 0.5; vec2 q = p - o; float ca = cos(a), sa = sin(a);
+  q = vec2(ca * q.x + sa * q.y, -sa * q.x + ca * q.y); q.y += (h12(c + 13.0) < 0.5 ? 0.06 : -0.06);
+  float d = min(length((q - vec2(-0.075, 0.0)) / vec2(0.05, 0.042)), length((q - vec2(0.055, 0.008)) / vec2(0.07, 0.05)));
+  return -bks(1.05, 0.45, d) + bks(1.45, 1.05, d) * bks(0.75, 1.05, d) * 0.3; }
+float bkRut(float bu, float z) {
+  float tc = 68.0 + 3.0 * sin(z * 0.011) + 1.5 * sin(z * 0.037 + 1.0); float dd = bu - tc;
+  float r1 = abs(dd - 0.8), r2 = abs(dd + 0.8); float rr = min(r1, r2);
+  float tread = step(0.5, fract(z * 3.2 + (dd > 0.0 ? 0.0 : 0.5) + rr * 3.0));
+  return -bks(0.17, 0.1, rr) * (0.75 + 0.25 * tread) + bks(0.24, 0.17, rr) * bks(0.1, 0.17, rr) * 0.25; }`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+float vSandY = vSandW.y; float wetS = bks(-0.6, -0.9, vSandY);
+float bkZ = vSandW.z, bkAZ = abs(bkZ);
+float bkOff = bks(380.0, 540.0, bkAZ) * (18.0 * sin(bkZ * 0.0047) + 10.0 * sin(bkZ * 0.013 + 1.3) - 6.0);
+float bu = vSandW.x - 335.0 - bkOff; float onB = step(0.0, bu) * step(bkAZ, 1440.0);
+float bkPW = length(fwidth(vSandW.xz)); vec3 bkN = vec3(0.0); float bkGloss = 0.0;
+if (onB > 0.5) {
+  float dn = vnoise(vSandW.xz * 0.03) * 0.6 + vnoise(vSandW.xz * 0.13) * 0.4; diffuseColor.rgb *= mix(0.95, 1.04, dn);
+  // damp high-tide line (sharp landward edge) + wrack strip just above it
+  float wl = -0.6 + (vnoise(vec2(bkZ * 0.07, 3.0)) - 0.5) * 0.1 + (vnoise(vec2(bkZ * 0.6, 9.0)) - 0.5) * 0.025;
+  float damp = bks(wl + 0.012, wl - 0.012, vSandY); diffuseColor.rgb *= mix(vec3(1.0), vec3(0.6, 0.57, 0.52), damp); // a_sandfix: 0.7 -> 0.6 (damp band read flat after ACES)
+  float band = bks(0.045, 0.0, abs(vSandY - wl - 0.035));
+  float weed = band * bks(0.42, 0.72, vnoise(vSandW.xz * vec2(1.4, 0.35)) * 0.7 + vnoise(vSandW.xz * 6.0) * 0.3);
+  diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.17, 0.12, 0.05), vec3(0.32, 0.24, 0.09), vnoise(vSandW.xz * 9.0)), weed * 0.85);
+  bkGloss += weed * 0.35;
+  float fine = bks(0.06, 0.02, bkPW);
+  { vec2 sc = vSandW.xz / 0.16; vec2 ci = floor(sc); float hs = h12(ci + 41.0); float dens = 0.006 + 0.09 * bks(0.09, 0.0, abs(vSandY - wl - 0.03));
+    float sh = step(1.0 - dens, hs) * bks(0.3, 0.16, length(fract(sc) - 0.5 - (vec2(h12(ci + 2.0), h12(ci + 5.0)) - 0.5) * 0.3));
+    vec3 shc = mix(vec3(0.97, 0.93, 0.86), vec3(0.93, 0.7, 0.62), h12(ci + 7.0)); if (h12(ci + 8.0) < 0.25) shc = vec3(0.3, 0.27, 0.24);
+    diffuseColor.rgb = mix(diffuseColor.rgb, shc, sh * fine); diffuseColor.rgb *= 1.0 + dens * 0.6 * (1.0 - fine); }
+  // swash: bubble lines + glassy film at the water's edge
+  float sw = bks(0.012, 0.0, abs(vSandY - (-0.84 + 0.035 * sin(bkZ * 0.23) + (vnoise(vec2(bkZ * 0.05, 1.0)) - 0.5) * 0.08)));
+  sw += 0.6 * bks(0.008, 0.0, abs(vSandY - (-0.9 + 0.03 * sin(bkZ * 0.17 + 2.0))));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.84, 0.8), clamp(sw, 0.0, 1.0) * 0.5 * bks(0.4, 0.1, bkPW));
+  bkGloss += bks(-0.88, -0.97, vSandY);
+  // tyre ruts (firm sand) + footprints, as albedo and as a normal tilt
+  float ruF = bks(0.7, 0.2, bkPW) * (1.0 - bks(1380.0, 1420.0, bkAZ));
+  if (ruF > 0.0) { float r0 = bkRut(bu, bkZ), rx = bkRut(bu + 0.03, bkZ), rz = bkRut(bu, bkZ + 0.03);
+    diffuseColor.rgb *= 1.0 + r0 * 0.3 * ruF; bkN.xz += vec2(rx - r0, rz - r0) / 0.03 * 0.05 * ruF; } // a_sandfix: albedo 0.13 -> 0.3, tilt 0.035 -> 0.05
+  float fpF = bks(0.12, 0.045, bkPW) * (1.0 - bks(-0.8, -0.93, vSandY));
+  if (fpF > 0.0) { float trail = bks(0.5, 0.85, vnoise(vec2(bkZ * 0.06, bu * 0.012) + 4.0));
+    float dens = (0.05 + 0.3 * trail + 0.12 * bks(0.1, 0.0, abs(bu - 57.0) / 20.0)) * bks(1.0, 4.0, bu);
+    float f0 = bkFoot(vSandW.xz, dens), fx = bkFoot(vSandW.xz + vec2(0.02, 0.0), dens), fz = bkFoot(vSandW.xz + vec2(0.0, 0.02), dens);
+    float wetF = damp; diffuseColor.rgb *= 1.0 + f0 * (0.22 + 0.16 * wetF) * fpF; // a_sandfix: 0.1+0.12 -> 0.22+0.16
+    bkN.xz += vec2(fx - f0, fz - f0) / 0.02 * (0.03 + 0.02 * wetF) * fpF; }
+}
+diffuseColor.rgb *= mix(1.0, onB > 0.5 ? 0.5 : 0.55, wetS); // a_sandfix: beach wet sand 0.62 -> 0.5`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+if (onB > 0.5) normal = normalize(normal + (viewMatrix * vec4(-bkN.x, 0.0, -bkN.z, 0.0)).xyz);`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, onB > 0.5 ? 0.4 : 0.3, wetS); roughnessFactor = mix(roughnessFactor, 0.14, clamp(bkGloss, 0.0, 1.0));');
+  }, 'sand'));
   }
   const grass = texSet(T, 'grass', 1); for (const t of [grass.map, grass.normalMap, grass.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
   // v4.5 lawns: a second texture scale + world-space macro noise (greener swales, sun-dried patches, worn earth) kills the tiling
@@ -683,17 +1072,32 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   diffuseColor.rgb *= mix(vec3(0.82, 0.95, 0.74), vec3(1.18, 1.08, 0.78), smoothstep(0.3, 0.75, m));
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.36, 0.30, 0.22), smoothstep(0.80, 0.9, vnoise(vLW.xz * 0.09 + 7.0)) * 0.3);${CYBER ? '' : `
   // vis-sweep (map A, GTA6 Florida look): St. Augustine lawns read olive / sun-bleached, not lime -> 25% desaturate, warmer
-  { float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.75) * vec3(1.03, 0.97, 0.88); }`} }`);
+  { float gl = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = mix(vec3(gl), diffuseColor.rgb, 0.75) * vec3(1.03, 0.97, 0.88); }
+  // r6.4 flora_a: lawns were one tone from the air. Yard-scale tone patches (irrigated emerald / olive St. Augustine / straw
+  // Bahia / dry), soft parcel-like edges on a warped 26 m lattice; clumps + clover mottling up close; dark shrub/weed speckle
+  // and mower stripes on some patches, all faded by footprint so nothing shimmers at distance
+  { vec2 q = vLW.xz + vec2(vnoise(vLW.xz * 0.021) - 0.5, vnoise(vLW.xz * 0.021 + 5.0) - 0.5) * 30.0; vec2 c = q / 26.0; vec2 ci = floor(c), cf = fract(c);
+    vec2 w = smoothstep(0.30, 0.70, cf); float h00 = h12(ci), h10 = h12(ci + vec2(1.0, 0.0)), h01 = h12(ci + vec2(0.0, 1.0)), h11 = h12(ci + vec2(1.0, 1.0));
+    float hv = mix(mix(h00, h10, w.x), mix(h01, h11, w.x), w.y);
+    vec3 tone = hv < 0.3 ? mix(vec3(0.80, 1.06, 0.78), vec3(0.95, 1.02, 0.86), hv / 0.3) : hv < 0.62 ? mix(vec3(0.95, 1.02, 0.86), vec3(1.08, 1.03, 0.80), (hv - 0.3) / 0.32) : mix(vec3(1.08, 1.03, 0.80), vec3(1.26, 1.08, 0.66), (hv - 0.62) / 0.38);
+    diffuseColor.rgb *= tone;
+    float fw = length(fwidth(vLW.xz)); float nearF = 1.0 - smoothstep(0.35, 2.2, fw);
+    float cl = vnoise(vLW.xz * 0.6) * 0.6 + vnoise(vLW.xz * 2.1 + 3.0) * 0.4;
+    diffuseColor.rgb *= mix(1.0, 0.80 + 0.36 * cl, nearF);
+    float hc = h12(ci + 17.0); vec2 sd = vec2(cos(hc * 6.28), sin(hc * 6.28)); float stripe = step(0.5, fract(dot(vLW.xz, sd) / 3.2));
+    diffuseColor.rgb *= 1.0 + (stripe - 0.5) * 0.10 * step(0.55, hc) * (1.0 - smoothstep(0.25, 0.7, fw)); // iter2: faded earlier (aliased into diagonal moire on aerials)
+    float sp = smoothstep(0.70, 0.80, vnoise(vLW.xz * 0.33 + 11.0)) * (0.6 + 0.4 * step(0.6, h12(ci + 3.0)));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.52, 0.66, 0.44), sp * 0.55 * (1.0 - 0.75 * smoothstep(0.6, 2.0, fw))); }`} }`);
   };
-  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', lawn); // vis-sweep: lawn macro-variation on both maps (map A lawns were one flat tiled green, aerials showed the 4 m tile)
+  M.grass = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'grass', gw(lawn, 'grass')); // vis-sweep: lawn macro-variation on both maps (map A lawns were one flat tiled green, aerials showed the 4 m tile)
   // v4.4 land caps under the open world: pushed back in depth so district pavers / roads drawn just above never z-fight from the air
   const po = { polygonOffset: false }; // v4.5: was 3 / 12 -> at grazing distances the caps fell behind the water plane 1 m below (white 'shallows' instead of land)
-  M.land = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: new THREE.Color().setRGB(0.92, 0.95, 0.86), roughness: 1, ...po }), 'grass', lawn);
+  M.land = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: new THREE.Color().setRGB(0.92, 0.95, 0.86), roughness: 1, ...po }), 'grass', gw(lawn, 'grass'));
   M.landc = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1, ...po }), 'concrete');
   // r5.0 mainland / pearl-island ground: sits 6 cm below the road ribbons (polygonOffset pushed it behind the water at grazing angles)
   // vis-sweep: the district ground showed as hectares of bare grey concrete between the lots (aerials looked unfinished) ->
   // world-space mix of worn concrete, gravel/dirt and patchy lawn (vacant lots / yards), macro tone so the 4 m tile never repeats
-  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc', (s) => {
+  M.mgroundC = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xaaa69e, roughness: 1 }), 'mgc', gw((s) => {
     s.uniforms.tG = { value: grass.map };
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvLW = (modelMatrix*vec4(position,1.0)).xyz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tG; varying vec3 vLW;' + HASH).replace('#include <map_fragment>', `#include <map_fragment>
@@ -703,7 +1107,7 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   diffuseColor.rgb *= 0.84 + 0.2 * vnoise(vLW.xz * 0.03 + 9.0);
   diffuseColor.rgb = mix(diffuseColor.rgb, dirt, smoothstep(0.36, 0.46, m) * 0.35);
   diffuseColor.rgb = mix(diffuseColor.rgb, g, smoothstep(0.44, 0.56, m)); }`);
-  });
+  }, 'mgc'));
   // r6.3 (ground_a): mainland open ground — big dry-grass / bare-soil swathes break the lawn up from the air, and beyond the modelled
   // city (x < -3600, |z| > 2900) a painted, footprint-anti-aliased city pattern (street grid, arterials, roof speckle, canopy) so the
   // horizon reads as more city instead of a green blanket
@@ -712,7 +1116,7 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.28, 1.10, 0.70), dry * 0.6);
   float soil = smoothstep(0.70, 0.86, vnoise(vLW.xz * 0.012 + 5.3) * 0.65 + vnoise(vLW.xz * 0.09) * 0.35);
   diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.36, 0.27) * (0.85 + 0.3 * vnoise(vLW.xz * 0.5)), soil * 0.45);
-  float far = max(smoothstep(-3590.0, -3680.0, vLW.x), smoothstep(2890.0, 2980.0, abs(vLW.z))) * step(vLW.x, -950.0);
+  float far = max(1.0 - smoothstep(-3680.0, -3590.0, vLW.x), smoothstep(2890.0, 2980.0, abs(vLW.z))) * step(vLW.x, -950.0);
   if (far > 0.0) {
     vec2 q = vLW.xz; vec2 cl = vec2(118.0, 104.0); vec2 g = abs(fract(q / cl) - 0.5) * cl; float rd = 1.0 - smoothstep(4.0, 6.0, min(g.x, g.y));
     vec2 art = vec2(472.0, 416.0); vec2 ga = abs(fract((q + 59.0) / art) - 0.5) * art; float ar = 1.0 - smoothstep(6.5, 9.0, min(ga.x, ga.y));
@@ -726,13 +1130,15 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
     cityC = mix(cityC, avg, smoothstep(5.0, 16.0, fw));
     diffuseColor.rgb = mix(diffuseColor.rgb, cityC, far);
     gFarGlow = far * mix(max(rd, ar * 1.6) * 0.9, 0.22, smoothstep(5.0, 16.0, fw)); } }`).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += gFarGlow * uNight * vec3(1.0, 0.62, 0.3) * 0.5;'); };
-  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg2', lawnA);
+  M.mgroundG = prep(new THREE.MeshStandardMaterial({ map: grass.map, normalMap: grass.normalMap, roughnessMap: grass.roughnessMap, color: 0xffffff, roughness: 1 }), 'mgg2', gw(lawnA, 'mgg2'));
   M.pool = prep(new THREE.MeshStandardMaterial({ color: 0x2aa9bd, roughness: 0.06, metalness: 0.0, emissive: 0x0a3a44, emissiveIntensity: 0.6 }), 'pool');
   M.roof = prep(new THREE.MeshStandardMaterial({ map: conc.map, color: 0x9a948c, roughness: 0.95 }), 'roof');
   M.white = prep(new THREE.MeshStandardMaterial({ color: 0xeeeae2, roughness: 0.7, map: T.plaster_d }), 'whitep');
   M.metal = prep(new THREE.MeshStandardMaterial({ color: 0x5a5d60, roughness: 0.45, metalness: 0.85 }), 'metal');
   M.darkmetal = prep(new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.5, metalness: 0.6 }), 'dmetal');
   M.glassRail = prep(new THREE.MeshStandardMaterial({ color: 0x8fb4b8, roughness: 0.05, metalness: 0.9, transparent: true, opacity: 0.45 }), 'grail');
+  // b_envprog: the glow term lives in the shared environment program (uEK = 1); ?oldenvmat keeps the 'neon' patch
+  if (!OLDENV) { const nm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, color: 0x222222 }); nm.userData.envEK = 1; M.neon = prep(nm, 'neon'); } else
   M.neon = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, color: 0x222222 }), 'neon', (s) => {
     s.uniforms.uNight = U.uNight;
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
@@ -757,8 +1163,8 @@ diffuseColor.rgb *= mix(1.0, 0.55, wetS);`)
     float cl = dot(vColor.rgb, vec3(0.299, 0.587, 0.114)); float k = smoothstep(0.18, 0.55, cl);
     float mac = vnoise(vVW.xz * 0.07 + vVW.y * 0.05) * 0.6 + vnoise(vVW.xy * 0.9 + vVW.zz * 0.7) * 0.4;
     diffuseColor.rgb *= mix(vec3(1.0), clamp(tx / ${CYBER ? '0.44' : '0.63'}, 0.6, 1.25), 0.55 * k) * (0.92 + 0.14 * mac);
-    diffuseColor.rgb *= 1.0 - smoothstep(${CYBER ? '1.2' : '0.8'}, 0.0, vVW.y) * 0.22 * k;           // splash / dust at the foot
-    diffuseColor.rgb *= 1.0 - smoothstep(-0.2, -0.9, vVN.y) * 0.18;                                    // soffits / undersides darker
+    diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, ${CYBER ? '1.2' : '0.8'}, vVW.y)) * 0.22 * k;           // splash / dust at the foot
+    diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(-0.9, -0.2, vVN.y)) * 0.18;                                    // soffits / undersides darker
   }`).replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor *= 0.9 + 0.2 * vnoise(vVW.xz * 2.1 + vVW.y);');
   }); }
   M.vcolCloth = prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide }), 'vcolc');

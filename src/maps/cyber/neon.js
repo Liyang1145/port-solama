@@ -7,18 +7,27 @@ import * as THREE from 'three';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
 import { BldgLayer } from './bldglayer.js';
+import { cnText, cnReady, cnWhenReady } from './cnglyph.js';
+import { PortQuay } from './port.js';
 
 const WORDS_V = [['霓', '港'], ['鲸', '歌', '电', '子'], ['夜', '航'], ['零', '点', '茶'], ['海', '妖', '酒', '吧'], ['蓝', '晶', '诊', '所'], ['极', '光'], ['数', '字', '海']];
 const WORDS_H = [['SOLA//NET', '索拉纳网络'], ['潮汐 VR', 'DIVE DEEP'], ['白鲸 AI', '24H ONLINE'], ['双月光学', 'TWIN MOON'], ['回声电台', '101.7 FM'], ['拉面 24H', 'RAMEN'], ['珊瑚银行', 'CORAL BANK'], ['Ψ-ARC', '义体工坊'],
   ['极光能量', 'AURORA'], ['NEON TIDE', '霓潮'], ['夜猫市场', 'NIGHT MKT'], ['HYDRA-7', '量子快递'], ['星砂赌场', 'STAR SAND'], ['云端公寓', 'SKYHOME'], ['蓝鲸物流', 'BLUEWHALE'], ['零号区', 'ZONE 0']];
 const PAL = ['#ff2bd6', '#19f0ff', '#8a5cff', '#ff4d6d', '#38ff9c', '#ffd23f', '#3d7bff', '#ff8a2b'];
 
+// b_neon_sign: CJK from the offline glyph atlas (cnglyph.js) instead of the system font; repainted once if it arrives late
 function atlas() {
-  const c = document.createElement('canvas'); c.width = 2048; c.height = 2048; const g = c.getContext('2d'); const r = mulberry(4545);
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 2048;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true;
+  paintAtlas(c.getContext('2d')); if (!cnReady()) cnWhenReady(() => { paintAtlas(c.getContext('2d')); t.needsUpdate = true; });
+  return t;
+}
+function paintAtlas(g) {
+  const r = mulberry(4545);
   g.fillStyle = '#000'; g.fillRect(0, 0, 2048, 2048);
   const font = (px, bold = true) => `${bold ? '900' : '500'} ${px}px "Anton", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif`;
-  const glowText = (t, x, y, px, col, align = 'center') => { g.font = font(px); g.textAlign = align; g.textBaseline = 'middle';
-    for (const [b, a] of [[28, 0.55], [12, 0.8], [0, 1]]) { g.shadowColor = col; g.shadowBlur = b; g.fillStyle = a < 1 ? col : '#ffffff'; g.globalAlpha = a; g.fillText(t, x, y); }
+  const glowText = (t, x, y, px, col, align = 'center') => { void font;
+    for (const [b, a] of [[28, 0.55], [12, 0.8], [0, 1]]) { g.shadowColor = col; g.shadowBlur = b; g.fillStyle = a < 1 ? col : '#ffffff'; g.globalAlpha = a; cnText(g, t, x, y, px, align, '"Anton", Impact, sans-serif'); }
     g.globalAlpha = 1; g.shadowBlur = 0; };
   // 8 vertical banners (256 x 1024) in the top half
   for (let i = 0; i < 8; i++) {
@@ -42,7 +51,6 @@ function atlas() {
     g.shadowBlur = 0;
     const [a, b] = WORDS_H[i]; glowText(a, x0 + 300, y0 + 105, a.length > 6 ? 62 : 76, col); glowText(b, x0 + 300, y0 + 190, 40, col2);
   }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true; return t;
 }
 
 const HOLO_VS = `attribute vec4 aCell; attribute vec2 aSeed; varying vec2 vUv; varying vec2 vSeed; varying vec3 vWP;
@@ -55,7 +63,7 @@ void main(){
   vec3 c = texture2D(tAtlas, vUv + vec2(glitch, 0.0)).rgb;
   float scan = 0.72 + 0.28 * sin(vWP.y * 26.0 - t * 6.0);
   float flick = 0.86 + 0.14 * step(0.08, hh(floor(t * 13.0) + vSeed.y * 7.0));
-  float roll = 0.8 + 0.4 * smoothstep(0.0, 0.08, fract(vWP.y * 0.05 - t * 0.15)) * smoothstep(0.2, 0.08, fract(vWP.y * 0.05 - t * 0.15));
+  float roll = 0.8 + 0.4 * smoothstep(0.0, 0.08, fract(vWP.y * 0.05 - t * 0.15)) * (1.0 - smoothstep(0.08, 0.2, fract(vWP.y * 0.05 - t * 0.15)));
   float k = uNight * scan * flick * roll * (1.4 + vSeed.y);
   gl_FragColor = vec4(c * k * 2.4, 1.0);
 }`;
@@ -106,7 +114,7 @@ export function buildNeon(scene, city) {
     vertexShader: 'varying vec2 vUv; varying float vY; void main(){ vUv = uv; vY = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `uniform sampler2D tAtlas; uniform float uNight, uTime; uniform vec4 uCell; varying vec2 vUv; varying float vY;
       void main(){ vec2 uv = uCell.xy + fract(vUv) * uCell.zw; vec3 c = texture2D(tAtlas, uv).rgb; float scan = 0.7 + 0.3 * sin(vUv.y * 40.0 - uTime * 5.0);
-        float edge = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.92, vUv.y); gl_FragColor = vec4(c * uNight * scan * edge * 2.2 + vec3(0.1, 0.6, 0.8) * uNight * 0.08 * edge, 1.0); }` });
+        float edge = smoothstep(0.0, 0.08, vUv.y) * (1.0 - smoothstep(0.92, 1.0, vUv.y)); gl_FragColor = vec4(c * uNight * scan * edge * 2.2 + vec3(0.1, 0.6, 0.8) * uNight * 0.08 * edge, 1.0); }` });
   out.rings = [];
   for (let i = 0; i < Math.min(14, tall.length); i += 1) { const p = tall[i]; if (i % 2) continue; const m = ringMat.clone(); m.uniforms.uNight = U.uNight; m.uniforms.uTime = U.uTime; m.uniforms.tAtlas = { value: tex };
     const ci = Math.floor(R() * 16); m.uniforms.uCell = { value: new THREE.Vector4((ci % 4) * 0.25, (3 - Math.floor(ci / 4)) * 0.125, 0.25, 0.125) };
@@ -121,8 +129,11 @@ export function buildNeon(scene, city) {
     const b = new THREE.Mesh(beamG, m); b.position.set(p.x, p.h + 1, p.z); b.renderOrder = 7; b.userData = { ph: R() * 6.28, sp: 0.15 + R() * 0.2, tilt: 0.28 + R() * 0.2 }; b.frustumCulled = false; scene.add(b); out.beams.push(b); out.meshes.push(b); }
   // r6.2: street-structure layer (harbor cranes / pipes / catwalks, skyways, sky bridges, cross-street cables), chunk-streamed
   out.bldg = city.stream ? new BldgLayer(scene, city.stream.mats, city) : null;
+  // r6.4 (b_port): 货柜港 south quay — STS cranes, container yard (instanced), berthed box ship, quay ground + props
+  out.port = city.stream ? new PortQuay(scene, city.stream.mats, city) : null;
   out.update = (night, time) => {
     if (out.bldg) out.bldg.sync();
+    if (out.port) out.port.sync();
     const on = night > 0.02;
     for (const m of out.meshes) m.visible = on;
     if (!on) return;

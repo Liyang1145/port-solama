@@ -1,0 +1,26 @@
+{
+ "query": "map=cyber&hour=13&lowshadow&probe=0&ao=0&noshaft",
+ "reset": false,
+ "shots": [
+  {
+   "name": "sign_close",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; let best=null; __G.scene.traverse((m)=>{ if(m.isMesh && m.name.startsWith('nglow|')){ const q=m.geometry.attributes.position, n=m.geometry.attributes.normal; for(let i=0;i<q.count;i+=4){ const x=(q.getX(i)+q.getX(i+2))/2,y=(q.getY(i)+q.getY(i+2))/2,z=(q.getZ(i)+q.getZ(i+2))/2; const h=Math.abs(q.getY(i+2)-q.getY(i)); if(y>2.5&&y<6.5&&h>2.5){ const d=Math.hypot(x-c.position.x,z-c.position.z); if(d>4&&(!best||d<best.d)) best={d,x,y,z,nx:n.getX(i),nz:n.getZ(i)}; } } } }); if(best){ c.position.set(best.x+best.nx*6.5, 1.7, best.z+best.nz*6.5); c.lookAt(best.x, best.y-0.6, best.z); c.updateMatrixWorld(); __G.streamSync(); } JSON.stringify(Object.assign({best, cam:[c.position.x,c.position.y,c.position.z]}, __G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0}))"
+  },
+  {
+   "name": "sign_fix",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1647.51,1.7,-256.94); c.lookAt(-1648.03,4.09,-250.46); c.far=160; c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); 0"
+  },
+  {
+   "name": "b_night_street",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "tenement_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1604,-820,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1604,3.5,-805); c.lookAt(-1586,10,-776); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  },
+  {
+   "name": "via_far_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.tp(-1650,-268,0); __G.step(3); __G.game.player.root.visible=false; const c=__G.camera; c.position.set(-1625,2.6,-262); c.lookAt(-1900,22,-285); c.far=420; c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const B=__G.neon&&__G.neon.bldg; JSON.stringify(Object.assign(__G.stats(), {bl: B ? B.tris() : 0, via: B&&B.via ? B.via.tris() : 0, vc: B&&B.via ? B.via.counts : 0}))"
+  }
+ ]
+}

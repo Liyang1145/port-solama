@@ -1,0 +1,10 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft&nowater",
+ "reset": false,
+ "shots": [
+  {
+   "name": "core_recess_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; if(g.P.car) g.toggleCar(); g.tp(178,15,0); __G.step(3); g.player.root.visible=false; __G.streamSync(); __G.neon.update(__G.U.uNight.value,0); const L=__G.neon.bldg.shops; const c=__G.camera; c.far=200; const S=L.list().filter(s=>s.src==='core'); let b=null; for(const s of S){ const d=Math.hypot(s.cx-180,s.cz-32); if(!b||d<b.d) b={d,s}; } const s=b.s; const cam={p:[s.cx+s.n[0]*4.2+s.u[0]*2.6, 1.6, s.cz+s.n[1]*4.2+s.u[1]*2.6], t:[s.cx-s.u[0]*0.4, 1.7, s.cz-s.u[1]*0.4]}; window.__CAM={cam,type:s.type,w:s.w}; for(let k=0;k<4;k++){ __G.streamSync(); __G.step(2); g.player.root.visible=false; c.position.set(...cam.p); c.lookAt(...cam.t); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.neon.update(__G.U.uNight.value,0); } JSON.stringify(window.__CAM)"
+  }
+ ]
+}

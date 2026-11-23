@@ -1,0 +1,30 @@
+{
+ "query": "map=cyber&hour=22&lowshadow&probe=0&ao=0&noshaft",
+ "reset": false,
+ "shots": [
+  {
+   "name": "air_stat",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; const PS=__G.city.parcels.filter(p=>!p.far&&p.style==='mid'); let best=null,bn=-1; for(const p of PS){ let n=0; for(const q of PS) if(Math.hypot(q.x-p.x,q.z-p.z)<120) n++; if(n>bn){bn=n;best=p;} } const P=best; g.tp(P.x+Math.cos(P.ang)*(P.d/2+9), P.z+Math.sin(P.ang)*(P.d/2+9), 0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=2000; c.position.set(P.x+95,88,P.z+95); c.lookAt(P.x,12,P.z); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.info.autoReset=false; R.info.reset(); __G.render(); const rc=R.info.render.calls, rt=R.info.render.triangles; R.info.autoReset=true; const B=__G.neon&&__G.neon.bldg; const L=B&&B.roofs; const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; JSON.stringify({keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey)+':'+p.cacheKey.slice(0,60)), P:[+P.x.toFixed(1),+P.z.toFixed(1),+P.h.toFixed(1)], cam:c.position.toArray().map(v=>+v.toFixed(1)), frameCalls:rc, frameTris:rt, stream:__G.stream.tris(), programs:R.info.programs.length, roofTris:L?L.tris():0, roofCalls:L?L.calls():0, roofStats:L?L.stats:null, chunks:L?L.chunks.size:0})"
+  },
+  {
+   "name": "street_stat",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; const PS=__G.city.parcels.filter(p=>!p.far&&p.style==='mid'); let best=null,bn=-1; for(const p of PS){ let n=0; for(const q of PS) if(Math.hypot(q.x-p.x,q.z-p.z)<120) n++; if(n>bn){bn=n;best=p;} } const P=best; g.tp(P.x+Math.cos(P.ang)*(P.d/2+9), P.z+Math.sin(P.ang)*(P.d/2+9), 0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=2000; const fx=Math.cos(P.ang), fz=Math.sin(P.ang); c.position.set(P.x+fx*(P.d/2+9),1.7,P.z+fz*(P.d/2+9)); c.lookAt(P.x,P.h+4,P.z); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.info.autoReset=false; R.info.reset(); __G.render(); const rc=R.info.render.calls, rt=R.info.render.triangles; R.info.autoReset=true; const B=__G.neon&&__G.neon.bldg; const L=B&&B.roofs; const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; JSON.stringify({keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey)+':'+p.cacheKey.slice(0,60)), P:[+P.x.toFixed(1),+P.z.toFixed(1),+P.h.toFixed(1)], cam:c.position.toArray().map(v=>+v.toFixed(1)), frameCalls:rc, frameTris:rt, stream:__G.stream.tris(), programs:R.info.programs.length, roofTris:L?L.tris():0, roofCalls:L?L.calls():0, roofStats:L?L.stats:null, chunks:L?L.chunks.size:0})"
+  },
+  {
+   "name": "prog_census",
+   "noshot": true,
+   "js": "const hs=(s)=>{let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return (h>>>0).toString(36);}; __G.setHour(22.0); const g=__G.game; g.override=null; const PS=__G.city.parcels.filter(p=>!p.far&&p.style==='mid'); let best=null,bn=-1; for(const p of PS){ let n=0; for(const q of PS) if(Math.hypot(q.x-p.x,q.z-p.z)<120) n++; if(n>bn){bn=n;best=p;} } const P=best; g.tp(P.x+Math.cos(P.ang)*(P.d/2+9), P.z+Math.sin(P.ang)*(P.d/2+9), 0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=2000; c.position.set(P.x+95,88,P.z+95); c.lookAt(P.x,12,P.z); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.compile(__G.scene, c); JSON.stringify({n:R.info.programs.length, keys:R.info.programs.map(p=>p.name+':'+hs(p.cacheKey))})"
+  },
+  {
+   "name": "prog_share",
+   "noshot": true,
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; const PS=__G.city.parcels.filter(p=>!p.far&&p.style==='mid'); let best=null,bn=-1; for(const p of PS){ let n=0; for(const q of PS) if(Math.hypot(q.x-p.x,q.z-p.z)<120) n++; if(n>bn){bn=n;best=p;} } const P=best; g.tp(P.x+Math.cos(P.ang)*(P.d/2+9), P.z+Math.sin(P.ang)*(P.d/2+9), 0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=2000; c.position.set(P.x+95,88,P.z+95); c.lookAt(P.x,12,P.z); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); const R=__G.renderer; R.compile(__G.scene, c); const roofG=__G.scene.getObjectByName('roofs'); const inRoof=new Set(); if(roofG) roofG.traverse(o=>inRoof.add(o)); const other=new Set(), mine=new Map(); __G.scene.traverseVisible(o=>{ if(!o.material) return; const ms=Array.isArray(o.material)?o.material:[o.material]; for(const m of ms){ const pr=R.properties.get(m).currentProgram; if(!pr) continue; if(inRoof.has(o)) mine.set(pr, (mine.get(pr)||[]).concat(o.name)); else other.add(pr);} }); const fresh=[...mine.keys()].filter(pr=>!other.has(pr)); JSON.stringify({programs:R.info.programs.length, roofPrograms:mine.size, roofMeshes:inRoof.size, newPrograms:fresh.length, fresh:fresh.map(pr=>mine.get(pr).slice(0,4))})"
+  },
+  {
+   "name": "air_night",
+   "js": "__G.setHour(22.0); const g=__G.game; g.override=null; const PS=__G.city.parcels.filter(p=>!p.far&&p.style==='mid'); let best=null,bn=-1; for(const p of PS){ let n=0; for(const q of PS) if(Math.hypot(q.x-p.x,q.z-p.z)<120) n++; if(n>bn){bn=n;best=p;} } const P=best; g.tp(P.x+Math.cos(P.ang)*(P.d/2+9), P.z+Math.sin(P.ang)*(P.d/2+9), 0); __G.step(3); g.player.root.visible=false; const c=__G.camera; c.far=2000; c.position.set(P.x+95,88,P.z+95); c.lookAt(P.x,12,P.z); c.updateProjectionMatrix(); c.updateMatrixWorld(); __G.streamSync(); __G.neon.update(__G.U.uNight.value, 0); __G.neon.update(__G.U.uNight.value, 0); 0"
+  }
+ ]
+}

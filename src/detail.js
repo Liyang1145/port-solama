@@ -3,6 +3,7 @@
 // stamp() bakes them into a GeoBucket with a placement matrix.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { CYBER } from './mapsel.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const M = (x, y, z, rx = 0, ry = 0, rz = 0, s = [1, 1, 1]) => new THREE.Matrix4().compose(V3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), V3(...s));
@@ -68,6 +69,15 @@ export function busShelter() {
   o.push([P(new THREE.BoxGeometry(0.01, 0.62, 0.45), M(1.98, 1.45, -0.05)), [0.82, 0.84, 0.8]]);
   const bin = new THREE.CylinderGeometry(0.2, 0.18, 0.7, 12); bin.translate(2.35, 0.35, 0.2); o.push([bin, [0.2, 0.32, 0.26]]);
   const lip = new THREE.TorusGeometry(0.2, 0.02, 6, 16); lip.rotateX(Math.PI / 2); lip.translate(2.35, 0.71, 0.2); o.push([lip, steel]);
+  if (!CYBER) { // a_props (map 索拉纳港): backlit ad light box behind the end-wing poster, roof gutter + downpipe, kerb edge strip, bench armrests
+    o.push([new RoundedBoxGeometry(0.13, 1.74, 1.24, 1, 0.02).translate(1.915, 1.3, 0), alu]);
+    for (const [w, h, y, z] of [[0.05, 1.74, 1.3, -0.6], [0.05, 1.74, 1.3, 0.6], [1.24, 0.05, 2.15, 0], [1.24, 0.05, 0.45, 0]]) o.push([P(new THREE.BoxGeometry(0.03, h, w > 0.1 ? w : 0.05), M(1.995, y, z)), steel]);
+    o.push([P(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 8), M(-2.12, 1.25, -0.8)), steel]);                            // downpipe
+    o.push([P(new THREE.BoxGeometry(4.3, 0.06, 0.1), M(0, 2.43, -0.92)), steel]);                                              // gutter
+    o.push([P(new THREE.BoxGeometry(4.4, 0.012, 0.25), M(0, 0.006, 0.95)), [0.86, 0.72, 0.18]]);                            // yellow kerb edge strip
+    for (const x of [-0.3, 0.75]) o.push([P(new THREE.BoxGeometry(0.04, 0.16, 0.3), M(x, 0.56, -0.3)), steel]);              // anti-sleep armrests
+    o.push([P(new THREE.BoxGeometry(0.3, 0.08, 0.004), M(1.4, 2.2, -0.605)), [0.9, 0.9, 0.88]]);                             // stop number plate
+  }
   return o;
 }
 
@@ -84,6 +94,13 @@ export function newsBox(col) {
   o.push([P(new THREE.BoxGeometry(0.03, 0.05, 0.02), M(0.13, 1.03, 0.262)), [0.1, 0.1, 0.1]]);
   o.push([P(new THREE.BoxGeometry(0.36, 0.3, 0.36), M(0, 0.15, 0)), [0.2, 0.2, 0.21]]); // pedestal
   o.push([P(new THREE.BoxGeometry(0.42, 0.02, 0.42), M(0, 0.01, 0)), [0.25, 0.25, 0.26]]);
+  if (!CYBER) { // a_props (map 索拉纳港): door hinge pins, price sticker, rain drip lip, chained ground anchor, sun-faded side decal
+    for (const y of [0.68, 0.88]) o.push([P(new THREE.CylinderGeometry(0.008, 0.008, 0.05, 6), M(-0.2, y, 0.228)), [0.6, 0.6, 0.62]]);
+    o.push([P(new THREE.BoxGeometry(0.07, 0.04, 0.003), M(0.13, 0.93, 0.236)), [0.93, 0.92, 0.85]]);
+    o.push([P(new THREE.BoxGeometry(0.48, 0.015, 0.03), M(0, 0.925, 0.235)), col.map((c) => c * 0.8)]);
+    o.push([P(new THREE.BoxGeometry(0.003, 0.2, 0.3), M(0.232, 0.62, 0)), col.map((c) => Math.min(1, c * 0.6 + 0.35))]);
+    for (let k = 0; k < 5; k++) { const t = new THREE.TorusGeometry(0.018, 0.005, 3, 6); t.rotateY(k % 2 ? Math.PI / 2 : 0); t.translate(0.18, 0.06 + k * 0.032, -0.19); o.push([t, [0.5, 0.5, 0.48]]); }
+  }
   return o;
 }
 

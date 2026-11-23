@@ -10,6 +10,10 @@ import * as THREE from 'three';
 import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
 import { withSeed, rng, rand, randi, pick } from '../../util.js';
 import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies } from './city.js';
+import { CLUT_CTX } from './clutcap.js'; // b_clutter
+import { SVC_CTX } from './svcface.js'; // b_alleyface2
+import { PY_OFF, yardContainers } from './portyard.js'; // r6.4 b_portyard
+import { farCrown, setCrownParcel } from './crown.js';
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
@@ -40,12 +44,16 @@ function villa(ctx, p, big) {
   polyCap(v, [D, C, B, A], y0 - 0.05, {}, tile.map((c) => c * 0.6), true); // eave soffit
   // front porch / entrance canopy on slim columns, garage door, garden wall + gate piers, pool deck at the side
   const pw = Math.min(5, hz); box(v, hx, 2.9, -pw / 2, hx + 2.4, 3.15, pw / 2, {}, wall.map((c) => Math.min(1, c * 1.08)), false);
-  for (const zz of [-pw / 2 + 0.2, pw / 2 - 0.2]) box(v, hx + 2.0, 0.05, zz - 0.15, hx + 2.3, 2.9, zz + 0.15, {}, [0.95, 0.94, 0.9]);
+  [-pw / 2 + 0.2, pw / 2 - 0.2].forEach((zz, i) => { if (!(p.gf && p.gf.villa && p.gf.villa.porch.includes(i))) box(v, hx + 2.0, 0.05, zz - 0.15, hx + 2.3, 2.9, zz + 0.15, {}, [0.95, 0.94, 0.9]); }); // b_genfit
   box(v, hx + 0.01, 0.05, hz - 5.5, hx + 0.06, 2.6, hz - 1.0, {}, [0.86, 0.85, 0.82]); // garage door
   for (let k = 0; k < 5; k++) box(v, hx + 0.06, 0.4 + k * 0.45, hz - 5.5, hx + 0.08, 0.43 + k * 0.45, hz - 1.0, {}, [0.7, 0.7, 0.68]);
   const gw = [0.93, 0.91, 0.86]; const fx = hx + 5.2;
-  box(v, fx - 0.15, 0.05, -hz, fx + 0.15, 1.0, -pw / 2 - 1.2, {}, gw); box(v, fx - 0.15, 0.05, pw / 2 + 1.2, fx + 0.15, 1.0, hz - 6.5, {}, gw);
-  for (const zz of [-pw / 2 - 1.2, pw / 2 + 1.2, hz - 6.5]) box(v, fx - 0.25, 0.05, zz - 0.25, fx + 0.25, 1.35, zz + 0.25, {}, gw);
+  const g = p.gf && p.gf.villa; // r6.4 b_genfit: lots whose garden wall / piers would stand on the sidewalk (genfit.js); others unchanged
+  if (!g) { box(v, fx - 0.15, 0.05, -hz, fx + 0.15, 1.0, -pw / 2 - 1.2, {}, gw); box(v, fx - 0.15, 0.05, pw / 2 + 1.2, fx + 0.15, 1.0, hz - 6.5, {}, gw);
+    for (const zz of [-pw / 2 - 1.2, pw / 2 + 1.2, hz - 6.5]) box(v, fx - 0.25, 0.05, zz - 0.25, fx + 0.25, 1.35, zz + 0.25, {}, gw); }
+  else { if (g.za !== null) box(v, fx - 0.15, 0.05, g.za, fx + 0.15, 1.0, -pw / 2 - 1.2, {}, gw); box(v, fx - 0.15, 0.05, pw / 2 + 1.2, fx + 0.15, 1.0, g.zb, {}, gw);
+    [-pw / 2 - 1.2, pw / 2 + 1.2, g.zb].forEach((zz, i) => { if (!g.drop.includes(i)) box(v, fx - 0.25, 0.05, zz - 0.25, fx + 0.25, 1.35, zz + 0.25, {}, gw); });
+    if (g.endPier !== null) box(v, fx - 0.25, 0.05, g.endPier - 0.25, fx + 0.25, 1.35, g.endPier + 0.25, {}, gw); }
   // driveway + front lawn edging
   polyCap(ctx.W.b('pavers', 0, 0), rect(hx, hz - 6, fx + 0.3, hz - 0.5), 0.02);
   if (big || rng() < 0.5) { // pool on the back lawn
@@ -70,11 +78,12 @@ function port(ctx, p) {
     for (let z = -hz + 6; z < hz - 4; z += 10) box(v, hx + 0.02, 0.05, z - 2, hx + 0.08, 4.8, z + 2, {}, [0.75, 0.34, 0.18]);
     return;
   }
+  if (!PY_OFF) { yardContainers(v, p); return; } // r6.4 b_portyard: same draws, detailed boxes (portyard.js)
   const CC = [[0.62, 0.16, 0.12], [0.12, 0.32, 0.55], [0.85, 0.55, 0.12], [0.2, 0.45, 0.3], [0.55, 0.55, 0.55], [0.75, 0.75, 0.72], [0.45, 0.2, 0.35]];
   for (let x = -hx + 2; x < hx - 2.4; x += 3) for (let z = -hz + 1; z < hz - 12; z += 13.2) { const n = randi(1, 4); for (let k = 0; k < n; k++) { const c = pick(CC); box(v, x, 0.05 + k * 2.6, z, x + 2.44, 0.05 + (k + 1) * 2.6, z + 12.2, {}, c, false);
     for (let r = 1; r < 12; r++) box(v, x - 0.05, 0.15 + k * 2.6, z + r * 1.0, x + 2.49, 2.5 + k * 2.6, z + r * 1.0 + 0.08, {}, c.map((q) => q * 0.72)); } }
 }
-function genParcel(ctx, p) {
+export function genParcel(ctx, p) { // b_parcelfit: exported for the footprint census (tests only)
   const hx = p.d / 2, hz = p.w / 2;
   switch (p.style) {
     case 'deco': decoHotel(ctx, -hx, -hz, hx, hz, false, 1); break;
@@ -133,6 +142,8 @@ function impostor(W, p) {
   polyCap(v, [P(-mx - 3, mz + 2), P(-mx + 3, mz + 2), P(-mx + 3, mz - 2), P(-mx - 3, mz - 2)].map((q) => q), top + 2.2, {}, [0.62, 0.62, 0.6]);
   prismWalls(v, [P(-mx - 3, mz + 2), P(-mx + 3, mz + 2), P(-mx + 3, mz - 2), P(-mx - 3, mz - 2)], top, top + 2.2, null, [0.58, 0.58, 0.56]);
   if (k > 1) { const q = [P(mx - 2, -mz + 2), P(mx + 2, -mz + 2), P(mx + 2, -mz - 2), P(mx - 2, -mz - 2)]; prismWalls(v, q, top, top + (tall ? 6 : 3), null, [0.45, 0.47, 0.5]); polyCap(v, q, top + (tall ? 6 : 3), {}, [0.4, 0.42, 0.45]); }
+  // r6.4 b_tower2: megatower crowns read from afar (helipad / mast / billboard / fin screen / spire + aviation lights)
+  if (st === 'downtown' && h >= 90) farCrown(W, P, p, top, sx, sz);
 }
 
 export class Stream {
@@ -144,7 +155,7 @@ export class Stream {
     let tris = 0;
     for (const c of this.chunks.values()) {
       const W = mkWorld(); for (const p of c.parcels) impostor(W, p);
-      c.far = W.build(this.group, mats, { building: { cast: true } }); for (const m of c.far) tris += m.geometry.index.count / 3;
+      c.far = W.build(this.group, mats, { building: { cast: true }, neon: { cast: false } }); for (const m of c.far) tris += m.geometry.index.count / 3;
     }
     this.farTris = tris;
   }
@@ -153,12 +164,16 @@ export class Stream {
     const W = mkWorld();
     for (const p of c.parcels) {
       if (p.far) continue;
-      const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [] };
-      withSeed(p.seed, () => genParcel(ctx, p));
-      const m = parcelMatrix(p);
+      const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
+      const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
+      SVC_CTX.p = p; SVC_CTX.log = []; // b_alleyface2: service faces on the lot's back / slot sides (city.js svcEdgesLot)
+      setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); CLUT_CTX.m = null; // b_tower3: crown sizes/content from the seed
+      { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
+        p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
       for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
+      if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
     }
-    c.near = W.build(this.group, this.mats, { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false } });
+    c.near = W.build(this.group, this.mats, { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } });
     for (const m of c.far) m.visible = c.parcels.some((p) => p.far); // keep far-only parcels' boxes (none in near chunks normally)
     this.stats.builds++; this.stats.ms = performance.now() - t0;
   }

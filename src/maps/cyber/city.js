@@ -1,28 +1,45 @@
 // "Port Solana": an original Miami-inspired city — a barrier island (Art Deco beachfront, condos)
 // across a bay from a glass-tower downtown, linked by a causeway.
 import * as THREE from 'three';
+import { envAdopt } from '../../mats.js'; // b_envprog2
 import { World, prismWalls, polyCap, rect, box } from '../../geo.js';
 import { ColliderGrid, rng, rand, randi, pick, clamp } from '../../util.js';
 import { ROADS, landAt, beachX, BEACH_Z, DECO_CORE } from './mapdata.js';
 import { buildGraph } from './roadgraph.js';
 import { genParcels } from './parcels.js';
+import { planGenfit } from './genfit.js'; // b_genfit
+import { planYards } from './portyard.js'; // r6.4 b_portyard
 import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
-import { megatower, tenement, shopStreet } from './arch.js';
+import { megatower, tenement, shopStreet, CORE_SHOP_LOG } from './arch.js';
 import { signFaceMat } from './dress.js';
+import { cnSignMat, steamMat } from './street2.js';
+import { neonGlowMat, neonReflMat } from './neontube.js';
+import { viaductRoute, viaductClear } from './viaduct.js';
 import { U } from '../../env.js';
 import { neonSign, randGlyphs } from './kit.js';
+import { AF_OFF, svcBays, SVC, SVC_CTX, svcPieceList, NF_OFF, nfFace, nfPairs, inBox as nfInBox } from './svcface.js'; // b_alleyface
+import { pedLoop, addPropCols, lanePoint, pedPath, pathLanePoint, pedWarm, pedWant } from './pedlane.js';
+const Q_NOPALM = typeof location !== 'undefined' && /[?&]nopalmloop\b/.test(location.search); // test switch: old loops, no prop colliders
+const Q_NOSP = Q_NOPALM || (typeof location !== 'undefined' && /[?&]nostreetpeds\b/.test(location.search)); // test switch (b_streetpeds): old graph paths, loops solved on first use, no bollard colliders
 // r6.2: streamed parcels are built with a stub collider (stream.js nullCol); the hand-built Deco core uses the real grid
 const streamed = (ctx) => !(ctx.col instanceof ColliderGrid);
 
 // v4.4: an oriented box as a few axis-aligned slices (the collider grid is AABB-only)
+// b_parcelfit: returns the boxes it added (PARCEL_COLS keeps them per streamed parcel; no rng use)
 export function obbCollider(col, cx, cz, hx, hz, ang, h, tag = 'bld') {
-  const c = Math.cos(ang), s = Math.sin(ang); const ax = Math.abs(c), az = Math.abs(s);
-  if (ax < 0.08 || az < 0.08) { const ex = ax * hx + az * hz, ez = az * hx + ax * hz; col.add(cx - ex, cz - ez, cx + ex, cz + ez, h, tag); return; }
+  const c = Math.cos(ang), s = Math.sin(ang); const ax = Math.abs(c), az = Math.abs(s); const out = [];
+  if (ax < 0.08 || az < 0.08) { const ex = ax * hx + az * hz, ez = az * hx + ax * hz; out.push(col.add(cx - ex, cz - ez, cx + ex, cz + ez, h, tag)); return out; }
   const long = hx >= hz; const L = long ? hx : hz, S = long ? hz : hx; const n = Math.max(2, Math.ceil(L / Math.max(1.5, S * 0.7)));
   const ux = long ? c : -s, uz = long ? s : c; // long axis
-  for (let i = 0; i < n; i++) { const t = -L + (2 * L) * (i + 0.5) / n; const x = cx + ux * t, z = cz + uz * t; const r = Math.max(S * 0.82, L / n) * 0.92; col.add(x - r * 0.75, z - r * 0.75, x + r * 0.75, z + r * 0.75, h, tag); }
+  for (let i = 0; i < n; i++) { const t = -L + (2 * L) * (i + 0.5) / n; const x = cx + ux * t, z = cz + uz * t; const r = Math.max(S * 0.82, L / n) * 0.92; out.push(col.add(x - r * 0.75, z - r * 0.75, x + r * 0.75, z + r * 0.75, h, tag)); }
+  return out;
 }
+// b_parcelfit: streamed parcel -> its building collider boxes (city.js obbCollider, replaced by parcelgap.js / parcelfit.js)
+export const PARCEL_COLS = new WeakMap();
+// b_parcelfit: footprints (parcel frame) of the walking-height volumes a streamed parcel's generator lays (volume() y0 < 1.75);
+// parcelfit.js reads them per parcel (Stream.onParcel) to check its startup prediction. No rng use.
+export const FOOT_LOG = [];
 export const LAYOUT = {
   // v4.0 "one perfect district": only the Deco beachfront (Tideline Dr, x=290), two inner avenues (x=170, x=50) and five cross
   // streets survive; downtown across the bay is a low-poly skyline silhouette (no roads, no colliders).
@@ -56,8 +73,12 @@ export function buildCity(scene, mats, T) {
       s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight;')
         .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.6, 0.14, uNight);')
         .replace('#include <opaque_fragment>', 'outgoingLight = min(outgoingLight, vec3(mix(0.09, 3.0, uNight)));\n#include <opaque_fragment>'); };
-    mats.puddle.customProgramCacheKey = () => 'puddleN'; }
+    mats.puddle.customProgramCacheKey = () => 'puddleN'; envAdopt(mats.puddle, 'puddleN'); } // b_envprog2
   if (!mats.signface) mats.signface = signFaceMat();
+  if (!mats.cnsign) mats.cnsign = cnSignMat(); // r6.4 b_street2: Chinese light-box signs / paper stickers (text atlas)
+  if (!mats.steam) mats.steam = steamMat(); // r6.4 b_street2: stall steam / grill smoke
+  if (!mats.nglow) mats.nglow = neonGlowMat(); // b_neon_sign: near-range neon halo
+  if (!mats.nrefl) mats.nrefl = neonReflMat(); // b_neon_sign: neon streaks on the wet pavement
   const W = new World(250);
   W.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 };
   W.attrs.road = { aRd: 4 };
@@ -162,12 +183,16 @@ export function buildCity(scene, mats, T) {
   // ------------------------------------------------------------- buildings -----
   const B = W.b.bind(W);
   const bld = { W, col, signs, awnings, lamps, alleys: [], yards: [] };
+  NF_CORE = NF_OFF() ? null : []; // b_narrowfix
   for (const b of blocks) {
     if (b.area === 'promenade') { promenade(W, b, shrubs, trees); continue; }
+    bld.curBlock = b; // b_alleyface: volume() tells street fronts from alley / back-yard / gap faces by the block's lot (no rng use)
     if (b.area === 'island') islandBlock(bld, b, palms, trees, shrubs);
     else if (b.area === 'bayfront') bayfrontBlock(bld, b, palms, trees);
     else downtownBlock(bld, b, palms, trees);
+    bld.curBlock = null;
   }
+  nfCore(col); // b_narrowfix: core service pieces, now that every core block stands
   // ------------------------------------------- v4.0 district edges + far skyline ----
   districtEdges(bld, deco);
   marina(bld); landmarks(bld);
@@ -176,12 +201,17 @@ export function buildCity(scene, mats, T) {
   const graph = buildGraph(ROADS, legacyRoads);
   buildRegion({ ...bld, palms, trees, shrubs }, graph);
   const parcels = genParcels(graph);
+  planGenfit(parcels, graph); planYards(parcels, graph); // r6.4 b_portyard: yard furniture plan (after genfit: reads p.gf; no rng use)
+  // r6.4 b_genfit: kerb fit of garden walls / yard rails / masts / crane over the sidewalk (no rng use)
   const wild = wildField(graph); // v4.5 草原 / 雨林 height field (src/nature.js)
   for (const p of parcels) {
-    if (p.far) continue; obbCollider(col, p.x, p.z, p.d / 2, p.w / 2, p.ang, p.h);
+    if (p.far) continue; PARCEL_COLS.set(p, obbCollider(col, p.x, p.z, p.d / 2, p.w / 2, p.ang, p.h));
     if (p.style === 'canal' || p.style === 'villa' || p.style === 'mansion') { const bx = -Math.cos(p.ang), bz = -Math.sin(p.ang); // back yard palm
       const x = p.x + bx * (p.d / 2 + 3), z = p.z + bz * (p.d / 2 + 3); if (landAt(x, z) && !graph.index.near(x, z)) palms.push({ x, z, h: rand(7, 12), lean: rand(-0.08, 0.08), rot: rand(0, 6.28), s: 1, region: true }); }
   }
+  // r6.4 b_street2: elevated light-rail over 零点大道 / 霓滨大道 (viaduct.js) — plan it now so palms under the deck are dropped and
+  // the columns get colliders; the geometry is built by the street-structure layer (bldglayer.js)
+  const viaduct = viaductRoute(graph, lamps, parcels); viaductClear(viaduct, palms, col);
   // ---------------------------------------------------------- street lights ----
   for (const s of segs) {
     if (s.bridge) continue;
@@ -240,7 +270,12 @@ export function buildCity(scene, mats, T) {
   };
   const bedH = (x, z) => { if (inCore(x, z)) return 0; if (wild.inside(x, z)) return wild.H(x, z); if (onBeach(x, z)) return Math.max(beachH(x, z), -6); return landAt(x, z) ? 0 : L.waterY - 3; }; // water shader bed (bridges ignored)
   const junctions = graph.nodes.filter((n) => n.deg >= 3);
-  return { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild };
+  const out = { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild, viaduct };
+  // r6.x b_palmloop: pedestrian lanes of the Deco block loops (off the palm / tree pits) + colliders for uncollided sidewalk props
+  if (!Q_NOPALM) { out.pedLoop = (b) => pedLoop(out, b); out.pedInit = () => addPropCols(out, !Q_NOSP); out.lanePoint = lanePoint; }
+  // r6.x b_streetpeds: road-graph sidewalk paths off the palm line + lanes solved a slice per frame around the player
+  if (!Q_NOSP) { out.pedPath = (p) => pedPath(out, p); out.pathLanePoint = pathLanePoint; out.pedWarm = (PE, at) => pedWarm(out, PE, at); out.pedWant = (o, isPath) => pedWant(out, o, isPath); }
+  return out;
 }
 
 function roadQuad(rd, s) {
@@ -306,20 +341,26 @@ function facadeAttrs(style, fh, ww, seed, wallC, glassC, up = [0, 0, 0]) {
 // one building volume (polygon footprint) with ground-floor storefront band + upper style
 export function volume(ctx, poly, y0, y1, opts) {
   const { W, col } = ctx; const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+  if (SVC_CTX.dry) { const D = SVC_CTX.dry; if (!(opts.store && y0 < 1)) { D.miss = true; throw D; } D.rec = { poly, y0, seed: rand(0, 100), sw: opts.storeW || 4.5 }; throw D; } // b_svccol: startup replay stops at the store volume (svccol.js)
   const b = W.b('building', cx, cz);
   const seed = rand(0, 100);
+  if (y0 < 1.75 && streamed(ctx)) FOOT_LOG.push(poly); // b_parcelfit
   const ground = opts.ground ?? 4.6;
+  const svc = opts.store && y0 < 1 ? svcEdges(ctx, poly, seed, opts.storeW || 4.5, y0) : null; // b_alleyface
   if (opts.store && y0 < 1) {
-    prismWalls(b, poly, y0, y0 + ground, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]), null, 0, true);
+    const fa = facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]);
+    prismWalls(b, poly, y0, y0 + ground, svc ? (i, len) => (svc[i] ? { aWin: [6, ground, svc[i].ww, seed], aCol: opts.wall, aGlass: [svc[i].ps, svc[i].kind, y0], aUp: [0, 0, 0] } : fa(i, len)) : fa, null, 0, true);
     prismWalls(b, poly, y0 + ground, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
   } else prismWalls(b, poly, y0, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
   if (opts.relief !== false && (opts.style === 0 || opts.style === 2 || opts.style === 1)) relief(ctx, poly, opts.store && y0 < 1 ? y0 + ground : y0, y1, opts.fh, opts.ww, opts.style, opts.wall, y1 - y0 > 40 || opts.lite);
-  if (opts.store && y0 < 1 && opts.canopy !== false) canopies(ctx, poly, y0 + ground, opts.wall);
-  if (opts.store && y0 < 1) shopfront(ctx, poly, y0, ground, opts.storeW || 4.5, opts.wall);
+  if (opts.store && y0 < 1 && opts.canopy !== false) canopies(ctx, poly, y0 + ground, opts.wall, svc);
+  if (opts.store && y0 < 1) shopfront(ctx, poly, y0, ground, opts.storeW || 4.5, opts.wall, svc);
   polyCap(W.b('roof', cx, cz), poly, y1);
   if (opts.collide !== false) {
     const xs = poly.map((p) => p[0]), zs = poly.map((p) => p[1]);
-    col.add(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), y1, 'bld');
+    const bx = col.add(Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), y1, 'bld');
+    if (bx && !streamed(ctx) && svc) bx.svc = svc; // b_alleyface: service edges (alley.js keeps its wall fixtures off the openings)
+    if (bx && !streamed(ctx)) bx.poly = poly; // b_coreflow: the real footprint, for storefront.js exactCore() (no rng use, box unchanged here)
   }
 }
 function chamfer(x0, z0, x1, z1, c) {
@@ -364,21 +405,86 @@ function relief(ctx, poly, y0, y1, fh, ww, style, wall, lite) {
     }
   }
 }
+// b_alleyface: which store-band edges of a hand-built core volume face an alley / back yard / gap instead of a street: the point
+// 4 m out from the edge middle still lies inside the block's lot (b.inner, i.e. not on the sidewalk). Edges < 2 m (the rounded
+// Deco corners) stay shopfront. Returns per edge null or { ww, ps, kind (1 alley, 0 back / gap), p, dx, dz, len, y0 }. No rng use.
+function svcEdges(ctx, poly, seed, sw, y0) {
+  if (AF_OFF) return null;
+  if (streamed(ctx)) return svcEdgesLot(poly, seed, sw, y0);
+  if (!ctx.curBlock || !ctx.curBlock.inner) return null;
+  const [ix0, iz0, ix1, iz1] = ctx.curBlock.inner; let any = false;
+  const out = poly.map((p, i) => { const E = edgeFrame(poly, i); if (E.len < 2) return null; const q = E.P(E.len / 2, 4);
+    if (!(q[0] > ix0 && q[0] < ix1 && q[1] > iz0 && q[1] < iz1)) return null;
+    const kind = (ctx.alleys || []).some((a) => Math.abs(q[1] - a.z) < a.w / 2 + 1.5 && q[0] > a.x0 && q[0] < a.x1) ? 1 : 0;
+    const n = Math.max(1, Math.round(E.len / sw)); any = true;
+    return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: p, dx: E.dx, dz: E.dz, len: E.len, y0 }; });
+  return any ? out : null;
+}
+// b_alleyface2: the same for a streamed lot (parcel frame, street front at +x): an edge whose outward normal points back (−x) or
+// to a side (±z) is a service face, unless bldglayer.js found a road on that side (p.svcRoad; corner side rows / back streets keep
+// the glass band). Edges < 2 m (rounded Deco corners) and slanted ones stay as they were. kind 1 = back, 0 = side / slot. No rng.
+function svcEdgesLot(poly, seed, sw, y0) {
+  const p = SVC_CTX.p; if (!p || p.svcRoad === undefined) return null; let any = false;
+  const out = poly.map((q, i) => { const E = edgeFrame(poly, i); if (E.len < 2) return null; let kind;
+    if (E.ox < -0.7) { if (p.svcRoad & 4) return null; kind = 1; }
+    else if (Math.abs(E.oz) > 0.7) { if (p.svcRoad & (E.oz > 0 ? 1 : 2)) return null; kind = 0; }
+    else return null;
+    const n = Math.max(1, Math.round(E.len / sw)); any = true;
+    return { ww: E.len / n, ps: (Math.floor(seed * 7) + i * 3) % 11, kind, p: q, dx: E.dx, dz: E.dz, len: E.len, y0, fx: (p.svcFix && p.svcFix[i]) || null }; }); // b_narrowfix: fx from svccol.js (startup)
+  return any ? out : null;
+}
+// b_alleyface: the real pieces of a service face (the rest is the style-6 shader): concrete plinth, roller-shutter housings,
+// steel door hoods, delivery-hatch sill + housing, meter cabinets. Bays from svcface.js (same rule as the shader).
+const SVC_STAT = { edges: 0, alley: 0, bays: 0, open: [0, 0, 0, 0, 0, 0] };
+export { SVC_STAT };
+export const SVC_CORE = []; // b_svccol: the hand-built core's service edges (world frame) -> svccol.js colliders
+export { svcEdgesLot, edgeFrame as svcEdgeFrame }; // b_svccol: startup prediction of a streamed lot's service openings
+function svcFront(b, E, y0, ground, s) {
+  const C = { galv: [0.40, 0.43, 0.45], dark: [0.17, 0.18, 0.19], steel: [0.33, 0.34, 0.35], cab: [0.36, 0.39, 0.37], plinth: [0.30, 0.30, 0.29], door: [0.102, 0.124, 0.156] };
+  SVC_STAT.edges++; if (s.kind) SVC_STAT.alley++;
+  const n = Math.max(1, Math.round(E.len / s.ww)); SVC_STAT.bays += n;
+  const lg = SVC_CTX.log; if (lg) SVC_STAT.lot = (SVC_STAT.lot || 0) + 1;
+  for (const o of svcBays(E.len, s.ww, s.ps)) { SVC_STAT.open[o.t]++; const a0 = o.c - o.hw, a1 = o.c + o.hw;
+    if (lg) lg.push({ a: E.P(a0, 0), b: E.P(a1, 0), lo: y0 + o.bot, hi: y0 + o.top, t: o.t, floor: !!o.floor }); } // b_alleyface2 (parcel frame)
+  // concrete plinth, roll housings, door drip hoods (b_alleyface2 size + steel), hatch sill + housing, louvre drip sills, meter
+  // cabinets + rain lids: svcface.js svcPieceList (b_narrowfix: flush versions where a neighbour wall stands close, s.fx)
+  for (const q of svcPieceList(E.len, s.ww, s.ps, s.fx)) lbox(b, E, q.u0, q.u1, -0.02, q.d, y0 + q.ya, y0 + q.yb, C[q.c], q.cap);
+  void ground;
+}
+// b_narrowfix: the hand-built core's service pieces are built once every core block (and its collider) stands: a face built back to
+// back with the next block (zero gap) or across a slot narrower than its pieces gets the flush versions / none (svcface.js nfFace,
+// nfPairs), so nothing reaches into the neighbour. Same vcol buckets, same piece list; no rng use. ?nonarrowfix: inline as before.
+let NF_CORE = null;
+export const NF_STAT = { core: { faces: 0, fixed: 0, pairs: 0 } };
+function nfCore(col) {
+  const L = NF_CORE; NF_CORE = null; if (!L) return; const PE = (r, u, d) => r.E.P(u, d); PE.dir = (r) => [r.E.dx, r.E.dz];
+  const ents = L.map((d) => { const rec = { E: d.E, len: d.E.len, ww: d.s.ww, ps: d.s.ps }; const poly = d.poly;
+    const F = { P: PE, rec, own: (b, x, z, ox, oz) => b.poly === poly || nfInBox(b, x - ox * 0.05, z - oz * 0.05), self: null, near: null };
+    return { d, F, fx: nfFace(col, F), fixed: false }; });
+  NF_STAT.core.pairs = nfPairs(ents);
+  for (const e of ents) { const { b, E, y0, ground, s, poly } = e.d; NF_STAT.core.faces++; if (e.fx) NF_STAT.core.fixed++; const s2 = { ...s, fx: e.fx };
+    svcFront(b, E, y0, ground, s2); SVC_CORE.push({ p: E.P(0, 0), dx: E.dx, dz: E.dz, len: E.len, y0, ww: s.ww, ps: s.ps, poly, fx: e.fx }); }
+}
 // v3.5 shopfront geometry on the ground-floor band: piers between bays, projecting transom / sign ledge, stone kick plate
-function shopfront(ctx, poly, y0, ground, sw, wall) {
-  const b = ctx.W.b('vcol', poly[0][0], poly[0][1]); const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
+function shopfront(ctx, poly, y0, ground, sw, wall, svc = null) {
+  const b = ctx.W.b('vcol', poly[0][0], poly[0][1]);
+  if (!streamed(ctx)) for (let i = 0; i < poly.length; i++) { const E = edgeFrame(poly, i); if (E.len >= 4) CORE_SHOP_LOG.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ground, sw, svc: !!(svc && svc[i]) }); } // no rng use; b_alleyface: storefront.js skips svc edges
+  const pier = wall.map((c) => Math.min(1, c * 1.02)), ledge = wall.map((c) => Math.min(1, c * 1.1 + 0.04)), kick = [0.32, 0.31, 0.3];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 2.5) continue; const n = Math.max(1, Math.round(E.len / sw)); const cw = E.len / n;
+    if (svc && svc[i]) { if (!streamed(ctx) && NF_CORE) { NF_CORE.push({ b, E, y0, ground, s: svc[i], poly }); continue; } // b_narrowfix: core pieces wait until every core block stands (nfCore)
+      svcFront(b, E, y0, ground, svc[i]); if (!streamed(ctx)) SVC_CORE.push({ p: poly[i], dx: E.dx, dz: E.dz, len: E.len, y0, ww: svc[i].ww, ps: svc[i].ps, poly }); continue; } // b_alleyface: service frontage instead of shop piers / sign ledge (b_svccol: core edges logged for their colliders, no rng)
     for (let k = 0; k <= n; k++) { const a = k * cw; lbox(b, E, Math.max(0, a - 0.17), Math.min(E.len, a + 0.17), -0.02, 0.2, y0, y0 + ground - 0.05, pier); }
     const yt = 0.8 * ground; lbox(b, E, 0, E.len, -0.02, 0.3, yt, yt + 0.14, ledge, true);
     lbox(b, E, 0, E.len, -0.02, 0.07, y0, 0.06 * ground + 0.04, kick);
   }
 }
-function canopies(ctx, poly, y, wall) {
+function canopies(ctx, poly, y, wall, svc = null) {
   const b = ctx.W.b('vcol', poly[0][0], poly[0][1]); const dark = [0.22, 0.23, 0.25], soffit = [0.85, 0.85, 0.83];
   for (let i = 0; i < poly.length; i++) {
     const E = edgeFrame(poly, i); if (E.len < 12) continue;
     const a0 = E.len * rand(0.1, 0.3), a1 = E.len * rand(0.7, 0.9); const dep = rand(1.8, 2.6);
+    if (svc && svc[i]) continue; // b_alleyface: no shop canopy over a service face (the three rand() above still run: same rng order)
     lbox(b, E, a0, a1, 0, dep, y - 0.12, y + 0.18, dark, true); // canopy slab
     lbox(b, E, a0, a1, dep - 0.05, dep + 0.03, y - 0.25, y + 0.3, soffit); // fascia
     for (const a of [a0 + 0.4, a1 - 0.4]) lbox(b, E, a - 0.05, a + 0.05, 0.1, dep - 0.2, y + 0.18, y + 1.6, dark); // tie-back rods
@@ -423,7 +529,11 @@ function rgeo() {
   RG.fan = new THREE.CylinderGeometry(1, 1, 1, 8, 1); RG.fan.translate(0, 0.5, 0);
   return RG;
 }
+// r6.4 b_rooftop: every roof deck rooftop() / decoHotel() lays down is logged here (no rng use, geometry unchanged) so the
+// rooftop-detail layer (roofs.js) can dress it; stream.js hands the streamed ones over per parcel (Stream.onParcel)
+export const ROOF_LOG = [];
 export function rooftop(ctx, x0, z0, x1, z1, y, kind = 'any', excl = []) {
+  const used = excl.slice(); ROOF_LOG.push({ st: streamed(ctx), x0, z0, x1, z1, y, kind, used, ph: 1.15 });
   const b = ctx.W.b('vcol', (x0 + x1) / 2, (z0 + z1) / 2); const G = rgeo();
   const conc = [0.72, 0.71, 0.68], cap = [0.84, 0.83, 0.8], met = [0.62, 0.64, 0.66], dark = [0.16, 0.17, 0.18];
   const t = 0.3, ph = 1.05;
@@ -431,7 +541,6 @@ export function rooftop(ctx, x0, z0, x1, z1, y, kind = 'any', excl = []) {
   P(x0, z0, x1, z0 + t, conc, y, y + ph); P(x0, z1 - t, x1, z1, conc, y, y + ph); P(x0, z0, x0 + t, z1, conc, y, y + ph); P(x1 - t, z0, x1, z1, conc, y, y + ph);
   for (const [a0, b0, a1, b1] of [[x0 - 0.08, z0 - 0.08, x1 + 0.08, z0 + t + 0.05], [x0 - 0.08, z1 - t - 0.05, x1 + 0.08, z1 + 0.08], [x0 - 0.08, z0, x0 + t + 0.05, z1], [x1 - t - 0.05, z0, x1 + 0.08, z1]]) P(a0, b0, a1, b1, cap, y + ph, y + ph + 0.1, true);
   const W = x1 - x0, D = z1 - z0; if (W < 7 || D < 7) return;
-  const used = excl.slice();
   const free = (a0, b0, a1, b1) => !used.some((u) => a0 < u[2] && a1 > u[0] && b0 < u[3] && b1 > u[1]);
   const place = (w, d) => { for (let i = 0; i < 12; i++) { const a = rand(x0 + 1.2, x1 - 1.2 - w), c = rand(z0 + 1.2, z1 - 1.2 - d); if (free(a - 0.6, c - 0.6, a + w + 0.6, c + d + 0.6)) { used.push([a, c, a + w, c + d]); return [a, c]; } } return null; };
   // penthouse
@@ -608,6 +717,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   ledge(tb, poly, true, -0.02, 0.3, top - 0.2, top + 0.2, lighter);
   prismWalls(tb, poly, top + 0.2, top + 1.2, null, wall); polyCap(tb, poly, top + 1.2, {}, wall);
   ledge(tb, poly, true, -0.02, 0.12, top + 1.2, top + 1.32, lighter); // parapet coping
+  { const fs = R * 0.3 + 2.8; ROOF_LOG.push({ st: streamed(ctx), x0, z0, x1, z1, y: top + 1.2, kind: 'deco', ph: 0.12, facing, used: [facing > 0 ? [x1 - fs, z0 - 1, x1 + 1, z1 + 1] : [x0 - 1, z0 - 1, x0 + fs, z1 + 1]] }); } // b_rooftop
   // stepped Deco parapet "ziggurat" blocks at the front corners and centre
   for (const zz of [z0 + 0.6 + R * 0.4, z1 - 0.6 - R * 0.4]) { const pxa = s > 0 ? fx - 1.6 - R * 0.3 : fx + 0.2 + R * 0.3; box(tb, pxa, top + 1.2, zz - 0.5, pxa + 1.4, top + 1.9, zz + 0.5, {}, lighter); box(tb, pxa + 0.25, top + 1.9, zz - 0.3, pxa + 1.15, top + 2.4, zz + 0.3, {}, accent); }
   // accent stripes on the parapet front
