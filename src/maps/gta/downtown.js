@@ -18,6 +18,30 @@ import { KIT_LAYER } from './houses.js';
 
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
 const OFF = Q.has('nodt');
+// a_signals: phased signal heads + pedestrian heads (?oldsignals = the static a_downtown heads, no pedestrian heads)
+const OLD_SIG = Q.has('oldsignals');
+// cycle per junction (s): NS = vehicles moving along z (heads facing +-z), EW = along x. 1 s all-red before each green.
+//   NS: red 0-1, green 1-30, amber 30-34, red 34-68     EW: red 0-35, green 35-64, amber 64-68
+//   pedestrians crossing parallel to a direction: WALK for the first 17 s of its green, flashing hand to the end of its amber, steady hand otherwise
+export const SIG_CYCLE = 68; const SIG_PH = [[1, 30, 34], [35, 64, 68]]; const SIG_WALK = 17;
+let sigT = 0, sigWall = -1, sigFix = null; const SIG = { J: [] };
+const sigNow = () => (sigFix !== null ? sigFix : sigT);
+// read-only: state of junction id's approach dir ('ns' | 'ew' or 0 | 1) at time t (default: the signal clock, seconds)
+export function signalState(id, dir, t) {
+  const J = SIG.J[id]; if (!J) return null; const d = dir === 'ew' || dir === 1 ? 1 : 0; const T = (t === undefined ? sigNow() : t);
+  const c = (((T + J.off) % SIG_CYCLE) + SIG_CYCLE) % SIG_CYCLE; const [g0, g1, a1] = SIG_PH[d];
+  const light = c >= g0 && c < g1 ? 'green' : c >= g1 && c < a1 ? 'amber' : 'red';
+  const remain = light === 'green' ? g1 - c : light === 'amber' ? a1 - c : ((g0 - c) % SIG_CYCLE + SIG_CYCLE) % SIG_CYCLE;
+  const ped = c >= g0 && c < g0 + SIG_WALK ? 'walk' : c >= g0 + SIG_WALK && c < a1 ? 'flash' : 'dontwalk';
+  return { light, ped, remain: +remain.toFixed(2), cycle: +c.toFixed(2), x: J.x, z: J.z, static: OLD_SIG };
+}
+export const signalJunctions = () => SIG.J.map((J, id) => ({ id, x: J.x, z: J.z, off: J.off }));
+export const signalClock = () => sigNow();
+if (typeof window !== 'undefined') window.__SIGNALS = { state: signalState, junctions: signalJunctions, clock: signalClock, setT: (t) => { sigFix = t === null || t === undefined ? null : +t; }, cycle: SIG_CYCLE, old: OLD_SIG };
+// head seed: (lit + face angle / 2pi) / 4, lit 0 red 1 amber 2 green; pedestrian heads lit 3 with fraction = (quarter + state / 4 + 0.04) / 4,
+// state 0 hand 1 walking figure 2 dark (flash off)
+const headSeed = (h, T) => { const st = signalState(h.j, h.d, T); if (h.p) { const s = st.ped === 'walk' ? 1 : st.ped === 'flash' && (T % 1) >= 0.5 ? 2 : 0; return (3 + (h.q + s / 4 + 0.04) / 4) / 4; }
+  return ((st.light === 'green' ? 2 : st.light === 'amber' ? 1 : 0) + h.a) / 4; };
 const AW = 7; // arterial half width (fabric.js)
 const CAP = 2400, RAD = 175, FADE = 18, NEAR = 95, NFADE = 12;
 const ih = (x, z, k = 0) => { let h = (Math.round(x * 4) * 73856093) ^ (Math.round(z * 4) * 19349663) ^ (k * 83492791); h = Math.imul(h ^ (h >>> 13), 0x5bd1e995); h ^= h >>> 15; return (h >>> 0) / 4294967296; };
@@ -124,10 +148,12 @@ export function prepDowntown(fab, col, palms) {
   // ---- 3) junction furniture ----
   const J = new Map(); for (const L of fab.dtLines || []) for (const x of L.xs) for (const z of L.zs) J.set(Math.round(x) + ',' + Math.round(z), [x, z]);
   const blockAt = (x, z) => fab.dtBlocks.find((q) => x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1);
-  const CORN = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
+  const CORN = [[1, 1], [-1, 1], [-1, -1], [1, -1]]; const PED = []; SIG.J.length = 0;
   for (const [x, z] of J.values()) {
     const corners = CORN.filter(([sx, sz]) => blockAt(x + sx * (AW + 1.5), z + sz * (AW + 1.5))); if (corners.length < 2) continue; S.junctions++;
     const hj = Math.floor(ih(x, z, 7) * 4); const nsGreen = ih(x, z, 8) < 0.5;
+    const jid = SIG.J.length; SIG.J.push({ x, z, off: Math.floor(ih(x, z, 9) * SIG_CYCLE * 4) / 4 }); const mnt = {}; // a_signals: junction id, phase offset, pole per corner
+    const tagH = (d, a) => { if (!OLD_SIG) K.recs[K.recs.length - 1][13] = { j: jid, d, a, p: 0 }; };
     for (let ci = 0; ci < 4; ci++) { const [sx, sz] = CORN[ci]; if (!corners.some((c) => c[0] === sx && c[1] === sz)) continue; S.corners++;
       const role = (ci + hj) % 4; const kx = x + sx * AW, kz = z + sz * AW;
       if (role === 0 || role === 2) { // mast-arm signal: arm over the N-S street (heads face +sz) and over the E-W street (heads face -sx)
@@ -145,12 +171,13 @@ export function prepDowntown(fab, col, palms) {
         const fA = Math.atan2(sz, 0) / (Math.PI * 2), fB = Math.atan2(0, -sx) / (Math.PI * 2); const nA = ((fA % 1) + 1) % 1, nB = ((fB % 1) + 1) % 1;
         const ltA = nsGreen ? 2 : 0, ltB = nsGreen ? 0 : 2;
         if (oa) { const L = oa === 2 ? la + tx : 4.2 + tx; add(px - sx * L / 2, 6.5, pz, L, 0.18, 0.18, 0, C.pole, 8);
-          for (const a of oa === 2 ? [3.4, 6.6] : [3.4]) { const hx = px - sx * (a + tx); add(hx, 5.44, pz, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); add(hx, 5.32, pz - sz * 0.17, 0.62, 1.3, 0.04, 0, C.plate, 8); } }
-        else { add(px, 3.5, pz + sz * 0.31, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); add(px, 3.38, pz + sz * 0.14, 0.62, 1.3, 0.04, 0, C.plate, 8); } // pole-mounted head
+          for (const a of oa === 2 ? [3.4, 6.6] : [3.4]) { const hx = px - sx * (a + tx); add(hx, 5.44, pz, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); tagH(0, nA); add(hx, 5.32, pz - sz * 0.17, 0.62, 1.3, 0.04, 0, C.plate, 8); } }
+        else { add(px, 3.5, pz + sz * 0.31, 0.36, 1.05, 0.3, 0, C.head, 19, (ltA + nA) / 4); tagH(0, nA); add(px, 3.38, pz + sz * 0.14, 0.62, 1.3, 0.04, 0, C.plate, 8); } // pole-mounted head
         if (ob) { const L = ob === 2 ? lb2 + tz : 4.0 + tz; add(px, 6.15, pz - sz * L / 2, 0.16, 0.16, L, 0, C.pole, 8);
-          for (const a of ob === 2 ? [3.0, 5.6] : [3.0]) { const hz = pz - sz * (a + tz); add(px, 5.08, hz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); add(px + sx * 0.17, 4.96, hz, 0.04, 1.3, 0.62, 0, C.plate, 8); } }
-        else { add(px - sx * 0.31, 3.5, pz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); add(px - sx * 0.14, 3.38, pz, 0.04, 1.3, 0.62, 0, C.plate, 8); }
+          for (const a of ob === 2 ? [3.0, 5.6] : [3.0]) { const hz = pz - sz * (a + tz); add(px, 5.08, hz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); tagH(1, nB); add(px + sx * 0.17, 4.96, hz, 0.04, 1.3, 0.62, 0, C.plate, 8); } }
+        else { add(px - sx * 0.31, 3.5, pz, 0.3, 1.05, 0.36, 0, C.head, 19, (ltB + nB) / 4); tagH(1, nB); add(px - sx * 0.14, 3.38, pz, 0.04, 1.3, 0.62, 0, C.plate, 8); }
         add(px - sx * 0.2, 2.6, pz, 0.12, 0.42, 0.3, 0, C.head, 8, 0, NEAR); // pedestrian push-button / signal box
+        mnt[ci] = { px, pz, low: !oa || !ob };
       } else if (role === 1) { // controller cabinet on its pad + hydrant
         let ok = false; for (const t of [3.4, 4.9, 6.4]) { const cx = kx + sx * t, cz = kz + sz * 1.05; if (!free(cx, cz, 1.2, 0.8, 0)) continue;
           add(cx, 0, cz, 1.2, 0.1, 0.8, 0, C.conc, 8, 0, NEAR); add(cx, 0.1, cz, 1.0, 1.42, 0.6, 0, C.cab, 8, 0, NEAR); add(cx, 1.52, cz, 1.06, 0.06, 0.66, 0, C.cab, 8, 0, NEAR); addCol(cx, cz, 1.2, 0.8, 0, 1.6); it('cabinet'); ok = true; break; }
@@ -163,7 +190,24 @@ export function prepDowntown(fab, col, palms) {
         const bx = kx + sx * 3.0, bz = kz + sz * 1.0; if (free(bx, bz, 0.62, 0.62, 0)) { add(bx, 0, bz, 0.6, 0.92, 0.6, 0, C.bin, 8, 0, NEAR); add(bx, 0.92, bz, 0.66, 0.07, 0.66, 0, C.bin, 8, 0, NEAR); addCol(bx, bz, 0.62, 0.62, 0, 1.0); it('bin'); } else no('bin');
       }
     }
+    if (!OLD_SIG) PED.push({ jid, x, z, corners, mnt });
   }
+  // ---- 4) a_signals: pedestrian heads at both ends of every crosswalk (a crosswalk = two adjacent kerb corners of one leg). At a corner
+  // with a signal pole they hang on it (above the push-button box); a corner without one gets a slim push-button post (0.14 m, 3.4 m,
+  // one exact OBB) when the kerb is clear. Each corner's heads face across the two legs it touches (-sx and -sz), toward the far end.
+  // Crossing along x (over the N-S street) runs with the EW vehicle phase, crossing along z with NS. Runs after every placement above.
+  for (const P of PED) { const { jid, x, z, corners, mnt } = P; const has = (sx, sz) => corners.some((c) => c[0] === sx && c[1] === sz);
+    for (let ci = 0; ci < 4; ci++) { const [sx, sz] = CORN[ci]; if (!has(sx, sz)) continue; const lx = has(-sx, sz), lz = has(sx, -sz); if (!lx && !lz) continue;
+      let m = mnt[ci], y0 = 3.08; const kx = x + sx * AW, kz = z + sz * AW;
+      if (!m) { const px = kx + sx * 0.75, pz = kz + sz * 0.75; if (!free(px, pz, 0.3, 0.3, 0, 0.12)) { no('pedpost'); continue; }
+        add(px, 0, pz, 0.3, 0.08, 0.3, 0, C.conc, 8, 0, NEAR); add(px, 0, pz, 0.14, 3.4, 0.14, 0, C.pole, 8); add(px - sx * 0.1, 1.05, pz - sz * 0.1, 0.1, 0.16, 0.1, 0, C.head, 8, 0, NEAR); // post + push button
+        addCol(px, pz, 0.16, 0.16, 0, 3.4); it('pedpost'); m = { px, pz, low: false }; y0 = 2.6; }
+      else if (m.low) y0 = 2.0;
+      const head = (fx, fz, d) => { const ang = Math.atan2(fz, fx) / (Math.PI * 2); const q = Math.round((((ang % 1) + 1) % 1) * 4) % 4;
+        const hx = m.px + fx * 0.25, hz = m.pz + fz * 0.25; add(hx, y0, hz, fx ? 0.24 : 0.34, 0.62, fx ? 0.34 : 0.24, 0, C.head, 19, (3 + (q + 0.04) / 4) / 4, NEAR + 20);
+        K.recs[K.recs.length - 1][13] = { j: jid, d, q, p: 1 }; add(m.px + fx * 0.1, y0 + 0.24, m.pz + fz * 0.1, fx ? 0.14 : 0.06, 0.1, fx ? 0.06 : 0.14, 0, C.pole, 8, 0, NEAR); it('pedhead'); };
+      if (lx) head(-sx, 0, 1); if (lz) head(0, -sz, 0); } }
+  S.sigJunctions = SIG.J.length;
   // 48 m grid of record indices
   K.recs.forEach((r, i) => { const k = Math.floor(r[0] / 48) * 65536 + Math.floor(r[2] / 48); let l = K.grid.get(k); if (!l) K.grid.set(k, l = []); l.push(i); });
   S.crowns = crowns.length; S.boxes = K.recs.length; S.ms = Math.round(performance.now() - T0); return K;
@@ -184,17 +228,26 @@ const _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vect
 export function updateDowntown(K, cam) {
   if (!K || !K.mesh) return; const p = cam && cam.isObject3D ? cam.position : cam; if (!p) return; const m = K.mesh;
   if ((m.userData.warm & 3) !== 3) return;
+  { const w = performance.now() / 1000; if (sigWall >= 0) sigT += Math.min(0.25, Math.max(0, w - sigWall)); sigWall = w; } // a_signals: signal clock
   if (p.y > 140) { if (m.visible) { m.visible = false; K.last = null; } return; }
-  if (K.last && Math.hypot(p.x - K.last[0], p.z - K.last[1]) < 1.5) return; K.last = [p.x, p.z];
+  if (K.last && Math.hypot(p.x - K.last[0], p.z - K.last[1]) < 1.5) { sigPass(K, false); return; } K.last = [p.x, p.z]; const HL = K.hl || (K.hl = []); HL.length = 0;
   const M = m.instanceMatrix.array, Cc = m.instanceColor.array, A = m.geometry.attributes.aK.array; let n = 0;
   const a0 = Math.floor((p.x - RAD) / 48), a1 = Math.floor((p.x + RAD) / 48), k0 = Math.floor((p.z - RAD) / 48), k1 = Math.floor((p.z + RAD) / 48);
   for (let a = a0; a <= a1 && n < CAP; a++) for (let k = k0; k <= k1 && n < CAP; k++) { const l = K.grid.get(a * 65536 + k); if (!l) continue;
     for (const i of l) { const r = K.recs[i]; const dd = Math.hypot(r[0] - p.x, r[2] - p.z); const R = r[12]; if (dd > R) continue; if (n >= CAP) break;
       _q.setFromAxisAngle(_y, r[6]); _m.compose(_v.set(r[0], r[1], r[2]), _q, _s.set(r[3], r[4], r[5])); _m.toArray(M, n * 16);
-      Cc[n * 3] = r[7]; Cc[n * 3 + 1] = r[8]; Cc[n * 3 + 2] = r[9]; A[n * 2] = r[10] - 0.45 * sstep(R - (R === RAD ? FADE : NFADE), R, dd); A[n * 2 + 1] = r[11]; n++; } }
+      Cc[n * 3] = r[7]; Cc[n * 3 + 1] = r[8]; Cc[n * 3 + 2] = r[9]; A[n * 2] = r[10] - 0.45 * sstep(R - (R === RAD ? FADE : NFADE), R, dd); A[n * 2 + 1] = r[11]; if (r[13]) HL.push(n, i); n++; } }
   m.count = Math.max(n, 1); if (!n) m.instanceMatrix.array.fill(0, 0, 16);
   m.instanceMatrix.clearUpdateRanges(); m.instanceMatrix.addUpdateRange(0, Math.max(n, 1) * 16); m.instanceMatrix.needsUpdate = true;
   m.instanceColor.clearUpdateRanges(); m.instanceColor.addUpdateRange(0, Math.max(n, 1) * 3); m.instanceColor.needsUpdate = true;
   const ga = m.geometry.attributes.aK; ga.clearUpdateRanges(); ga.addUpdateRange(0, Math.max(n, 1) * 2); ga.needsUpdate = true; m.visible = n > 0;
-  K.info = { boxes: n, tris: n * 12 };
+  K.info = { boxes: n, tris: n * 12, heads: HL.length / 2 }; sigPass(K, true);
+}
+// a_signals: rewrite the seeds of the head instances in the pool when the quarter-second signal step changes (only aK range of heads)
+function sigPass(K, force) {
+  const HL = K.hl; if (OLD_SIG || !HL || !HL.length) return; const T = sigNow(); const q = Math.floor(T * 4); if (!force && q === K.sq) return; K.sq = q;
+  const t0 = performance.now(); const ga = K.mesh.geometry.attributes.aK, A = ga.array; let lo = 1e9, hi = -1;
+  for (let k = 0; k < HL.length; k += 2) { const n = HL[k], s = headSeed(K.recs[HL[k + 1]][13], T); if (A[n * 2 + 1] !== s) { A[n * 2 + 1] = s; if (n < lo) lo = n; if (n > hi) hi = n; } }
+  if (hi >= 0) { ga.addUpdateRange(lo * 2, (hi - lo + 1) * 2); ga.needsUpdate = true; }
+  K.sigMs = performance.now() - t0; K.sigN = (K.sigN || 0) + 1;
 }
