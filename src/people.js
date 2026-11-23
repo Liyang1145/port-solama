@@ -226,6 +226,20 @@ export function prepareCharacters(G) {
     const C = CAST[key]; const P = PROTOS[key] = { scene: g.scene, scale: C.hT && C.h ? C.hT / C.h : 1, sex: C.sex, cop: !!C.cop, clips };
     P.cal = calibrate(P);
   }
+  if (!OLDDROPIMG) dropBitmapsAfterUpload();
+}
+// fix_pt6 #1 (?olddropimg = old): the cast GLB textures are decoded ImageBitmaps (1024² hero maps 4 MB each, ~150 textures in all) that
+// stayed alive next to their GPU copy for the whole session. Once every Texture that reads a bitmap has been uploaded (onUpdate), the
+// bitmap is closed and the source keeps only its size; three never re-uploads these (no needsUpdate after load).
+const OLDDROPIMG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('olddropimg');
+const DROPIMG = { bitmaps: 0, closed: 0, mb: 0 }; if (typeof window !== 'undefined') window.__DROPIMG = DROPIMG;
+function dropBitmapsAfterUpload() {
+  if (typeof ImageBitmap === 'undefined') return; const users = new Map();
+  for (const k in PROTOS) PROTOS[k].scene.traverse((o) => { const ms = !o.material ? [] : Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of ms) for (const f in m) { const t = m[f]; if (!t || !t.isTexture || !t.source || !(t.source.data instanceof ImageBitmap)) continue; let u = users.get(t.source); if (!u) users.set(t.source, u = new Set()); u.add(t); } });
+  for (const [src, set] of users) { DROPIMG.bitmaps++; const up = new Set();
+    for (const t of set) { const prev = t.onUpdate; t.onUpdate = function (tex) { if (prev) prev.call(this, tex); up.add(t); if (up.size < set.size) return; const d = src.data; if (!d || !d.close) return;
+      DROPIMG.closed++; DROPIMG.mb += d.width * d.height * 4 / 1048576; const w = d.width, h = d.height; d.close(); src.data = { width: w, height: h }; }; } }
 }
 const pickKind = (kind, opt) => {
   if (opt.proto && PROTOS[opt.proto]) return opt.proto;

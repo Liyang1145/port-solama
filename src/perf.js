@@ -107,12 +107,16 @@ function freeArr() { dropped += this.array.byteLength; this.array = new this.arr
 // normal / uv / color arrays still on the CPU at ready). Every attribute now marks itself when uploaded (prototype default callback);
 // one already on the GPU is freed at once.
 const UPL = new WeakSet(); const OLDREL = Q.has('oldrelease');
+// fix_pt6 #1 (?keeppos = old): position + index of the same static meshes go too (bounding volumes are computed first; draw counts stay
+// on the attribute; nothing reads a static mesh's vertices after load - the dynamic ones are DynamicDrawUsage and skipped)
+const KEEPPOS = OLDREL || Q.has('keeppos');
 if (!OLDREL) THREE.BufferAttribute.prototype.onUploadCallback = function () { UPL.add(this); };
 export function releaseCpuAttrs(scene) {
   if (Q.has('keepgeo')) return 0; let n = 0;
   scene.traverse((o) => { if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || o.morphTargetInfluences) return; const g = o.geometry; if (!g || reg.has(g)) return; reg.add(g);
     if (Object.keys(g.morphAttributes).length) return; if (!g.boundingSphere) g.computeBoundingSphere(); if (!g.boundingBox) g.computeBoundingBox();
-    for (const k in g.attributes) { const a = g.attributes[k]; if (!DROP.has(k) || a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute || a.usage !== THREE.StaticDrawUsage || !a.array || a.array.length < 3000) continue; if (!OLDREL && UPL.has(a)) freeArr.call(a); else a.onUpload(freeArr); n++; } });
+    const ix = g.index; if (KEEPPOS === false && ix && ix.usage === THREE.StaticDrawUsage && ix.array && ix.array.length >= 3000) { if (UPL.has(ix)) freeArr.call(ix); else ix.onUpload(freeArr); n++; }
+    for (const k in g.attributes) { const a = g.attributes[k]; if (!(DROP.has(k) || (KEEPPOS === false && k === 'position')) || a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute || a.usage !== THREE.StaticDrawUsage || !a.array || a.array.length < 3000) continue; if (!OLDREL && UPL.has(a)) freeArr.call(a); else a.onUpload(freeArr); n++; } });
   return n;
 }
 export const releasedMB = () => +(dropped / 1048576).toFixed(1);
