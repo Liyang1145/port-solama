@@ -504,7 +504,12 @@ export class Game {
     { // r6.2: the shoulder offset could push the look-at point into a wall / pole when standing against it, and a ray
       // cast from inside a box returns 0, leaving the camera inside the building; clamp the offset against geometry first
       const hx = target.x, hz = target.z; target.addScaledVector(right, -side);
-      if (side > 0) { const ts = this.city.col.raycast(hx, target.y, hz, target.x, target.y, target.z); if (ts < 1) { const k = Math.max(0, ts - 0.25 / side); target.x = hx + (target.x - hx) * k; target.z = hz + (target.z - hz) * k; } }
+      const OCW = this.oldCamWall ?? (this.oldCamWall = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldcamwall'));
+      if (side > 0 && OCW) { const ts = this.city.col.raycast(hx, target.y, hz, target.x, target.y, target.z); if (ts < 1) { const k = Math.max(0, ts - 0.25 / side); target.x = hx + (target.x - hx) * k; target.z = hz + (target.z - hz) * k; } }
+      else if (side > 0) { // fix_pt6 #2: a wall exactly at the shoulder point was a hit at t = 1 (missed) -> the look-at point sat on the wall face and every
+        // camera ray started inside it; probe 0.3 m past the shoulder and keep 0.25 m of clearance
+        const ux = (target.x - hx) / side, uz = (target.z - hz) / side, L = side + 0.3; const ts = this.city.col.raycast(hx, target.y, hz, hx + ux * L, target.y, hz + uz * L);
+        if (ts < 1) { const k = Math.max(0, Math.min(1, (ts * L - 0.25) / side)); target.x = hx + ux * side * k; target.z = hz + uz * side * k; } }
     }
     let want = target.clone().add(off); want.y += height;
     // collide with buildings
