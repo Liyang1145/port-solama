@@ -22,8 +22,16 @@ export function detailStream(chunk = 128) {
     update(p, budget = 1) {
       if (!S.M) return;
       for (const c of cells.values()) { const d = S.dist(c, p);
-        if (!c.det && d < DLOAD && budget > 0) { S.load(c); budget--; } else if (c.det && d > DFREE) S.unload(c); }
+        if (!c.det && d < DLOAD && budget > 0) { if (S.gate && budget === 1) { if (!S.job || (S.job.c !== c && d < S.job.d - 60)) S.job = { c, d, W: S.world(), i: 0 }; budget--; } else { S.load(c); budget--; } } else if (c.det && d > DFREE) S.unload(c); }
+      if (S.job) S.stepJob(S.job, 3);
     },
+    // perf_debug5 (?oldtpwarm = old: whole cell in one frame): streaming play runs a cell's jobs a few per frame under ~3 ms, builds it
+    // when complete, keeps it hidden until its shader programs are compiled (S.gate = region.gate), then shows it
+    stepJob(j, ms) { const t0 = performance.now(); const c = j.c; if (c.det) { S.job = null; return; }
+      while (j.i < c.jobs.length) { c.jobs[j.i++](j.W); if (performance.now() - t0 > ms) return; }
+      S.job = null; const ms2 = j.W.build(S.scene, S.M, { glassRail: { cast: false }, dglass: { cast: false } }); c.det = ms2; S.stats.loads++; S.stats.loaded++;
+      for (const m of ms2) { m.userData.r62 = true; m.visible = false; S.marked.add(m); }
+      S.gate(ms2, () => { if (c.det === ms2) for (const m of ms2) m.visible = S.show; }); },
     world() { const W = new World(128); W.attrs.building = { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 }; return W; },
     load(c) { const W = S.world(); for (const fn of c.jobs) fn(W); c.det = W.build(S.scene, S.M, { glassRail: { cast: false }, dglass: { cast: false } }); S.mark(c.det); S.stats.loads++; S.stats.loaded++; },
     // A/B switch (tests / before-after shots): hides every r6.2 detail mesh, including the per-lot detail inside region chunks

@@ -436,10 +436,14 @@ export function buildRegion(ctx, H) {
       // renderer.compileAsync says their programs are ready (non-blocking with KHR_parallel_shader_compile), then swap in.
       const A = this.async; if (!A || A.sync) { for (const m of c.far) m.visible = false; return; }
       const dets = c.det; for (const m of dets) m.visible = false; c.pend = true; this.stats.pend = (this.stats.pend || 0) + 1;
-      const show = () => { c.pend = false; this.stats.pend--; if (c.det !== dets) return; for (const m of dets) m.visible = true; for (const m of c.far) m.visible = false; };
+      this.gate(dets, () => { c.pend = false; this.stats.pend--; if (c.det !== dets) return; for (const m of dets) m.visible = true; for (const m of c.far) m.visible = false; });
+    },
+    // perf_debug5: call show() once every program the (hidden) meshes need is compiled: compileAsync with KHR_parallel_shader_compile,
+    // otherwise queued for pump() (one new program linked per frame). Also used by the r6.2 detail stream (bldgdetail.js).
+    gate(dets, show) { const A = this.async; if (!A || A.sync) { show(); return; }
       const R = A.renderer; if (A.par === undefined) A.par = !!R.extensions.get('KHR_parallel_shader_compile');
       if (A.par) { const fake = { traverse: (fn) => { for (const m of dets) fn(m); }, traverseVisible() {} }; try { R.compileAsync(fake, A.camera, A.scene).then(show, show); } catch (e) { show(); } return; }
-      (A.q || (A.q = [])).push({ dets, i: 0, show }); // no parallel compile: link at most ONE new program per frame (pump), then swap in
+      (A.q || (A.q = [])).push({ dets, i: 0, show });
     },
     pump() { const A = this.async; if (!A || !A.q || !A.q.length) return; const R = A.renderer, P = R.info.programs; const j = A.q[0];
       while (j.i < j.dets.length) { const m = j.dets[j.i++]; const n0 = P.length; let ms;

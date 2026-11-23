@@ -28,7 +28,7 @@ srv.listen(0, async () => {
     window.__one = one; return 0; })()`);
   const r = []; const rec = async (lbl, i) => { const f = await p.evaluate(`__one(${JSON.stringify(lbl)}, ${i})`); r.push(f); if (f.ms > 120 || f.i < 2) console.log(TAG, JSON.stringify(f)); };
   for (let i = 0; i < 3; i++) await rec('warm', i);
-  for (const [x, z] of [[-300, 200], [600, -400], [-150, -350]]) { await p.evaluate(`__G.game.tp(${x}, ${z}, 0)`); for (let i = 0; i < NF; i++) await rec(x + ',' + z, i); }
+  for (const [x, z] of (process.env.SPOTS || '-300,200;600,-400').split(';').map((s) => s.split(',').map(Number))) { await p.evaluate(`__G.game.tp(${x}, ${z}, 0)`); for (let i = 0; i < NF; i++) await rec(x + ',' + z, i); }
   fs.mkdirSync(path.join(root, 'shots/pd5'), { recursive: true }); fs.writeFileSync(path.join(root, 'shots/pd5/tpr_' + TAG + '.json'), JSON.stringify(r, null, 0).replace(/},{/g, '},\n{'));
   console.log('PAGEERROR', perr); await b.close(); process.exit(0);
 });
