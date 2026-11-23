@@ -1,6 +1,7 @@
 // Ocean + bay water: planar reflection (shared with wet roads), animated normals, shallow-water colour, shore foam
 import * as THREE from 'three';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
+import { OLD, CHAR_LAYER } from './perf.js';
 import { U } from './env.js';
 import { LAYOUT } from './city.js';
 import { buildRegionData, shoreX, westCoast, beachOff, ISLE } from './maps/gta/mapgeo.js';
@@ -156,6 +157,7 @@ export function buildWater(scene, T, size = 0.5) {
   const renderRefl = (renderer, scene, camera) => {
     if (!refl.visible) return;
     shared.on.value = 0; shared.tex.value = dummy;
+    if (!OLD.mirror && refl.getReflectionCamera) refl.getReflectionCamera(camera).layers.disable(CHAR_LAYER); // perf_debug1: no characters in the mirror (the clone copied the main camera's layers)
     ob.call(refl, renderer, scene, camera);
     shared.tex.value = refl.getRenderTarget().texture; shared.on.value = 1;
     refl.updateMatrixWorld(); inv.copy(refl.matrixWorld).invert();

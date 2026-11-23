@@ -30,6 +30,8 @@ import { rolledLights, precompile } from './loadfast.js';
 import { bedTexture } from './maps/cyber/region.js';
 import { buildNature } from './maps/cyber/nature.js';
 import { buildNeon } from './maps/cyber/neon.js';
+import { OLD, cubeStepper, makeDRS } from './perf.js';
+import { prof, PROF, wrap, profRenderer, profPasses, setScope } from './prof.js'; // perf_debug1: ?prof frame profiler
 import { SHOTFAST, shotfastShaders, shotfastFinish } from './shotfast.js'; // b_verify: test-only ?shotfast (screenshot first frame)
 
 // loadtime: staged boot timing (ms since navigation start) -> window.__LT, shown on the load screen and in the console
@@ -52,8 +54,10 @@ renderer.toneMapping = Q.get('tm') === 'agx' ? THREE.AgXToneMapping : Q.get('tm'
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+if (!OLD.shadow) renderer.shadowMap.autoUpdate = false; // perf_debug1: maps re-rendered once per frame (renderFrame), not inside every render() call
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 4200);
+camera.layers.enable(3); // perf_debug1: CHAR_LAYER (characters; not seen by the water mirror / probes)
 
 const lbar = document.querySelector('#lbar i');
 const texList = ['sky_day.jpg', 'sky_golden.jpg', 'sky_sunset.jpg', 'sky_dusk.jpg', 'asphalt_d.jpg', 'asphalt_n.jpg', 'asphalt_arm.jpg', 'pavers_d.jpg', 'pavers_n.jpg', 'pavers_arm.jpg', 'plaster_d.jpg', 'plaster_n.jpg', 'plaster_arm.jpg',
@@ -117,14 +121,18 @@ async function load() {
   if (CYBER) neon = buildNeon(scene, city);
   mark('props+furniture+street+neon');
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
+  profRenderer(renderer); profPasses(post.composer);
   post.shaftLight = env.sunFar; post.shaft = U.uShaft.value; // light2 volumetric sun shafts (far cascade)
 
   // v3.4 reflection probe: a cube capture of the city from over the bay, used as the env map of the building material so
   // tower glass reflects the skyline / island / water instead of only the sky (GTA6_REFERENCE §4 reflections). Refreshed with the sky.
   const probe = { rt: new THREE.WebGLCubeRenderTarget(Q.has('snap') ? 128 : 256, { type: THREE.HalfFloatType }), pm: new THREE.PMREMGenerator(renderer), tex: null, hour: -99 };
   probe.cam = new THREE.CubeCamera(2, 3600, probe.rt); probe.cam.position.set(-420, 38, -30); scene.add(probe.cam);
-  probe.update = () => {
+  probe.step = OLD.probe ? null : cubeStepper(renderer, scene, probe.cam);
+  probe.finish = () => { const t = probe.pm.fromCubemap(probe.rt.texture); if (probe.tex) probe.tex.dispose(); probe.tex = t; M.building.envMap = t.texture; M.building.envMapIntensity = 1.0; M.building.needsUpdate = true; };
+  probe.update = (sync) => {
     if (Q.get('probe') === '0') return;
+    if (probe.step && !sync) { probe.step.start(); return; } // perf_debug1: one cube face per frame (renderFrame) instead of 6 + PMREM at once
     const envKeep = scene.environment; probe.cam.update(renderer, scene);
     const t = probe.pm.fromCubemap(probe.rt.texture); if (probe.tex) probe.tex.dispose(); probe.tex = t;
     M.building.envMap = t.texture; M.building.envMapIntensity = 1.0; M.building.needsUpdate = true; scene.environment = envKeep;
@@ -133,14 +141,24 @@ async function load() {
   // reflect the real street (palms, hotels, neon at night) instead of only the sky.
   const sprobe = { rt: new THREE.WebGLCubeRenderTarget(SNAP ? 128 : 128, { type: THREE.HalfFloatType }), pm: probe.pm, tex: null, t: 99, pos: new THREE.Vector3(1e9, 0, 0) };
   sprobe.cam = new THREE.CubeCamera(0.5, 900, sprobe.rt); scene.add(sprobe.cam);
+  sprobe.step = OLD.probe ? null : cubeStepper(renderer, scene, sprobe.cam);
   sprobe.update = (force) => {
     if (Q.get('probe') === '0') return;
+    if (sprobe.step && !force) { // perf_debug1: amortized (1 face / frame, PMREM on the 7th frame), at most every 3 s
+      if (sprobe.pending) { sprobe.pending = false; const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0); return; }
+      if (sprobe.step.busy) { const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; let vis = null;
+        if (sprobe.step.step(() => { if (pl) { vis = pl.visible; pl.visible = false; } }, () => { if (pl) pl.visible = vis; })) sprobe.pending = true; return; }
+      if (probe.step && probe.step.busy) { if (probe.step.step()) probe.finish(); return; } // the city probe takes the same slot
+      const p = camera.position; if (sprobe.t < 3 || (sprobe.t < 8 && sprobe.pos.distanceTo(p) < 40)) return;
+      sprobe.t = 0; sprobe.pos.copy(p); sprobe.cam.position.set(p.x, 2.2, p.z); sprobe.step.start(); return;
+    }
     const p = camera.position; if (!force && sprobe.t < 2 && sprobe.pos.distanceTo(p) < 25) return;
     sprobe.t = 0; sprobe.pos.copy(p); sprobe.cam.position.set(p.x, 2.2, p.z);
     const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; const vis = pl ? pl.visible : null; if (pl) pl.visible = false;
     sprobe.cam.update(renderer, scene); if (pl) pl.visible = vis;
     const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0);
   };
+  for (const l of [env.sun, env.sunFar]) if (l.shadow.camera.layers.mask & 0xFFFFFFFE) l.shadow.camera.layers.enable(3); // a shadow camera with its own layers must also see CHAR_LAYER
   mark('post+probes');
   const game = new Game({ renderer, scene, camera, env, city, G, T, props, Q, SNAP });
   let hour = Q.has('hour') ? +Q.get('hour') : CYBER ? 21.6 : 18.3; // r6.0: 霓港 opens at night
@@ -148,15 +166,17 @@ async function load() {
   const lp = document.querySelector('#load p'); const lp0 = lp ? lp.innerHTML : '';
   const pre = (all) => precompile(renderer, scene, camera, { rt: post.composer.renderTarget1, all, onProgress: (d, n) => { lbar.style.width = (100 * d / Math.max(1, n)) + '%'; if (lp) lp.innerHTML = '正在准备画面 ' + d + ' / ' + n; } });
   if (!Q.has('noprecompile')) { LT.precompile = await pre(false); mark('precompile'); } // loadtime: what the first frames draw, in parallel
-  probe.update(); probe.hour = hour; mark('probe(first compile)');
+  probe.update(true); probe.hour = hour; mark('probe(first compile)');
   if (!Q.has('noprecompile')) { LT.precompile2 = await pre(false); if (lp) lp.innerHTML = lp0; mark('precompile(envmap variants)'); }
 
   const W = window.__G = {
     game, env, city, street, scene, camera, renderer, post, U, water, sprobe, map: MAP, poi: POI, missionStarts: MISSION_STARTS, stream, nature, neon,
     streamSync(x, z) { if (!stream) return 0; const p = x === undefined ? camera.position : { x, z }; return stream.sync(p); },
-    setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(); sprobe.t = 99; },
+    setHour(h) { hour = h; env.setHour(h, true); probe.hour = h; probe.update(SNAP); sprobe.t = 99; },
     photo(on = true, focus = 0, ap = 1.2) { post.dof = on ? 1 : 0; post.focus = focus || 6; post.aperture = ap; document.body.classList.toggle('photo', !!on); },
     get hour() { return hour; },
+    // perf_debug1: one real frame (game + optional render) at the given dt; with ?prof returns the frame record
+    tick(dt = 1 / 30, render = false) { frame(dt, !render); return PROF ? prof.frames[prof.frames.length - 1] : 0; },
     step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt, true); return game.state(); },
     render() { renderFrame(0); },
     finish() { return shotfastFinish(renderer); }, // b_verify: ms until the GPU queue (SwiftShader pipeline JIT) is done
@@ -165,50 +185,81 @@ async function load() {
     pick(px, py, w = 1280, h = 720, n = 3) { const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(px / w * 2 - 1, 1 - py / h * 2), camera);
       return rc.intersectObjects(scene.children, true).filter((i) => i.object.visible && i.object.material && !i.object.material.isShaderMaterial || i.object.name).slice(0, n).map((i) => { const pth = []; for (let o = i.object; o && pth.length < 5; o = o.parent) pth.push(o.name || o.type);
         const m = Array.isArray(i.object.material) ? i.object.material[0] : i.object.material; return { path: pth.join('<'), mat: m && (m.name || m.type), color: m && m.color && m.color.getHexString(), dist: +i.distance.toFixed(1), point: i.point.toArray().map((v) => +v.toFixed(2)), inst: i.instanceId, tris: i.object.geometry && i.object.geometry.index ? i.object.geometry.index.count / 3 : 0 }; }); },
+    THREE, // perf_debug1: probes
     stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, meshes: meshes.length, ...(CYBER ? { stream: stream.tris() } : { chunks: { ...city.region.stats } }) }; },
   };
 
   const clock = new THREE.Timer(); clock.connect?.(document);
   function frame(dt, noRender = false) {
+    prof.begin();
     post.storePrev();
     U.uTime.value += dt; sprobe.t += dt;
     if (!SNAP || W.timeFlow) { hour += dt * game.timeScale / 3600; if (hour >= 24) hour -= 24; }
     if (Math.abs(env.hour - hour) > 0.002) env.setHour(hour);
     if (Math.abs(probe.hour - hour) > 0.75 && Math.abs(probe.hour - hour) < 23.25) { probe.hour = hour; probe.update(); }
     U.uWet.value = THREE.MathUtils.smoothstep(env.look.night, 0.3, 0.8) * 0.9;
-    game.update(dt);
+    prof.mark('time+env');
+    game.update(dt); prof.mark('game.update');
     if (!noRender) renderFrame(dt);
+    if (PROF) W.profEnd(dt, noRender);
   }
   function renderFrame(dt) {
     if (CYBER) { stream.update(camera.position, 1); if (SNAP) stream.sync(camera.position); } // 霓港: detailed chunks before the mirror pass (wet-road / sea reflections)
-    env.update(dt);
+    prof.mark('r:pre');
+    env.update(dt); prof.mark('r:shadowfit');
+    if (!OLD.shadow) renderer.shadowMap.needsUpdate = true; // consumed by the first scene render of this frame (mirror or main pass)
     water.update(scene);
-    camera.updateMatrixWorld(); water.renderRefl(renderer, scene, camera);
-    if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1);
-    veg.update?.(camera.position);
+    camera.updateMatrixWorld(); { const k = setScope('water:mirror'); water.renderRefl(renderer, scene, camera); setScope(k); } prof.mark('r:water');
+    if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1); prof.mark('r:region');
+    veg.update?.(camera.position); prof.mark('r:veg');
     if (CYBER) { nature.update(camera.position); nature.frame(env, scene); neon.update(env.look.night, U.uTime.value); scene.fog.density = env.look.fogD * nature.fogMul(camera.position); }
     updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night, false, game.trafficPhase || 0); if (blot) blot.update(camera.position, env.look.night); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
-    updateNeonLights(props, city.signs, camera.position, env.look.night);
+    updateNeonLights(props, city.signs, camera.position, env.look.night); prof.mark('r:props');
     renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;
-    sprobe.update(false);
+    { const k = setScope('sprobe'); sprobe.update(false); setScope(k); } prof.mark('r:sprobe');
     const pc = game.P && game.P.car; const kmh = pc ? Math.abs(pc.speed || 0) * 3.6 : 0;
-    post.blur = Q.get('mb') === '0' ? 0 : THREE.MathUtils.smoothstep(kmh, 25, 110) * 0.6;
+    post.blur = Q.get('mb') === '0' ? 0 : OLD.sharp ? THREE.MathUtils.smoothstep(kmh, 25, 110) * 0.6 : THREE.MathUtils.smoothstep(kmh, 50, 150) * 0.35; // perf_debug1: gentler (smeared the whole frame from 25 km/h)
     if (post.dof && game.P) post.focus = camera.position.distanceTo(game.P.pos) + 0.3;
     const sy = U.uSunDir.value.y; const gold = (1 - THREE.MathUtils.smoothstep(sy, 0.08, 0.55)) /* shaftfix: was (sy,0.55,0.08) -> min>max made gold 1 at noon, 0 at golden hour; now matches env.js smooth(0.55,0.06,sd.y) */ * (1 - env.look.night);
     post.update(U.uSunDir.value, U.uSunCol.value, env.look.night, U.uTime.value, gold);
+    prof.mark('r:postupd');
     if (Q.has('nopost')) renderer.render(scene, camera); else post.render();
+    prof.mark('r:composer');
   }
   window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); post.setSize(window.innerWidth, window.innerHeight); });
   document.getElementById('load').style.display = SNAP ? 'none' : 'flex';
   const st = document.getElementById('start'); st.style.display = 'block';
   st.onclick = () => { document.getElementById('load').style.display = 'none'; game.start(); };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
+  if (PROF) {
+    W.prof = prof;
+    W.profInit = () => { if (W._profInit) return; W._profInit = 1; const g = game;
+      for (const k of ['input', 'carCollisions', 'updatePolice', 'updateOnFoot', 'updateGang', 'manage', 'setCarLights', 'updateCamera']) wrap(g, k, 'g:' + k);
+      wrap(g.traffic, 'update', 'g:traffic'); wrap(g.peds, 'update', 'g:peds'); wrap(g.mission, 'update', 'g:valet'); wrap(g.missions, 'update', 'g:missions'); wrap(g.world, 'update', 'g:world');
+      wrap(g.arsenal, 'update', 'g:arsenal'); wrap(g.sfx, 'update', 'g:sfx'); wrap(g.hud, 'update', 'g:hud'); wrap(g.police, 'update', 'g:policeOps');
+      const V = g.traffic.cars[0] && g.traffic.cars[0].constructor; if (V) wrap(V.prototype, 'update', 'g:vehicle.update');
+      const Ch = g.player.constructor; wrap(Ch.prototype, 'update', 'g:char.update'); wrap(g.player, 'update', 'g:player.update');
+      if (g.pose) wrap(g.pose.constructor.prototype, 'apply', 'g:pose');
+    };
+    W.profEnd = (dt, noRender) => { const n = performance.now(); const info = renderer.info;
+      const rec = { dt, ms: +(n - prof.t0).toFixed(2), r: !noRender, T: {}, C: { ...prof.C }, progs: info.programs.length, geo: info.memory.geometries, tex: info.memory.textures,
+        heap: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : 0 };
+      for (const k in prof.T) rec.T[k] = +prof.T[k].toFixed(2);
+      if (!noRender) { rec.calls = info.render.calls; rec.tris = info.render.triangles; }
+      info.reset(); prof.frames.push(rec); if (prof.frames.length > 20000) prof.frames.shift(); };
+  }
   mark('ready'); LT.programs = renderer.info.programs.length;
   W.firstFrame = () => { const t = performance.now(); renderFrame(0); renderer.getContext().readPixels(0, 0, 1, 1, renderer.getContext().RGBA, renderer.getContext().UNSIGNED_BYTE, new Uint8Array(4)); LT.firstFrame = Math.round(performance.now() - t); LT.programs = renderer.info.programs.length; return LT; };
   if (SNAP) { game.start(true); W.ready = true; return; }
   let nf = 0;
-  renderer.setAnimationLoop(() => { clock.update(); const dt = Math.min(clock.getDelta(), 1 / 20); frame(dt);
+  const drs = W.drs = makeDRS((s) => post.setScale(s)); let lastT = performance.now();
+  renderer.setAnimationLoop(() => { clock.update(); const now = performance.now(); const raw = now - lastT; lastT = now; drs.tick(raw);
+    if (OLD.step) frame(Math.min(clock.getDelta(), 1 / 20));
+    else { // perf_debug1: real-time game clock split into equal sub-steps of <= 1/60 s (max 4, i.e. no slow motion down to 15 fps
+      // and no judder: every rAF advances exactly its own wall time); only the last sub-step renders
+      const d = Math.min(clock.getDelta(), 0.25); const n = Math.min(4, Math.max(1, Math.ceil(d * 60 - 1e-3))); const h = d / n;
+      for (let i = 0; i < n - 1; i++) frame(h, true); frame(h); }
     if (++nf === 1) { mark('first frame'); LT.programs = renderer.info.programs.length; console.log('[loadtime]', JSON.stringify(LT));
       // loadtime: then the hidden rest (far LOD, streamed chunks, night props) in the background, only where it cannot block
       if (!Q.has('noprecompile') && renderer.extensions.get('KHR_parallel_shader_compile')) setTimeout(() => precompile(renderer, scene, camera, { rt: post.composer.renderTarget1, all: true }).then((r) => { LT.precompileBg = r; }), 1500);

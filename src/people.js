@@ -5,6 +5,7 @@ import { gunMesh } from './gunmodels.js';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
+import { OLD, CHAR_LAYER } from './perf.js'; // perf_debug1
 export const charLodReady = MeshoptSimplifier.ready;
 // v4.2 character LOD: per proto geometry, two simplified index buffers sharing the skinned vertex data (meshoptimizer)
 // r6.2 memory: glTF morph targets are per mesh, so every sub-mesh of a cast model (clothes, shoes, hair, ...) carried all 34 ARKit /
@@ -185,6 +186,7 @@ export function prepareCharacters(G) {
     const names = new Set(); g.scene.traverse((o) => names.add(o.name));
     g.scene.traverse((o) => {
       if (!o.isMesh) return; o.castShadow = !/Eye|Teeth|Tongue|Mouth|lash|brow|details/i.test(o.material.name); o.receiveShadow = true; o.frustumCulled = false;
+      if (!OLD.mirror) o.layers.set(CHAR_LAYER); // perf_debug1: not drawn into the water mirror / reflection probes
       const mm = Array.isArray(o.material) ? o.material : [o.material];
       mm.forEach((m) => { if (m.transparent && m.map === null) m.depthWrite = false; if (OLDNPC) prep(m, 'ch'); else npcMat(m); });
       if (o.isSkinnedMesh) dropDeadMorphs(o.geometry);

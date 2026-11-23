@@ -12,6 +12,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { FXAAPass } from 'three/examples/jsm/postprocessing/FXAAPass.js';
+import { OLD, DepthScenePass, SharpenShader } from './perf.js'; // perf_debug1
 
 const VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }';
 const DEPTH_FN = `
@@ -45,7 +46,15 @@ const LightFXShader = {
     // --- screen-space contact shadows: short ray march toward the sun; catches the fine occlusion the shadow map misses
     if (uContact > 0.0 && d < 0.99999) {
       vec3 vp = viewPos(vUv, d); float dist = -vp.z;
+      #ifdef NRM_FROM_DEPTH
+      // perf_debug1: view-space normal reconstructed from the main-pass depth (no separate normal G-buffer pass)
+      vec2 px = 1.0 / uRes; vec3 nr = viewPos(vUv + vec2(px.x, 0.0), rawD(vUv + vec2(px.x, 0.0))), nl = viewPos(vUv - vec2(px.x, 0.0), rawD(vUv - vec2(px.x, 0.0)));
+      vec3 nt = viewPos(vUv + vec2(0.0, px.y), rawD(vUv + vec2(0.0, px.y))), nb = viewPos(vUv - vec2(0.0, px.y), rawD(vUv - vec2(0.0, px.y)));
+      vec3 ddx = abs(nr.z - vp.z) < abs(vp.z - nl.z) ? nr - vp : vp - nl; vec3 ddy = abs(nt.z - vp.z) < abs(vp.z - nb.z) ? nt - vp : vp - nb;
+      vec3 n = normalize(cross(ddx, ddy));
+      #else
       vec3 n = normalize(texture2D(tNormal, vUv).xyz * 2.0 - 1.0);
+      #endif
       float ndl = dot(n, uSunV);
       if (dist < 60.0 && ndl > 0.05) {
         float len = mix(0.35, 1.4, clamp(dist / 60.0, 0.0, 1.0)); float j = ign(gl_FragCoord.xy);
@@ -146,14 +155,14 @@ const LensShader = {
 // ---------------------------------------------------------------- display-referred grade with a 3-D LUT ----
 const GradeShader = {
   uniforms: { tDiffuse: { value: null }, tLutDay: { value: null }, tLutNight: { value: null }, uTime: { value: 0 }, uGold: { value: 0 }, uNight: { value: 0 },
-    uRes: { value: new THREE.Vector2(1280, 720) }, uLutAmt: { value: 1 } },
+    uRes: { value: new THREE.Vector2(1280, 720) }, uLutAmt: { value: 1 }, uCA: { value: 0.0055 }, uGrain: { value: 1 } },
   vertexShader: VS,
-  fragmentShader: `precision highp sampler3D; uniform sampler2D tDiffuse; uniform sampler3D tLutDay, tLutNight; uniform float uTime, uGold, uNight, uLutAmt; uniform vec2 uRes; varying vec2 vUv;
+  fragmentShader: `precision highp sampler3D; uniform sampler2D tDiffuse; uniform sampler3D tLutDay, tLutNight; uniform float uTime, uGold, uNight, uLutAmt, uCA, uGrain; uniform vec2 uRes; varying vec2 vUv;
   float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
   vec3 lut(sampler3D t, vec3 c){ const float N = 32.0; vec3 uvw = clamp(c, 0.0, 1.0) * ((N - 1.0) / N) + 0.5 / N; return texture(t, uvw).rgb; }
   void main(){
     vec2 uv = vUv; vec2 c = uv - 0.5;
-    float ca = dot(c, c) * 0.0055;      // lateral chromatic aberration toward the frame edge
+    float ca = dot(c, c) * uCA;      // lateral chromatic aberration toward the frame edge
     vec3 col = vec3(texture2D(tDiffuse, uv + c * ca).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - c * ca).b);
     vec3 dayC = lut(tLutDay, col), nightC = lut(tLutNight, col);
     vec3 g = mix(mix(col, dayC, 0.55 + 0.45 * uGold), nightC, uNight);
@@ -162,7 +171,7 @@ const GradeShader = {
     col *= mix(0.80, 1.0, v);
     float gr = h(uv * uRes + fract(uTime * 7.13) * 91.0) - 0.5;
     float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col += gr * mix(0.018, 0.034, uNight) * (1.0 - lum * 0.6); // grain, stronger in the darks and at night (film stock look)
+    col += gr * mix(0.018, 0.034, uNight) * uGrain * (1.0 - lum * 0.6); // grain, stronger in the darks and at night (film stock look)
     gl_FragColor = vec4(col, 1.0);
   }`,
 };
@@ -213,12 +222,18 @@ function makeLUT(kind) {
 
 export function buildPost(renderer, scene, camera, opts = {}) {
   const w = window.innerWidth, h = window.innerHeight;
+  // perf_debug1 (?oldres): the chain used to run at CSS pixels (ratio 1) and was stretched onto the canvas (renderer ratio up
+  // to 1.5) -> blurry on every HiDPI / scaled laptop screen. Now it renders at the canvas' own pixel ratio x a dynamic scale.
+  const PR = () => OLD.res ? 1 : renderer.getPixelRatio() * (P ? P.scale : 1);
   const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: opts.msaa ? 4 : 0 });
   const composer = new EffectComposer(renderer, rt);
-  composer.setPixelRatio(1);
-  const rp = new RenderPass(scene, camera); composer.addPass(rp);
-  // GTAO always runs: its normal/depth G-buffer feeds contact shadows, god rays, motion blur and DOF
-  const gtao = new GTAOPass(scene, camera, w, h);
+  composer.setPixelRatio(OLD.res ? 1 : renderer.getPixelRatio()); composer.setSize(w, h);
+  const pw = () => Math.round(w * (OLD.res ? 1 : renderer.getPixelRatio())), ph = () => Math.round(h * (OLD.res ? 1 : renderer.getPixelRatio()));
+  const NEWG = !OLD.gbuf;
+  const rp = NEWG ? new DepthScenePass(scene, camera, pw(), ph()) : new RenderPass(scene, camera); composer.addPass(rp);
+  // GTAO: G-buffer depth now comes from the main pass (perf_debug1 ?oldgbuf: its own full-scene normal/depth pass)
+  const gtao = NEWG ? new GTAOPass(scene, camera, pw(), ph(), { depthTexture: rp.depthTexture }) : new GTAOPass(scene, camera, w, h);
+  if (NEWG && !opts.ao) gtao.enabled = false; // AO off: nothing else needs the pass any more
   gtao.output = GTAOPass.OUTPUT.Default;
   gtao.blendIntensity = opts.ao ? 1.0 : 0.0;
   gtao.updateGtaoMaterial({ radius: 1.4, distanceExponent: 1.6, thickness: 1.8, scale: 1.15, samples: 12, distanceFallOff: 1.0 });
@@ -254,7 +269,8 @@ export function buildPost(renderer, scene, camera, opts = {}) {
     try { ro(r, mat, tgt, cc, ca); } finally { for (let i = 0; i < swp.length; i += 2) swp[i].material = swp[i + 1]; swp.length = 0; for (const o of hid) o.visible = true; hid.length = 0; }
   };
   const PP = new URLSearchParams(location.search).get('pp') || 'cbmgf';
-  const lfx = new ShaderPass(LightFXShader); lfx.uniforms.tDepth.value = gtao.depthTexture; lfx.uniforms.tNormal.value = gtao.normalTexture;
+  const lfx = new ShaderPass(LightFXShader); lfx.uniforms.tDepth.value = gtao.depthTexture; lfx.uniforms.tNormal.value = gtao.normalTexture || gtao.depthTexture;
+  if (NEWG) { lfx.material.defines.NRM_FROM_DEPTH = 1; lfx.material.needsUpdate = true; }
   if (PP.includes('c')) composer.addPass(lfx);
   { // light2: a valid compare-mode depth texture for tShadow until the far cascade's shadow map exists
     const drt = new THREE.WebGLRenderTarget(1, 1, { depthTexture: new THREE.DepthTexture(1, 1) }); drt.depthTexture.compareFunction = THREE.LessEqualCompare;
@@ -272,10 +288,12 @@ export function buildPost(renderer, scene, camera, opts = {}) {
   const grade = new ShaderPass(GradeShader); grade.uniforms.tLutDay.value = makeLUT('day'); grade.uniforms.tLutNight.value = makeLUT('night');
   if (PP.includes('g')) composer.addPass(grade);
   const fxaa = new FXAAPass(); if (PP.includes('f')) composer.addPass(fxaa);
+  const sharp = new ShaderPass(SharpenShader); if (!OLD.sharp) { composer.addPass(sharp); grade.uniforms.uCA.value = 0.0015; grade.uniforms.uGrain.value = 0.5; } // perf_debug1 (?oldsharp)
   const sp = new THREE.Vector3(), sv = new THREE.Vector3();
   const P = {
-    composer, gtao, bloom, lfx, lens, grade, prevVP: new THREE.Matrix4(), blur: 0, dof: 0, focus: 6, aperture: 1,
-    setSize(w, h) { composer.setSize(w, h); for (const p of [grade, lfx, lens]) p.uniforms.uRes.value.set(w, h); },
+    composer, gtao, bloom, lfx, lens, grade, sharp, prevVP: new THREE.Matrix4(), blur: 0, dof: 0, focus: 6, aperture: 1, scale: 1, w, h,
+    setSize(w, h) { P.w = w; P.h = h; const pr = PR(); composer.setPixelRatio(pr); composer.setSize(w, h); for (const p of [grade, lfx, lens, sharp]) p.uniforms.uRes.value.set(Math.round(w * pr), Math.round(h * pr)); },
+    setScale(s) { P.scale = s; P.setSize(P.w, P.h); },
     // call once per simulated frame BEFORE the camera moves: motion blur reprojects against this
     storePrev() { camera.updateMatrixWorld(); P.prevVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); },
     update(sunDir, sunCol, night, time, gold = 0) {
@@ -297,5 +315,6 @@ export function buildPost(renderer, scene, camera, opts = {}) {
     },
     render() { composer.render(); },
   };
+  P.setSize(w, h);
   return P;
 }
