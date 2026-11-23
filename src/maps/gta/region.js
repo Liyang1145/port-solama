@@ -454,14 +454,20 @@ export function buildRegion(ctx, H) {
     // otherwise queued for pump() (one new program linked per frame). Also used by the r6.2 detail stream (bldgdetail.js).
     gate(dets, show) { const A = this.async; if (!A || A.sync) { show(); return; }
       const R = A.renderer; if (A.par === undefined) A.par = !!R.extensions.get('KHR_parallel_shader_compile');
-      if (A.par) { const fake = { traverse: (fn) => { for (const m of dets) fn(m); }, traverseVisible() {} }; try { R.compileAsync(fake, A.camera, A.scene).then(show, show); } catch (e) { show(); } return; }
+      if (A.par) { const fake = { traverse: (fn) => { for (const m of dets) fn(m); }, traverseVisible() {} }; try { const k = this.rtOn(A); const pr = R.compileAsync(fake, A.camera, A.scene); this.rtOff(A, k); pr.then(show, show); } catch (e) { show(); } return; }
       (A.q || (A.q = [])).push({ dets, i: 0, show });
     },
     pump() { const A = this.async; if (!A || !A.q || !A.q.length) return; if (!OLD.tpstagger && (A.want || !A.tok)) return; const R = A.renderer, P = R.info.programs; const j = A.q[0];
       while (j.i < j.dets.length) { const m = j.dets[j.i++]; const n0 = P.length; let ms;
-        try { ms = R.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, A.camera, A.scene); } catch (e) { ms = null; }
-        if (P.length > n0) { if (ms) for (const mt of ms) { const pr = R.properties.get(mt).currentProgram; if (pr) pr.getUniforms(); } A.tok = false; return; } } // getUniforms: forces the link now
+        const k = this.rtOn(A); try { ms = R.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, A.camera, A.scene); } catch (e) { ms = null; } this.rtOff(A, k);
+        if (P.length > n0) { if (ms) for (const mt of ms) { const pr = R.properties.get(mt).currentProgram; if (pr) pr.getUniforms(); } (A.linked || (A.linked = [])).push((m.material && (m.material.name || m.material.type)) + '|' + m.name); A.tok = false; return; } } // getUniforms: forces the link now
       A.q.shift(); j.show(); },
+    // perf_debug6 (?oldtpwarmrt = old): renderer.compile() with no render target bound builds the CANVAS variant of each program
+    // (sRGB output + tone mapping), but every real draw goes to a render target (composer / mirror / probe: linear, no tone map),
+    // so the pre-link was a wasted 70-200 ms SwiftShader link per material and the real program was still built at draw time.
+    // Bind a 1x1 render target while compiling so the variant matches the draws.
+    rtOn(A) { if (OLD.tpwarmRt) return null; const R = A.renderer; const k = [R.getRenderTarget(), R.getActiveCubeFace(), R.getActiveMipmapLevel()]; R.setRenderTarget(A.rt1 || (A.rt1 = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }))); return k; },
+    rtOff(A, k) { if (k) A.renderer.setRenderTarget(k[0], k[1], k[2]); },
     load(c) { const A = this.async; const k = A && A.sync; if (A) A.sync = true; const j = this.begin(c, 0); this.step(j, 1e9); if (A) A.sync = k; },
     unload(c) { for (const m of c.det) { this.scene.remove(m); m.geometry.dispose(); } c.det = null; for (const m of c.far) m.visible = true; this.stats.unloads++; this.stats.loaded--; },
     // a road-following point ~35 m along the nearest region road that gets closer to (tx, tz); null if not on a region road

@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim'), sprobe: Q.has('oldsprobe'), sprobeLod: Q.has('oldsprobelod'), tpwarm: Q.has('oldtpwarm'), tpstagger: Q.has('oldtpstagger') };
+export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim'), sprobe: Q.has('oldsprobe'), sprobeLod: Q.has('oldsprobelod'), tpwarm: Q.has('oldtpwarm'), tpstagger: Q.has('oldtpstagger'), tpwarmRt: Q.has('oldtpwarmrt') };
 // ?oldmirror: characters (skinned, the costliest meshes) were drawn into the water mirror and both reflection probes too;
 // now they live on CHAR_LAYER only, which the main camera and the shadow cameras see
 export const CHAR_LAYER = 3;
