@@ -61,5 +61,5 @@ cyber 图的真人场景本轮未跑完（时间/内存），仅跑回归 B。
 | 11（新） | 低 | 回归 B 的 missions 脚本第一次跑报 `TypeError: reading 'x'`（cyber 图上 M.data.van 未定义，脚本用的是 A 图坐标），重试通过；非 PAGEERROR，疑为既有脚本脆弱 | GPT |
 | 7（更新） | 低 | 每个场景开头的 250–370 ms 逻辑帧尖峰：首帧拆解显示是 HUD 首次绘制 + 首轮生成人车；正式游玩已移到加载画面下，场景内瞬移后的尖峰未处理 | Hark |
 
-daynight / session3min / cyber 真人场景：本轮仍未跑（时间用于修复与回归；沙箱内存紧，见 #10）。
+daynight：开跑约 10 s 被沙箱 OOM 杀（同 #3/#10）；session3min / cyber 真人场景：本轮未跑。
 回归：A plans/r5_regress.json 11/11，PAGEERROR 0；B plans/r6_cyber_smoke.json 7/7，PAGEERROR 0（missions 第一次失败、重试通过，见 #11）。
