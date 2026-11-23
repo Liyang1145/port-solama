@@ -428,8 +428,11 @@ export class Character {
       else this.lift = lerp(this.lift, 0, 1 - Math.exp(-6 * dt));
       // swimming: torso at the surface (the clips keep the hips at standing height)
       this.model.position.y = (this.lift + this.swimW * (this.A.swim ? 0.25 * (this.A.swim.weight) : 0)) * this.P.scale;
-      if (this.lod < 2) this.mixer.update(dt);
-      else if (this.lod === 2) { this.lodAcc += dt; if (this.lodAcc > 0.12) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } } else this.lodAcc += dt; // lod 3 (not drawn): no pose work
+      if (OLD.anim) { if (this.lod < 2) this.mixer.update(dt); else if (this.lod === 2) { this.lodAcc += dt; if (this.lodAcc > 0.12) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } } else this.lodAcc += dt; }
+      // perf_debug1 animation LOD: near (<20 m) every frame; 20-50 m every 2nd frame (staggered by id so the load is even); 50 m+ ~6 Hz
+      else if (this.lod === 0 || this.aimW > 0.05 || this.isPlayer) { this.mixer.update(dt + (this.lodAcc || 0)); this.lodAcc = 0; }
+      else if (this.lod === 1) { this.lodAcc = (this.lodAcc || 0) + dt; if (((this._af = (this._af || 0) + 1) + (this.id | 0)) % 2 === 0) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } }
+      else if (this.lod === 2) { this.lodAcc = (this.lodAcc || 0) + dt; if (this.lodAcc > 0.16) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } } else this.lodAcc = Math.min(0.5, (this.lodAcc || 0) + dt); // lod 3 (not drawn): no pose work
     }
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
     if (!this.dead && this.lod === 0) this.lookAt(dt); else this.lookY = 0;

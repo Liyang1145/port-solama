@@ -8,12 +8,14 @@
 //   ?oldres     the post chain ran at CSS pixels (pixel ratio 1) and was stretched onto the 1.5x canvas on HiDPI screens
 //               (blurry) -> post chain at the canvas' real pixel ratio + dynamic resolution (?nodrs) keeps the frame rate
 //   ?oldsharp   CAS-style sharpening after FXAA, less chromatic aberration / grain, gentler speed motion blur
+//   ?oldanim    every pedestrian within 50 m sampled its AnimationMixer every frame (~5 ms/frame with 86 peds)
+//               -> 20-50 m: every 2nd frame (staggered by id), 50 m+: 6 Hz
 //   ?oldstep    one variable game step per rAF clamped to 1/20 s (slow motion under 20 fps, big physics steps)
 //               -> fixed 1/60 s sub-steps (at most 4 per frame) with the rest carried to the next frame
 import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu') };
+export const OLD = { shadow: Q.has('oldshadow'), gbuf: Q.has('oldgbuf'), probe: Q.has('oldprobe'), res: Q.has('oldres'), sharp: Q.has('oldsharp'), step: Q.has('oldstep'), mirror: Q.has('oldmirror'), mirrorOrder: Q.has('oldmwu'), anim: Q.has('oldanim') };
 // ?oldmirror: characters (skinned, the costliest meshes) were drawn into the water mirror and both reflection probes too;
 // now they live on CHAR_LAYER only, which the main camera and the shadow cameras see
 export const CHAR_LAYER = 3;
