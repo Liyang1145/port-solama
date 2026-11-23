@@ -240,7 +240,7 @@ async function load() {
   // perf_debug3 (?nowarm = old): game.start() spawns the player / traffic / peds whose ~39 shader programs (+ shadow-depth and
   // mirror variants) were first compiled inside the first gameplay frame (~3 s hitch in SwiftShader). Now: compile them
   // (parallel where KHR_parallel_shader_compile exists) and draw one hidden warm-up frame while the loading screen is still up.
-  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); renderFrame(0); LT.warm = Math.round(performance.now() - t); };
+  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); if (SNAP) renderFrame(0); else frame(1 / 60); LT.warm = Math.round(performance.now() - t); };
   st.onclick = async () => { if (st.dataset.busy) return; st.dataset.busy = 1; game.start(); await warm(); document.getElementById('load').style.display = 'none'; };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
   if (PROF) {
