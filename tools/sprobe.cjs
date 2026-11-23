@@ -11,7 +11,7 @@ srv.listen(0, async () => {
   const p = await (await b.newContext({ viewport: { width: +(process.env.VW || 960), height: +(process.env.VH || 540) }, deviceScaleFactor: +(process.env.DSF || 1.5) })).newPage(); p.setDefaultTimeout(90000); let perr = 0;
   p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
   await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&prof&map=${MAPN}&hour=${process.env.HOUR || 15}&${process.env.Q || ''}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
-  const r = await p.evaluate(`(() => { const G = __G; G.profInit(); for (let i = 0; i < 3; i++) G.tick(1/30, true); G.sprobe.t = 99; G.sprobe.pos.set(1e9, 0, 0); const fr = [];
+  const r = await p.evaluate(`(() => { const G = __G; G.profInit(); ${process.env.TP ? `G.game.tp(${process.env.TP}, 0); G.step(2);` : ''} for (let i = 0; i < 3; i++) G.tick(1/30, true); G.sprobe.t = 99; G.sprobe.pos.set(1e9, 0, 0); const fr = [];
     for (let i = 0; i < 18; i++) { const f = G.tick(1/30, true); const c = f.C['sprobe:calls'] || 0; if (c || f.T['gl:sprobe']) fr.push({ i, calls: c, tris: +((f.C['sprobe:tris'] || 0) / 1e6).toFixed(2), ms: Math.round(f.T['gl:sprobe'] || 0), frame: Math.round(f.ms), tot: f.calls }); }
     return { fr, faces: fr.length, sumCalls: fr.reduce((a, x) => a + x.calls, 0), maxCalls: Math.max(0, ...fr.map((x) => x.calls)), maxTris: Math.max(0, ...fr.map((x) => x.tris)), size: G.sprobe.rt.width }; })()`);
   console.log(TAG, JSON.stringify(r), 'PAGEERROR', perr);

@@ -2,7 +2,7 @@
 // bus shelters, newspaper boxes, utility cabinets, parking meters, bollards, storm drains + manholes, and broadleaf street trees.
 // Everything is original artwork drawn on canvas (Chinese/English invented street names, generic sign shapes).
 import * as THREE from 'three';
-import { GeoBucket } from './geo.js';
+import { GeoBucket, dropJS } from './geo.js';
 import { M, prep, SHOPK } from './mats.js';
 import { U } from './env.js';
 import { LAYOUT } from './city.js';
@@ -275,7 +275,7 @@ export function buildStreet(scene, city) {
   const wires = new THREE.Mesh(w.build(), wireMat); wires.castShadow = false; scene.add(wires);
   const atlas = signAtlas();
   const signMat = prep(new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.45, metalness: 0.1, emissiveMap: atlas, emissive: 0xffffff, emissiveIntensity: 0.0 }), 'rsign');
-  const signs = new THREE.Mesh(sg.build(), signMat); signs.castShadow = true; signs.receiveShadow = true; scene.add(signs);
+  const signs = new THREE.Mesh(sg.build(), signMat); signs.castShadow = true; signs.receiveShadow = true; scene.add(signs); dropJS(g, w, sg, cov); // perf_debug5
   // v3.5 kerb ramps where the crosswalks (1.0–4.2 m from each intersection edge) meet the kerb: sloped concrete wedge with
   // flared sides and a yellow detectable-warning pad at the bottom
   {

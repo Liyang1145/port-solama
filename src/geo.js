@@ -66,6 +66,9 @@ export class GeoBucket {
 }
 
 // Chunked collection: key = material name + chunk id
+// perf_debug5: same reset for a standalone bucket after its mesh is built (a closure returned from the builder kept the whole
+// builder scope, so its buckets' JS arrays stayed live: buildStreet ~77 MB). ?keepjs = old
+export function dropJS(...bs) { if (!RESET_JS && !DROP_JS) return; for (const b of bs) { if (!b) continue; b.p = []; b.n = []; b.uv = []; b.idx = []; b.c = []; for (const k in b.custom) b.custom[k] = []; b.vc = 0; } }
 export class World {
   constructor(chunk = 250) { this.chunk = chunk; this.buckets = new Map(); this.attrs = {}; }
   b(mat, x, z, attrs) {
