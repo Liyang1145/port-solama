@@ -221,7 +221,7 @@ export function fixCurbs(fab, opt = {}) {
   if (!fab || !fab.lots) return S;
   const H0 = hashCurb(fab); S.hash = H0; S.t.hash = Math.round(performance.now() - T0);
   const BK = opt.bake || CURB_BAKE; const useBake = !AUDIT && !FULL && !BAKE && !opt.full && !opt.record && !!BK && BK.hash === H0;
-  if (!useBake && !AUDIT && !FULL && !BAKE && !opt.full && !opt.record && BK && typeof console !== 'undefined') console.warn('curbfix: bake stale (fabric inputs changed), full pass; regenerate: node tools/curbfix_bake.mjs');
+  if (!useBake && !AUDIT && !FULL && !BAKE && !opt.full && !opt.record && BK && typeof console !== 'undefined') console.warn('curbfix: bake stale (fabric inputs changed), full pass; regenerate: node tools/parkfix_bake.cjs (writes curbbake.js + parkbake.js)');
   const T = new Tape(useBake ? BK : null); S.baked = useBake;
   const SI = segIndex(fab); const PR = fab.curbProbe = { walks: [], drives: [], mouths: [], turned: [] }; // spots for the browser spot checks (small)
   // 1) curved sidewalk runs: mitre each joint (both sides, inner and outer edge); uv = world xz as laid
