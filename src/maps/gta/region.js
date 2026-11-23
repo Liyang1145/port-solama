@@ -10,6 +10,7 @@ import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, pointInP
 import { REGION } from './mapdata.js';
 import { rng, rand, randi, pick, clamp } from '../../util.js';
 import { shopMural } from './shoppools.js'; // a_shopnight2
+import { OLD } from '../../perf.js';
 
 const SW = REGION.sw, DY = REGION.deckY;
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -413,8 +414,9 @@ export function buildRegion(ctx, H) {
         else if (c.det && d > 440) this.unload(c);
       }
       if (budget >= 99) return;
+      if (this.async) this.async.tok = true; // perf_debug6: one heavy op (program link OR mesh build) per frame
       this.pump(); // perf_debug5
-      if (this.job && this.job.c !== best && (!best || bd < this.job.d - 60)) this.job = null; // a much nearer chunk wins
+      if (this.job && !this.job.B && this.job.c !== best && (!best || bd < this.job.d - 60)) this.job = null; // a much nearer chunk wins
       if (!this.job && best) this.job = this.begin(best, bd);
       if (this.job && this.step(this.job, 3)) this.job = null;
     },
@@ -425,10 +427,20 @@ export function buildRegion(ctx, H) {
     step(j, ms) {
       const t0 = performance.now(); const L = j.c.lots;
       while (j.i < L.length) { if (!L[j.i].empty) detailedLot(j.dctx, L[j.i], H); j.i++; if (performance.now() - t0 > ms) return false; }
+      // perf_debug6 (?oldtpstagger = old: build + link in the same frame as the last lot): the merge/upload-prep runs in its own
+      // frame(s), ~3 ms of buckets per frame, and never in a frame where pump() linked a program
+      const A = this.async; if (A && !A.sync && !OLD.tpstagger && ms < 1e8) {
+        if (!j.B) { if (!this.take()) return false; j.B = j.Wd.buildIter(this.scene, this.M, { ...this.fopts, hidden: true }); if (performance.now() - t0 > ms) return false; }
+        else if (!this.take()) return false;
+        if (!j.B.step(ms)) return false; this.finish(j.c, j.Wd, j.B.meshes); return true; }
       this.finish(j.c, j.Wd); return true;
     },
-    finish(c, Wd) {
-      c.det = Wd.build(this.scene, this.M, { glassRail: { cast: false }, mural0: { cast: false }, mural1: { cast: false }, mural2: { cast: false }, mural3: { cast: false }, mural4: { cast: false }, mural5: { cast: false }, pool: { cast: false } });
+    // perf_debug6: the per-frame heavy-op token (set in update(), consumed by a program link in pump() or a build slice); a builder
+    // that finds it taken marks want so the next frame's pump() yields to it
+    take() { const A = this.async; if (!A || A.sync || OLD.tpstagger) return true; if (!A.tok) { A.want = true; return false; } A.tok = false; A.want = false; return true; },
+    fopts: { glassRail: { cast: false }, mural0: { cast: false }, mural1: { cast: false }, mural2: { cast: false }, mural3: { cast: false }, mural4: { cast: false }, mural5: { cast: false }, pool: { cast: false } },
+    finish(c, Wd, built) {
+      c.det = built || Wd.build(this.scene, this.M, this.fopts);
       this.stats.loads++; this.stats.loaded++;
       // perf_debug5 (?oldtpwarm = old): the chunk's detailed meshes used to appear in the same frame they were built, so every
       // shader program they needed (new material variants first seen on that side of the map) was compiled and linked inside
@@ -445,10 +457,10 @@ export function buildRegion(ctx, H) {
       if (A.par) { const fake = { traverse: (fn) => { for (const m of dets) fn(m); }, traverseVisible() {} }; try { R.compileAsync(fake, A.camera, A.scene).then(show, show); } catch (e) { show(); } return; }
       (A.q || (A.q = [])).push({ dets, i: 0, show });
     },
-    pump() { const A = this.async; if (!A || !A.q || !A.q.length) return; const R = A.renderer, P = R.info.programs; const j = A.q[0];
+    pump() { const A = this.async; if (!A || !A.q || !A.q.length) return; if (!OLD.tpstagger && (A.want || !A.tok)) return; const R = A.renderer, P = R.info.programs; const j = A.q[0];
       while (j.i < j.dets.length) { const m = j.dets[j.i++]; const n0 = P.length; let ms;
         try { ms = R.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, A.camera, A.scene); } catch (e) { ms = null; }
-        if (P.length > n0) { if (ms) for (const mt of ms) { const pr = R.properties.get(mt).currentProgram; if (pr) pr.getUniforms(); } return; } } // getUniforms: forces the link now
+        if (P.length > n0) { if (ms) for (const mt of ms) { const pr = R.properties.get(mt).currentProgram; if (pr) pr.getUniforms(); } A.tok = false; return; } } // getUniforms: forces the link now
       A.q.shift(); j.show(); },
     load(c) { const A = this.async; const k = A && A.sync; if (A) A.sync = true; const j = this.begin(c, 0); this.step(j, 1e9); if (A) A.sync = k; },
     unload(c) { for (const m of c.det) { this.scene.remove(m); m.geometry.dispose(); } c.det = null; for (const m of c.far) m.visible = true; this.stats.unloads++; this.stats.loaded--; },

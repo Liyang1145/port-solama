@@ -77,19 +77,23 @@ export class World {
     let b = this.buckets.get(key); if (!b) { b = new GeoBucket(attrs || this.attrs[mat] || {}); b.mat = mat; this.buckets.set(key, b); }
     return b;
   }
-  build(scene, mats, opts = {}) {
-    const meshes = [];
-    for (const [key, b] of this.buckets) {
-      if (!b.vc) continue;
+  build(scene, mats, opts = {}) { const it = this.buildIter(scene, mats, opts); it.step(1e9); return it.meshes; }
+  // perf_debug6: the same build spread over frames: step(ms) builds buckets until ms is spent (at least one per call), returns true when done
+  buildIter(scene, mats, opts = {}) { const W = this, ents = [...this.buckets]; let i = 0; const meshes = [];
+    return { meshes, step(ms) { const t0 = performance.now();
+      while (i < ents.length) { W._one(ents[i++], scene, mats, opts, meshes); if (performance.now() - t0 > ms) break; }
+      if (i < ents.length) return false; if (!opts.keep && DROP_JS) W.buckets.clear(); return true; } };
+  }
+  _one([key, b], scene, mats, opts, meshes) {
+    {
+      if (!b.vc) return;
       const m = new THREE.Mesh(b.build(), mats[b.mat]);
       const o = opts[b.mat] || {};
       m.castShadow = o.cast !== false; m.receiveShadow = o.receive !== false;
-      m.name = key; scene.add(m); meshes.push(m);
+      m.name = key; if (opts.hidden) m.visible = false; scene.add(m); meshes.push(m);
       if (!opts.keep && DROP_JS) { b.p = b.n = b.uv = b.idx = b.c = null; b.custom = {}; } // v4.4: drop the JS-side arrays (heap was ~2x the GPU data)
       else if (!opts.keep && RESET_JS) { b.p = []; b.n = []; b.uv = []; b.idx = []; b.c = []; for (const k in b.custom) b.custom[k] = []; b.vc = 0; }
     }
-    if (!opts.keep && DROP_JS) this.buckets.clear();
-    return meshes;
   }
 }
 
