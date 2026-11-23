@@ -12,7 +12,7 @@ srv.listen(0, async () => {
   await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&map=${process.argv[2] || 'gta'}&hour=15&${process.env.Q || ''}`); await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
   const hops = [[280, 36], [290, -150], [170, -300], [50, 0], [170, 150], [290, 300], [50, -300], [280, 36]];
   for (let i = 0; i < +(process.env.N || 16); i++) { const [x, z] = hops[i % hops.length];
-    const r = await p.evaluate(process.env.DRIVE ? `(() => { const g = __G.game; if (!g.P.car) { g.carNearPlayer('sport', 3); g.toggleCar(); } g.override = { throttle: 1, steer: Math.sin(${i}) * 0.3 }; __G.step(120);` : `(() => { const g = __G.game; g.tp(${x}, ${z}, 0); __G.step(120); return [Math.round(performance.memory.usedJSHeapSize / 1048576), g.traffic.cars.length, g.peds.list.length, __G.renderer.info.memory.geometries]; })()`);
+    const r = await p.evaluate(process.env.DRIVE ? `(() => { const g = __G.game; if (!g.P.car) { g.carNearPlayer('sport', 3); g.toggleCar(); } g.override = { throttle: 1, steer: Math.sin(${i}) * 0.3 }; __G.step(120); return [Math.round(performance.memory.usedJSHeapSize / 1048576), g.traffic.cars.length, g.peds.list.length, __G.renderer.info.memory.geometries]; })()` : `(() => { const g = __G.game; g.tp(${x}, ${z}, 0); __G.step(120); return [Math.round(performance.memory.usedJSHeapSize / 1048576), g.traffic.cars.length, g.peds.list.length, __G.renderer.info.memory.geometries]; })()`);
     console.log('hop', i, 'rssMB', rss(), 'heap/cars/peds/geos', JSON.stringify(r)); }
   process.exit(0);
 });
