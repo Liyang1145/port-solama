@@ -43,8 +43,10 @@ const PAGE_HELPERS = `(() => {
     const heap = F.map((f) => f.heap); let drops = 0, grow = 0; for (let i = 1; i < heap.length; i++) { const d = heap[i] - heap[i - 1]; if (d < -2) drops++; else if (d > 0) grow += d; }
     const logicMs = L.map((f) => f.ms), renderMs = R.map((f) => f.ms);
     const spikes = L.map((f, i) => [f.ms, from + F.indexOf(f)]).filter((x) => x[0] > Math.max(8, pct(logicMs, 0.5) * 4)).slice(0, 12);
-    return { frames: F.length, rendered: R.length, logic: { p50: pct(logicMs, 0.5), p95: pct(logicMs, 0.95), max: pct(logicMs, 1), longOver16: L.filter((f) => f.ms > 16.7).length, longOver50: L.filter((f) => f.ms > 50).length },
-      render: { p50: pct(renderMs, 0.5), p95: pct(renderMs, 0.95), max: pct(renderMs, 1) }, spikes, mean, max: mx, counters,
+    const worst = [...L].sort((a, b) => b.ms - a.ms).slice(0, Math.max(3, Math.ceil(L.length * 0.01))).map((f) => [+f.ms.toFixed(1), Object.entries(f.T).filter(([k]) => !k.startsWith('gl:') && !k.startsWith('pass:')).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => k + '=' + v.toFixed(1)).join(' ')]); // perf_debug6
+    const wsum = {}; for (const f of [...L].sort((a, b) => b.ms - a.ms).slice(0, Math.max(3, Math.ceil(L.length * 0.05)))) for (const k in f.T) if (!k.startsWith('gl:') && !k.startsWith('pass:')) wsum[k] = +((wsum[k] || 0) + f.T[k]).toFixed(1);
+    return { worst, worst5sum: Object.fromEntries(Object.entries(wsum).sort((a, b) => b[1] - a[1]).slice(0, 10)), frames: F.length, rendered: R.length, logic: { p50: pct(logicMs, 0.5), p95: pct(logicMs, 0.95), p99: pct(logicMs, 0.99), max: pct(logicMs, 1), longOver16: L.filter((f) => f.ms > 16.7).length, longOver50: L.filter((f) => f.ms > 50).length },
+      render: { p50: pct(renderMs, 0.5), p95: pct(renderMs, 0.95), p99: pct(renderMs, 0.99), max: pct(renderMs, 1) }, spikes, mean, max: mx, counters,
       calls: R.length ? Math.max(...R.map((f) => f.calls || 0)) : 0, tris: R.length ? Math.max(...R.map((f) => f.tris || 0)) : 0,
       progs: [F.length ? F[0].progs : 0, F.length ? F[F.length - 1].progs : 0], geo: F.length ? F[F.length - 1].geo : 0, tex: F.length ? F[F.length - 1].tex : 0,
       heapMB: [heap[0], Math.max(...heap), heap[heap.length - 1]], allocMBperFrame: +(grow / Math.max(1, F.length)).toFixed(3), gcDrops: drops, state: g.state(), an: window.__AN.filter((a) => a.f >= from) };
@@ -53,7 +55,7 @@ const PAGE_HELPERS = `(() => {
 })()`;
 srv.listen(0, async () => {
   const port = srv.address().port; const T0 = Date.now();
-  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100', `--window-size=${W},${H}`] });
+  const b = await chromium.launch({ executablePath: process.env.CHROME_BIN || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--no-sandbox', '--disable-gpu-watchdog', '--disable-hang-monitor', '--in-process-gpu', '--enable-precise-memory-info', '--js-flags=--max-old-space-size=1100', `--window-size=${W},${H}`, ...(process.env.SINGLE ? ['--single-process', '--disable-gpu-program-cache', '--force-gpu-mem-available-mb=256'] : [])] });
   // the browser runs in its own session (playwright detaches it): remember it so the runner can kill exactly that session
   try { const cp = require('child_process').execSync(`ps -o pid= --ppid ${process.pid}`).toString().split(/\s+/).filter(Boolean); fs.writeFileSync(path.join(out, 'browser.pids'), cp.join(' ')); } catch (e) { }
   const killMine = () => { try { for (const pid of fs.readFileSync(path.join(out, 'browser.pids'), 'utf8').split(' ').filter(Boolean)) require('child_process').execSync(`for q in $(ps -o pid= --sid ${pid}); do kill -9 $q 2>/dev/null; done; true`); } catch (e) { } };
@@ -85,12 +87,16 @@ srv.listen(0, async () => {
   for (const [name, fn] of Object.entries(S)) {
     if (ONLY.length && !ONLY.includes(name)) continue;
     const t = Date.now(); const f0 = await ev('__mark()'); let res = null, err = null; const e0 = errs.length;
+    let cdp = null; if (process.env.CPUPROF) { cdp = await p.context().newCDPSession(p); await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); await cdp.send('Profiler.start'); } // perf_debug6
     try { res = await fn(); } catch (e) { err = e.message.slice(0, 400); log('SCENARIO-ERR', name, err); }
+    let top = null; if (cdp) { try { const { profile } = await cdp.send('Profiler.stop'); const by = {}; for (const n of profile.nodes) by[n.id] = n; const dt = {}; const tot = profile.samples.length;
+      for (const id of profile.samples) { const cf = by[id].callFrame; const k = (cf.functionName || '(anon)') + ' ' + cf.url.split('/').pop() + ':' + cf.lineNumber + ':' + cf.columnNumber; dt[k] = (dt[k] || 0) + 1; }
+      top = Object.entries(dt).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, v]) => [k, +(100 * v / tot).toFixed(1)]); fs.writeFileSync(path.join(out, name + '.cpuprofile'), JSON.stringify(profile)); } catch (e) { log('PROF-ERR', e.message.slice(0, 200)); } }
     for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'Space']) await p.keyboard.up(k);
     let sum = null; try { sum = await ev(`__sum(${f0})`); } catch (e) { log('SUM-ERR', e.message.slice(0, 200)); }
-    RESULTS[name] = { checks: res, err, errors: errs.slice(e0), sum, wallS: Math.round((Date.now() - t) / 1000) };
+    RESULTS[name] = { checks: res, err, errors: errs.slice(e0), sum, cpuTop: top, wallS: Math.round((Date.now() - t) / 1000) };
     fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify({ map: MAPN, q: process.env.Q || '', W, H, RE, results: RESULTS, perr, cerr }, null, 1));
-    log('scenario', name, 'logic p50/p95/max', sum && sum.logic.p50, sum && sum.logic.p95, sum && sum.logic.max, 'render p50', sum && sum.render.p50, 'calls', sum && sum.calls, 'an', sum && sum.an.length, JSON.stringify(res).slice(0, 300));
+    log('scenario', name, 'logic p50/p95/p99/max', sum && sum.logic.p50, sum && sum.logic.p95, sum && sum.logic.p99, sum && sum.logic.max, 'render p50', sum && sum.render.p50, 'calls', sum && sum.calls, 'an', sum && sum.an.length, JSON.stringify(res).slice(0, 300));
     if (process.env.NOSHOT !== '1') { try { await shot(MAPN + '_' + name); } catch (e) { log('SHOT-ERR', e.message.slice(0, 200)); } }
   }
   try { fs.writeFileSync(path.join(out, 'frames.json'), JSON.stringify(await ev('__G.prof.frames'))); } catch (e) { }

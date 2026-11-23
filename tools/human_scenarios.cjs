@@ -84,5 +84,17 @@ module.exports = ({ key, hold, look, run, ev, st, p, W, H, MAPN, log }) => {
     await ev('__G.game.wanted = 0');
     const used = (await ev('__mark()')) - F0; if (used < 5400) { await key.down('KeyW'); await look(5, 0, Math.max(0, 5400 - used)); await key.up('KeyW'); }
     r.frames = (await ev('__mark()')) - F0; r.state = await st(); return r; };
+  // perf_debug6: real-input 60 s scenarios for per-frame CPU profiling (tools/human.cjs PD6=1 adds p99 + worst-frame breakdown)
+  S.walk60 = async () => { const r = {}; const F0 = await ev('__mark()'); await hold(['KeyS'], 20); await face(300, 30);
+    await key.down('KeyW'); await key.down('ShiftLeft'); await look(5, 0, 360); await key.up('ShiftLeft'); await look(-7, 1, 360); await key.down('ShiftLeft'); await look(3, -1, 360); await key.up('ShiftLeft');
+    const used = (await ev('__mark()')) - F0; await look(-4, 0, Math.max(0, 1800 - used)); await key.up('KeyW'); r.frames = (await ev('__mark()')) - F0; r.state = await st(); return r; };
+  S.loop60 = async () => { const r = {}; const F0 = await ev('__mark()');
+    await ev('__G.game.carNearPlayer && __G.game.carNearPlayer("sport", 3)'); await run(2); await key.tap('KeyF', 2); await run(20); r.inCar = (await pose()).inCar;
+    if (!r.inCar) { const c = await ev('(() => { const v = __G.game.nearestCar(40); return v ? [v.x, v.z] : null; })()'); if (c) { await walkTo(c[0] - 2.2, c[1], { stop: 1.6, maxF: 300 }); await key.tap('KeyF', 2); await run(20); r.inCar = (await pose()).inCar; } }
+    const s0 = await pose(); const L = MAPN === 'gta' ? [[s0.x + 160, s0.z], [s0.x + 160, s0.z - 220], [s0.x - 40, s0.z - 220], [s0.x, s0.z]] : [[s0.x + 150, s0.z], [s0.x + 150, s0.z + 150], [s0.x, s0.z]];
+    r.legs = []; for (const [tx, tz] of L) { const used = (await ev('__mark()')) - F0; if (used > 1750) break; const pts = await route(tx, tz); r.legs.push((await driveTo(pts.length ? pts : [[tx, tz]], { maxF: 1800 - used, vmax: 20, reach: 7 })).reached); }
+    const used = (await ev('__mark()')) - F0; if (used < 1800) await hold(['KeyW'], 1800 - used); await hold(['KeyS'], 30);
+    r.frames = (await ev('__mark()')) - F0; r.state = await st(); return r; };
+  S.dn60 = async () => { const r = { hours: [] }; await key.down('KeyW'); for (let i = 0; i < 12; i++) { await key.tap('KeyT', 1); await look(i % 2 ? 4 : -4, 0, 60); r.hours.push(+(await ev('__G.hour')).toFixed(1)); } await key.up('KeyW'); return r; };
   return S;
 };
