@@ -103,7 +103,7 @@ function chunkOf(fab, x, z) {
 // body: [cx, y0, cz, w(along ang), h, d, ang, r, g, b, kind, seed]   kinds: 0 house 1 retail 2 warehouse 3 apartment 4 office 5 garage 6 hedge 7 wall 8 plain (trailer/container)
 function addBody(fab, cx, cz, y0, w, d, h, ang, colr, kind, col, collide = true) {
   const c = chunkOf(fab, cx, cz); c.I.body.push([cx, y0, cz, w, h, d, ang, colr[0], colr[1], colr[2], kind, fab.R()]);
-  if (collide && col) col.addOBB(cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, y0 + h, 'bld');
+  fab._lastBox = collide && col ? col.addOBB(cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, y0 + h, 'bld') : null;
   fab.stats.bodies = (fab.stats.bodies || 0) + 1;
 }
 const addRoof = (fab, cx, cz, y0, w, d, h, ang, colr) => chunkOf(fab, cx, cz).I.roof.push([cx, y0, cz, w, h, d, ang, colr[0], colr[1], colr[2]]);
@@ -115,6 +115,7 @@ const addLamp = (fab, x, z, ang) => chunkOf(fab, x, z).I.lamp.push([x, z, ang]);
 // street lights along a segment A->B: every `step` m, offset o (signed, + = left of travel), arm pointing back over the road
 function lampRow(fab, A, B, o, step, t0 = 10) { const d = sub(B, A), L = len2(d); if (L < 2 * t0) return; const tx = d[0] / L, tz = d[1] / L;
   for (let t = t0; t < L - t0 * 0.5; t += step) { const x = A[0] + tx * t - tz * o, z = A[1] + tz * t + tx * o; const sg = Math.sign(o); addLamp(fab, x, z, Math.atan2(sg * tx, sg * tz)); } }
+const lastRec = (fab, p, key) => { const L = chunkOf(fab, p[0], p[1]).I[key]; return L[L.length - 1]; }; // a_curbalign
 const addFlat = (fab, x, z, w, d, ang, colr, y = 0.012) => chunkOf(fab, x, z).I.flat.push([x, z, w, d, ang, colr[0], colr[1], colr[2], y]);
 
 // road ribbon A->B (kind 0 4-lane hw 7 / 2 2-lane hw 4.5); aRd lateral sign convention as region.js
@@ -130,8 +131,10 @@ function junction(fab, P) { if (P.length < 3) return; const H = hull(P); const c
 function walkSeg(fab, A, B, s, o0, o1, t0, t1, cuts = []) {
   const d = sub(B, A), L = len2(d); if (L < 1) return; const tx = d[0] / L, tz = d[1] / L; const nx = -tz * s, nz = tx * s;
   const pieces = []; let a = t0; for (const [c0, c1] of cuts.slice().sort((p, q) => p[0] - q[0])) { if (c1 < a) continue; if (c0 > a) pieces.push([a, Math.min(c0, t1)]); a = Math.max(a, c1); } if (a < t1) pieces.push([a, t1]);
+  const made = []; // a_curbalign: [acc, first vertex, corners] of every quad (curbfix.js re-shapes the joints of curved runs)
   for (const [p0, p1] of pieces) { if (p1 - p0 < 0.5) continue; const Q = (t, o) => [A[0] + tx * t + nx * o, A[1] + tz * t + nz * o];
-    const P = [Q(p0, o0), Q(p1, o0), Q(p1, o1), Q(p0, o1)]; const c = chunkOf(fab, (P[0][0] + P[2][0]) / 2, (P[0][1] + P[2][1]) / 2); c.walk.quad(P, 0.03, P.map((q) => [q[0], q[1]]), null); }
+    const P = [Q(p0, o0), Q(p1, o0), Q(p1, o1), Q(p0, o1)]; const c = chunkOf(fab, (P[0][0] + P[2][0]) / 2, (P[0][1] + P[2][1]) / 2); made.push([c.walk, c.walk.n, P]); c.walk.quad(P, 0.03, P.map((q) => [q[0], q[1]]), null); }
+  return made;
 }
 // paved / parking surface quad in a local frame (uv = metres along/across for the stall shader), mode 0 stalls 1 concrete yard 2 asphalt 3 sports field 4 plaza
 function lotQuad(fab, P, ua, va, mode, y = 0.006) { const c = chunkOf(fab, (P[0][0] + P[2][0]) / 2, (P[0][1] + P[2][1]) / 2);
@@ -235,23 +238,29 @@ function drawPolyRoad(fab, cell, cuts, pts, hw, kind, s0, s1) {
   return [pts[0], pts[n]];
 }
 // sidewalks + verge trees along a frame line, piecewise when the frame is curved
-function sidesA(fab, F, a0, a1, b, opts) { const n = F.curved ? Math.max(1, Math.ceil((a1 - a0) / 14)) : 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a0 + ((a1 - a0) * k) / n, b), F.P(a0 + ((a1 - a0) * (k + 1)) / n, b), opts); }
-function sidesB(fab, F, a, b0, b1, opts) { const n = F.curved ? Math.max(1, Math.ceil((b1 - b0) / 14)) : 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a, b0 + ((b1 - b0) * k) / n), F.P(a, b0 + ((b1 - b0) * (k + 1)) / n), opts); }
+function sidesA(fab, F, a0, a1, b, opts) { const n = F.curved ? Math.max(1, Math.ceil((a1 - a0) / 14)) : 1; const run = fab.nRun = (fab.nRun || 0) + 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a0 + ((a1 - a0) * k) / n, b), F.P(a0 + ((a1 - a0) * (k + 1)) / n, b), opts, run); }
+function sidesB(fab, F, a, b0, b1, opts) { const n = F.curved ? Math.max(1, Math.ceil((b1 - b0) / 14)) : 1; const run = fab.nRun = (fab.nRun || 0) + 1; for (let k = 0; k < n; k++) localSides(fab, F.P(a, b0 + ((b1 - b0) * k) / n), F.P(a, b0 + ((b1 - b0) * (k + 1)) / n), opts, run); }
 // local-frame quad (a0..a1, b0..b1) in world
 const fq = (F, a0, a1, b0, b1) => [F.P(a0, b0), F.P(a1, b0), F.P(a1, b1), F.P(a0, b1)];
 // frame direction angle (box rotation about y so that local +x runs along a)
 const fang = (F, a, b) => { const p = F.P(a, b), q = F.P(a + 1, b); return Math.atan2(-(q[1] - p[1]), q[0] - p[0]); };
 // verge trees + sidewalks along a local street piece (both sides)
-function localSides(fab, A, B, opts = {}) {
+function localSides(fab, A, B, opts = {}, run = 0) {
   const L = len2(sub(B, A)); if (L < 4) return; const d = norm2(sub(B, A));
+  const seg = { A, B, run, res: !!fab._res, w: {} }; (fab.locSegs = fab.locSegs || []).push(seg); // a_curbalign: the street piece every local sidewalk was laid along
   if (opts.lamps !== false && fab.R() < Math.min(1, L / 28)) lampRow(fab, A, B, LW + 0.5, 40, Math.min(L * 0.5, 4 + fab.R() * 20));
-  for (const s of [-1, 1]) { walkSeg(fab, A, B, s, LW + LVG, LIN, 0, L, []);
+  for (const s of [-1, 1]) { seg.w[s] = walkSeg(fab, A, B, s, LW + LVG, LIN, 0, L, []);
     if (opts.trees !== false) for (let t = 6 + fab.R() * 5; t < L - 5; t += fab.rr(11, 17)) { if (fab.R() < 0.18) continue; const o = (LW + LVG * 0.5) * s; const x = A[0] + d[0] * t - d[1] * o, z = A[1] + d[1] * t + d[0] * o; if (fab.canals && inCanal(fab, x, z)) continue;
       if (opts.palms ? fab.R() < 0.75 : fab.R() < 0.18) addPalm(fab, x, z, fab.rr(7, 12)); else addTree(fab, x, z, fab.rr(2.4, 3.8), fab.rr(2.2, 3.2), pickR(fab, LEAF)); } }
 }
 
 // ------------------------------------------------------------------ residential ----
 function residentialCell(fab, cell, cuts, col, canal) {
+  fab._res = cell; // a_curbalign: local sidewalks laid while this is set belong to a residential cell
+  { const q = cell.C.map((p) => [p[0], p[1]]); q.x0 = Math.min(...q.map((p) => p[0])); q.x1 = Math.max(...q.map((p) => p[0])); q.z0 = Math.min(...q.map((p) => p[1])); q.z1 = Math.max(...q.map((p) => p[1])); (fab.resCells = fab.resCells || []).push(q); }
+  try { residentialCell0(fab, cell, cuts, col, canal); } finally { fab._res = null; }
+}
+function residentialCell0(fab, cell, cuts, col, canal) {
   const F = frame(cell, canal ? true : cell.Lu >= cell.Lv); const { La, Lb } = F; const R = fab.R, rr = fab.rr;
   // commercial frontage bands on the arterials at b = 0 / b = Lb
   let bs = 0, be = Lb;
@@ -267,6 +276,7 @@ function residentialCell(fab, cell, cuts, col, canal) {
   const aBreak = [0, ...cross, La];
   // canal cells: the water runs between back-to-back rows (b mid-way between streets) out to the bay; a=La is the coast side
   const canals = canal ? streets.slice(0, -1).map((b, k) => (b + streets[k + 1]) / 2) : [];
+  const crossBr = new Map(); // a_orphans: canal b -> a of the local streets that bridge it
   // locals (constant b) split at the cross streets, junction patches at crossings
   for (const b of streets) for (let m = 0; m < aBreak.length - 1; m++) {
     const a0 = aBreak[m] + (m === 0 ? 0 : LW), a1 = aBreak[m + 1] - (m === aBreak.length - 2 ? 0 : LW);
@@ -279,7 +289,14 @@ function residentialCell(fab, cell, cuts, col, canal) {
     for (let k = 0; k < bl.length - 1; k++) { const first = k === 0, last = k === bl.length - 2;
       const b0 = bl[k] + (first ? 0 : LW), b1 = bl[k + 1] - (last ? 0 : LW);
       if (canal && canals.some((c) => c > b0 && c < b1)) { // bridge over the canal: road continues (deck), side walls
-        const c = canals.find((q) => q > b0 && q < b1); for (const sgn of [-1, 1]) addBody(fab, ...F.P(a + sgn * (LW + 0.25), c), 0, 0.5, 26, 1.0, fang(F, a, c) + Math.PI / 2, [0.82, 0.8, 0.76], 7, col, false); }
+        const c = canals.find((q) => q > b0 && q < b1); // a_orphans: was fang + PI/2, which laid both 26 m parapets ACROSS the street (two 1 m walls over the carriageway); now along its kerbs
+        for (const sgn of [-1, 1]) addBody(fab, ...F.P(a + sgn * (LW + 0.25), c), 0, 0.5, 26, 1.0, fang(F, a, c), [0.82, 0.8, 0.76], 7, col, false);
+        { const l = crossBr.get(c) || []; l.push(a); crossBr.set(c, l); for (const sgn of [-1, 1]) parapet(fab, ...F.P(a + sgn * (LW + 0.25), c), 0.5, 26, 1.0, fang(F, a, c)); }
+        // a_bridgewalk: the verges + sidewalks outside the kerb parapets used to hang over the water (sidewalk quads, no deck):
+        // a concrete deck slab under the whole street width (24.2 m = canal width, top -0.065 just under the -0.06 ground, 0.74 m fascia) and a low edge wall at
+        // the outer sidewalk edge (same body instancing / material as the parapets: no new program; collider via parapet())
+        { const ang = fang(F, a, c); deck(fab, ...F.P(a, c), -0.8, 2 * (LIN + 0.35), 24.2, 0.735, ang);
+          for (const sgn of [-1, 1]) { const Q = F.P(a + sgn * (LIN + 0.12), c); edgeWall(fab, Q[0], Q[1], 0.24, 26, 0.95, ang); } } }
       fStreetB(fab, F, cell, cuts, a, b0, b1, LW, 2, first && bs === 0, last && be === Lb);
       sidesB(fab, F, a, b0, b1); }
   }
@@ -298,11 +315,34 @@ function residentialCell(fab, cell, cuts, col, canal) {
   if (bs === 0) wallRun(fab, F, 0, La, 0.6, col); if (be === Lb) wallRun(fab, F, 0, La, Lb - 0.6, col);
   // canals: water cut is made in the ground (city.js reads fab.canals); seawall copings along both banks + docks/boats
   for (const c of canals) { const A = F.P(26, c), B0 = F.P(La, c), d = norm2(sub(B0, A)); let t = len2(sub(B0, A)); for (let k = 0; k < 4; k++) { const x = A[0] + d[0] * t, z = A[1] + d[1] * t; t += (shoreX(z) + 6 - x) / (d[0] || 1); }
-    const B = [A[0] + d[0] * t, A[1] + d[1] * t]; (fab.canals = fab.canals || []).push({ A, B, d, hw: 12 });
+    const B = [A[0] + d[0] * t, A[1] + d[1] * t];
+    // a_orphans: bridge decks across the canal (coastal boulevard between its parapets, local streets between theirs), as
+    // [along-canal distance from A, half width]; inCanalWater() keeps them dry so groundH gives the road, not the canal bed
+    // a_bridgewalk: entries are [t, lo, hi] (dry for lo < t - tb < hi; -t = inland): the boulevard deck now also carries its
+    // inland 4.5 m sidewalk out to the edge wall, local-street decks their verges + sidewalks, plus the bay-park promenade footbridge
+    const pj = (Q) => (Q[0] - A[0]) * d[0] + (Q[1] - A[1]) * d[1]; const tBv = pj(F.P(La + AIN, c)); const br = [[tBv, -(AIN + 0.24), AW + 0.4]];
+    // a_canaledge: deck slab extents along the canal [t0, t1] (region.js cuts the 0.12 m bank coping there, it used to stand across the deck)
+    const decks = [[tBv - (AIN + 0.3), tBv + AW + 0.7]];
+    for (const a of crossBr.get(c) || []) { const ta = pj(F.P(a, c)); br.push([ta, -(LIN + 0.24), LIN + 0.24]); decks.push([ta - (LIN + 0.35), ta + LIN + 0.35]); }
+    { const Pm = F.P(La + AIN, c); const o = AW + 16; const x = Pm[0] + d[0] * o, z = Pm[1] + d[1] * o; // promenade walk (bayPark: AW+14..AW+18 on the water side)
+      if (x <= shoreX(z) - 1.5) { br.push([tBv, AW + 13.8, AW + 18.2]); decks.push([tBv + AW + 13.6, tBv + AW + 18.4]); const ang = Math.atan2(-d[1], d[0]);
+        deck(fab, x, z, -0.8, 4.8, 24.2, 0.735, ang); for (const e of [-2.2, 2.2]) edgeWall(fab, x + d[0] * e, z + d[1] * e, 0.2, 26, 0.95, ang); } }
+    (fab.canals = fab.canals || []).push({ A, B, d, hw: 12, br, decks });
     // the coastal boulevard crosses on a short bridge: parapets either side of the canal
-    const P = F.P(La + AIN, c); const n = [-d[1], d[0]]; for (const o of [-(AW + 0.4), AW + 0.4]) addBody(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0]), [0.86, 0.84, 0.8], 7, null, false); void n; }
+    const P = F.P(La + AIN, c); const n = [-d[1], d[0]]; for (const o of [-(AW + 0.4), AW + 0.4]) { addBody(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0]), [0.86, 0.84, 0.8], 7, null, false); parapet(fab, P[0] + d[0] * o, P[1] + d[1] * o, 0.45, 2 * 12 + 2, 1.05, Math.atan2(-d[1], d[0])); }
+    // a_bridgewalk: boulevard deck slab (inland sidewalk edge to the outer face of the coast-side parapet) + inland edge wall
+    { const ang = Math.atan2(-d[1], d[0]); const lo = -(AIN + 0.3), hi = AW + 0.7; const m = (lo + hi) / 2; deck(fab, P[0] + d[0] * m, P[1] + d[1] * m, -0.8, hi - lo, 24.2, 0.735, ang);
+      const e = -(AIN + 0.12); edgeWall(fab, P[0] + d[0] * e, P[1] + d[1] * e, 0.24, 26, 0.95, ang); } void n; }
 }
-function wallRun(fab, F, a0, a1, b, col) { const ang = fang(F, (a0 + a1) / 2, b); for (let a = a0 + 2; a < a1 - 2; a += 40) { const ae = Math.min(a1 - 2, a + 40); const p = F.P((a + ae) / 2, b); addBody(fab, p[0], p[1], 0, ae - a, 0.35, 2.1, ang, [0.86, 0.82, 0.74], 7, col); } }
+// a_orphans: canal-bridge parapets are drawn without colliders (addBody collide=false); colfix adds these boxes after every layer
+// is placed (same OBB as addBody would make), so the fabric layout and every later layer's free-space checks stay unchanged
+// a_bridgewalk: deck slabs / edge walls go straight into the body instances (addBody would draw fab.R() and shift every later
+// placement); kind 7 = plain concrete like the parapets, so the existing body program draws them
+function deck(fab, cx, cz, y0, w, d, h, ang) { chunkOf(fab, cx, cz).I.body.push([cx, y0, cz, w, h, d, ang, 0.74, 0.73, 0.70, 7, 0.37]); }
+function edgeWall(fab, cx, cz, w, d, h, ang) { chunkOf(fab, cx, cz).I.body.push([cx, 0, cz, w, h, d, ang, 0.86, 0.84, 0.8, 7, 0.61]); parapet(fab, cx, cz, w, d, h, ang); }
+function parapet(fab, cx, cz, w, d, h, ang) { (fab.parapets = fab.parapets || []).push([cx, cz, Math.cos(ang), -Math.sin(ang), w / 2, d / 2, h]); }
+function wallRun(fab, F, a0, a1, b, col) { const ang = fang(F, (a0 + a1) / 2, b); for (let a = a0 + 2; a < a1 - 2; a += 40) { const ae = Math.min(a1 - 2, a + 40); const p = F.P((a + ae) / 2, b); addBody(fab, p[0], p[1], 0, ae - a, 0.35, 2.1, ang, [0.86, 0.82, 0.74], 7, col);
+  (fab.walls = fab.walls || []).push({ rec: lastRec(fab, p, 'body'), list: chunkOf(fab, p[0], p[1]).I.body, box: fab._lastBox }); } } // a_curbalign: curbfix.js cuts them where streets pass
 function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   const R = fab.R, rr = fab.rr; const fw = a1 - a0, depth = Math.abs(f1 - f0); if (depth < 18) return;
   const setback = rr(5.5, 8.5), hd = Math.min(depth - setback - 6, rr(10, 14)), hw = Math.max(8, fw - rr(3.5, 6.5));
@@ -310,36 +350,41 @@ function house(fab, F, a0, a1, f0, f1, s, col, canal) {
   const p = F.P(ac, bc); const ang = fang(F, ac, bc);
   const two = R() < (canal ? 0.5 : 0.28); const h = two ? rr(5.9, 6.6) : rr(3.2, 3.7);
   const wall = pickR(fab, WALLS); addBody(fab, p[0], p[1], 0, hw, hd, h, ang, wall, 0, col);
+  // a_curbalign: what curbfix.js needs about this lot (record references; no random draws)
+  const LT = { s, ang, canal, front: F.P(ac, f0), dfront: null, house: lastRec(fab, p, 'body'), box: fab._lastBox, roof: null, verge: null, yard: null, car: null, ftree: null, hedge: null, dock: null, boat: null };
+  (fab.lots = fab.lots || []).push(LT);
+  LT.quad = [F.P(a0, f0), F.P((a0 + a1) / 2, f0), F.P(a1, f0), F.P(a1, f1), F.P((a0 + a1) / 2, f1), F.P(a0, f1)]; LT.pool = null; LT.deck = null; LT.btree = null; // a_curbbake: lot outline + back-yard records (no random draws)
   const flat = R() < (canal ? 0.3 : 0.07);
-  if (!flat) addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, Math.min(hw, hd) * rr(0.22, 0.3), ang, pickR(fab, ROOFS));
+  if (!flat) { addRoof(fab, p[0], p[1], h, hw + 0.9, hd + 0.9, Math.min(hw, hd) * rr(0.22, 0.3), ang, pickR(fab, ROOFS)); LT.roof = lastRec(fab, p, 'roof'); }
   // driveway (verge part + yard part, skipping the sidewalk) on one side, car on it half the time
   const ds = R() < 0.5 ? -1 : 1; const ad = ac + ds * (hw / 2 - 1.8);
   const yardA = f0, yardB = f0 + s * setback; const pv = F.P(ad, (f0 - s * (LSW + LVG * 0.5)));
-  addFlat(fab, ...F.P(ad, f0 - s * (LSW + LVG / 2) + 0), 3.2, LVG + 0.2, ang, [0.66, 0.65, 0.62]); void pv;
-  const pm = F.P(ad, (yardA + yardB) / 2); addFlat(fab, pm[0], pm[1], 3.4, setback + 0.2, ang, [0.70, 0.69, 0.66]);
-  if (R() < 0.55) addCar(fab, ...F.P(ad, f0 + s * (setback * 0.45)), ang + Math.PI / 2, pickR(fab, CARS));
+  { const q = F.P(ad, f0 - s * (LSW + LVG / 2) + 0); addFlat(fab, ...q, 3.2, LVG + 0.2, ang, [0.66, 0.65, 0.62]); LT.verge = lastRec(fab, q, 'flat'); } void pv;
+  const pm = F.P(ad, (yardA + yardB) / 2); addFlat(fab, pm[0], pm[1], 3.4, setback + 0.2, ang, [0.70, 0.69, 0.66]); LT.yard = lastRec(fab, pm, 'flat'); LT.dfront = F.P(ad, f0);
+  if (R() < 0.55) { const q = F.P(ad, f0 + s * (setback * 0.45)); addCar(fab, ...q, ang + Math.PI / 2, pickR(fab, CARS)); LT.car = lastRec(fab, q, 'car'); }
   // back yard: pool + deck, trees, hedge on the back line
   const back0 = f0 + s * (setback + hd), yd = depth - setback - hd;
   if (yd > 8 && R() < (canal ? 0.75 : 0.42)) { const pb = back0 + s * (yd * 0.5); const pp = F.P(ac + rr(-2, 2), pb); const pw = rr(7, 10), pd = Math.min(yd - 4, rr(3.6, 5));
-    addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); addPool(fab, pp[0], pp[1], pw, pd, ang); }
-  if (R() < 0.6) { const t = F.P(a0 + rr(2, fw - 2), back0 + s * rr(2, yd - 1)); if (R() < 0.3) addPalm(fab, t[0], t[1], rr(7, 11)); else addTree(fab, t[0], t[1], rr(2.6, 4.6), rr(2.5, 4), pickR(fab, LEAF)); }
-  if (R() < 0.35) { const t = F.P(a0 + rr(2, fw - 2), f0 + s * rr(2, setback - 1.5)); if (R() < 0.4) addPalm(fab, t[0], t[1], rr(6, 10)); else addTree(fab, t[0], t[1], rr(2, 3.4), rr(2, 3), pickR(fab, LEAF)); }
-  if (!canal && R() < 0.5) { const hb = F.P(ac, f0 + s * (depth - 0.4)); addBody(fab, hb[0], hb[1], 0, fw - 0.4, 0.7, rr(1.4, 2.0), ang, [0.22, 0.32, 0.16], 6, null, false); }
-  if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); addFlat(fab, dk[0], dk[1], Math.min(10, fw - 4), 2.4, ang, [0.52, 0.42, 0.30], 0.35);
-    if (R() < 0.45) { const bt = F.P(ac + rr(-2, 2), f0 + s * (depth + 4.2)); addBody(fab, bt[0], bt[1], -0.8, rr(7, 11), 2.6, 1.6, ang, [0.95, 0.95, 0.94], 8, null, false); } }
+    addFlat(fab, pp[0], pp[1], pw + 2.4, pd + 2.4, ang, [0.84, 0.80, 0.72], 0.016); LT.deck = lastRec(fab, pp, 'flat'); addPool(fab, pp[0], pp[1], pw, pd, ang); LT.pool = lastRec(fab, pp, 'pool'); }
+  if (R() < 0.6) { const t = F.P(a0 + rr(2, fw - 2), back0 + s * rr(2, yd - 1)); if (R() < 0.3) { addPalm(fab, t[0], t[1], rr(7, 11)); LT.btree = ['palm', lastRec(fab, t, 'palm')]; } else { addTree(fab, t[0], t[1], rr(2.6, 4.6), rr(2.5, 4), pickR(fab, LEAF)); LT.btree = ['tree', lastRec(fab, t, 'tree')]; } }
+  if (R() < 0.35) { const t = F.P(a0 + rr(2, fw - 2), f0 + s * rr(2, setback - 1.5)); if (R() < 0.4) { addPalm(fab, t[0], t[1], rr(6, 10)); LT.ftree = ['palm', lastRec(fab, t, 'palm')]; } else { addTree(fab, t[0], t[1], rr(2, 3.4), rr(2, 3), pickR(fab, LEAF)); LT.ftree = ['tree', lastRec(fab, t, 'tree')]; } }
+  if (!canal && R() < 0.5) { const hb = F.P(ac, f0 + s * (depth - 0.4)); addBody(fab, hb[0], hb[1], 0, fw - 0.4, 0.7, rr(1.4, 2.0), ang, [0.22, 0.32, 0.16], 6, null, false); LT.hedge = lastRec(fab, hb, 'body'); }
+  if (canal) { const dk = F.P(ac, f0 + s * (depth + 1.2)); addFlat(fab, dk[0], dk[1], Math.min(10, fw - 4), 2.4, ang, [0.52, 0.42, 0.30], 0.35); LT.dock = lastRec(fab, dk, 'flat');
+    if (R() < 0.45) { const bt = F.P(ac + rr(-2, 2), f0 + s * (depth + 4.2)); addBody(fab, bt[0], bt[1], -0.8, rr(7, 11), 2.6, 1.6, ang, [0.95, 0.95, 0.94], 8, null, false); LT.boat = lastRec(fab, bt, 'body'); } }
 }
 // strip-mall band facing the arterial at b = bEdge (dir +1 into the cell from b=0, -1 from b=Lb)
 function stripBand(fab, F, bEdge, dir, La, col) {
   const R = fab.R, rr = fab.rr; const B = (x) => bEdge + dir * x;
+  const SB = { P: F.P, bEdge, dir, La, shops: [], pad: null }; (fab.strips = fab.strips || []).push(SB); // a_strip: metadata only (no random draw)
   lotQuad(fab, fq(F, 2, La - 2, Math.min(B(0.5), B(42)), Math.max(B(0.5), B(42))), [0, La - 4], dir > 0 ? [0, 41.5] : [41.5, 0], 0);
   for (let a = 4; a < La - 4; a += rr(16, 22)) { const p = F.P(a, B(1.2)); addPalm(fab, p[0], p[1], rr(8, 12)); }
   let a = rr(6, 14);
   while (a < La - 30) { const L = Math.min(La - 6 - a, rr(45, 130)); if (L < 25) break; const dd = rr(17, 25), h = rr(5, 7.5);
-    const p = F.P(a + L / 2, B(42 + dd / 2)); addBody(fab, p[0], p[1], 0, L, dd, h, fang(F, a + L / 2, B(42)), pickR(fab, WALLS), 1, col);
+    const p = F.P(a + L / 2, B(42 + dd / 2)); addBody(fab, p[0], p[1], 0, L, dd, h, fang(F, a + L / 2, B(42)), pickR(fab, WALLS), 1, col); SB.shops.push({ a, L, dd, h, rec: lastRec(fab, p, 'body') });
     lotQuad(fab, fq(F, a - 2, a + L + 2, Math.min(B(42 + dd), B(42 + dd + 7)), Math.max(B(42 + dd), B(42 + dd + 7))), [0, 1], [0, 1], 2);
     a += L + rr(10, 28); }
   // pad building (fast food / bank) out in the lot
-  if (R() < 0.5 && La > 160) { const ap = rr(30, La - 30); const p = F.P(ap, B(15)); addBody(fab, p[0], p[1], 0, rr(14, 20), rr(11, 15), rr(4.5, 5.5), fang(F, ap, B(15)), pickR(fab, WALLS), 1, col); }
+  if (R() < 0.5 && La > 160) { const ap = rr(30, La - 30); const p = F.P(ap, B(15)); addBody(fab, p[0], p[1], 0, rr(14, 20), rr(11, 15), rr(4.5, 5.5), fang(F, ap, B(15)), pickR(fab, WALLS), 1, col); SB.pad = { ap, rec: lastRec(fab, p, 'body') }; }
   parkCars(fab, F, 2, La - 2, bEdge, dir, 41.5, 0.42);
 }
 // cars in stall rows of a striped lot (modules of 18 m across: stalls 0.6–5.9 and 12.4–17.8, 2.7 m wide along a)
@@ -454,6 +499,7 @@ function dtFill(fab, b, col) {
     const kind = r < 0.25 ? 5 : r < 0.6 ? 4 : 3; const h = kind === 5 ? rr(12, 21) : rr(14, 30) + tall * rr(15, 70);
     const wall = kind === 4 ? pickR(fab, [[0.78, 0.80, 0.82], [0.86, 0.86, 0.84], [0.70, 0.74, 0.78], [0.90, 0.88, 0.82]]) : kind === 5 ? [0.80, 0.79, 0.76] : pickR(fab, WALLS);
     addBody(fab, cx, cz, 0, w, d, h, 0, wall, kind, col);
+    { const I = chunkOf(fab, cx, cz).I.body; (fab.dtBodies || (fab.dtBodies = [])).push({ rec: I[I.length - 1], cx, cz, w, d, h, kind, b }); } // a_downtown: podium pass (downtown.js) reads these after the bake hashes
     if (kind !== 5 && h > 25 && R() < 0.6) addBody(fab, cx + rr(-w * 0.15, w * 0.15), cz + rr(-d * 0.15, d * 0.15), h, w * rr(0.45, 0.7), d * rr(0.45, 0.7), rr(4, 12), 0, wall, kind, col);
   }
 }
@@ -509,6 +555,37 @@ const HASH = `
 float fh12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float fnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(fh12(i),fh12(i+vec2(1,0)),f.x), mix(fh12(i+vec2(0,1)),fh12(i+vec2(1,1)),f.x), f.y); }
 `;
+// a_houses: seven-segment digit (house numbers) and a 4x4 ordered dither (pool screens), body program only
+// a_shopnight: a shop room behind flat glazing, read along the view ray (same idea as the a_downtown2 lobby): ceiling with troffer rows at
+// 3.0 m, a gondola-shelf line 2.2 m in (aisles every 2.6 m, packed shelves), a pale floor, the back wall 9 m in. Returns a light level
+// (~0.6 average, troffers ~2.6) that scales the glass's night glow; it falls back to the average with the pixel footprint (no shimmer).
+const SHOPIN = `
+vec3 sTint = vec3(1.0); // colour of what the ray hit (muted packaging / a brand band on the back wall)
+float shopIn(vec2 uv0, vec3 dV, vec3 fn, vec2 ft, float sd) {
+  float dn = max(-dot(dV, fn), 0.12 * length(dV)); vec2 pr = vec2(dot(dV.xz, ft), dV.y) / dn;
+  float tC = pr.y > 0.002 ? (3.0 - uv0.y) / pr.y : 99.0, tF = pr.y < -0.002 ? -uv0.y / pr.y : 99.0; float t = min(9.0, min(tC, tF)); float lv;
+  vec2 s2 = uv0 + pr * 2.2; float sx = s2.x / 2.6 + sd * 7.0;
+  if (t > 2.2 && s2.y < 1.65 && fract(sx) < 0.62) { vec2 g = floor(vec2(s2.x / 0.32, s2.y / 0.42)); lv = (0.45 + 0.5 * fh12(g + sd * 13.0)) * (1.0 - 0.6 * step(fract(s2.y / 0.42), 0.12)); t = 2.2; sTint = mix(vec3(1.0), 0.35 + 0.9 * vec3(fh12(g * 1.3 + 2.1), fh12(g + 7.7), fh12(g * 0.7 + sd)), 0.5); }
+  else if (t == tC) { vec2 c = uv0 + pr * tC; lv = 0.42 + 2.2 * step(abs(fract(c.x / 2.4 + sd) - 0.5), 0.2) * step(abs(fract(tC / 2.1) - 0.5), 0.14); }
+  else if (t == tF) { vec2 f = uv0 + pr * tF; lv = 0.62 + 0.12 * step(0.5, fract(f.x / 0.6) + 0.0 * f.y); }
+  else { vec2 b = uv0 + pr * 9.0; lv = 0.78 - 0.3 * step(b.y, 1.9) * step(0.4, fract(b.x / 1.3 + sd)); sTint = mix(vec3(1.0), 0.3 + 0.8 * vec3(fh12(vec2(sd, 1.0)), fh12(vec2(sd, 2.0)), fh12(vec2(sd, 3.0))), step(abs(b.y - 2.35), 0.22)); }
+  lv *= 1.0 - 0.28 * clamp(t / 9.0, 0.0, 1.0); float nr = 1.0 - smoothstep(0.06, 0.3, length(fwidth(vFW))); sTint = mix(vec3(1.0), sTint, nr);
+  return mix(0.66, lv, nr); }
+`;
+const HKFN = `
+float fsgD(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); } // a_signals: segment distance (pedestrian symbols)
+float hkSeg(vec2 p, int d){ int m = d==0?63: d==1?6: d==2?91: d==3?79: d==4?102: d==5?109: d==6?125: d==7?7: d==8?127:111; float t = 0.16; float s = 0.0;
+  if (p.x < 0.0 || p.x > 1.0) return 0.0;
+  if ((m & 1) != 0) s += step(1.0 - t, p.y) * step(t, p.x) * step(p.x, 1.0 - t);
+  if ((m & 2) != 0) s += step(1.0 - t, p.x) * step(0.5, p.y);
+  if ((m & 4) != 0) s += step(1.0 - t, p.x) * step(p.y, 0.5);
+  if ((m & 8) != 0) s += step(p.y, t) * step(t, p.x) * step(p.x, 1.0 - t);
+  if ((m & 16) != 0) s += step(p.x, t) * step(p.y, 0.5);
+  if ((m & 32) != 0) s += step(p.x, t) * step(0.5, p.y);
+  if ((m & 64) != 0) s += step(abs(p.y - 0.5), t * 0.5) * step(t, p.x) * step(p.x, 1.0 - t);
+  return min(s, 1.0); }
+float hkBayer(vec2 f){ ivec2 q = ivec2(mod(f, 4.0)); int i = q.x + q.y * 4; int b[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5); return (float(b[i]) + 0.5) / 16.0; }
+`;
 const IVERT = `
   { vec4 wq = vec4(transformed, 1.0);
   #ifdef USE_INSTANCING
@@ -524,9 +601,10 @@ function mats(M) {
     s.uniforms.tPl = { value: tPl }; s.uniforms.uNight = U.uNight;
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aK; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvK = aK; vFN = normalize((modelMatrix * vec4(normalize(mat3(instanceMatrix) * normal), 0.0)).xyz);' + IVERT);
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH)
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tPl; uniform float uNight; varying vec2 vK; varying vec3 vFW; varying vec3 vIB; varying float vIH; varying vec3 vFN;' + HASH + HKFN + (OLD_ASHOP ? '' : SHOPIN))
       .replace('#include <color_fragment>', `#include <color_fragment>
-  float fk = floor(vK.x + 0.5), fsd = vK.y; vec3 fn = normalize(vFN); float fy = vFW.y - vIB.y; float fGlass = 0.0, fLit = 0.0;
+  float fk = floor(vK.x + 0.5), fsd = vK.y;${OLD_ASHOP ? '' : ' float fOff = 0.0, fDr = 0.0; if (fsd > 1.5) { fDr = 1.0; fOff = step(3.5, fsd); fsd = fract(fsd); } vec3 fLC = vec3(1.0, 0.72, 0.42);'} if (vK.x < fk - 0.004 && hkBayer(gl_FragCoord.xy + vec2(2.0, 1.0)) < (fk - vK.x) / 0.45) discard; // a_housepolish: kit fade (fraction 0..-0.45)
+  vec3 fn = normalize(vFN); float fy = vFW.y - vIB.y; float fGlass = 0.0, fLit = 0.0, fEm = 0.0, fStrip = -1.0; // a_strip: fEm = self-lit (light boxes / lenses), fStrip = shop face class
   vec2 ft = vec2(-fn.z, fn.x); float fu = dot(vFW.xz, ft) + fsd * 37.0;
   vec3 ftex = texture2D(tPl, (abs(fn.y) > 0.5 ? vFW.xz : vec2(fu, vFW.y)) * 0.25).rgb / 0.63;
   diffuseColor.rgb *= mix(vec3(1.0), clamp(ftex, 0.7, 1.2), 0.5) * (0.92 + 0.12 * fnoise(vFW.xz * 0.05 + fsd * 9.0));
@@ -534,14 +612,99 @@ function mats(M) {
     if (fk > 0.5 && fk < 5.5) { float m = fnoise(vFW.xz * 0.21 + fsd * 5.0); diffuseColor.rgb = mix(vec3(0.74, 0.73, 0.70), vec3(0.88, 0.87, 0.84), fsd) * (0.82 + 0.25 * m);
       vec2 g = fract(vFW.xz / 9.0 + fsd * 3.0); float unitM = step(0.78, fh12(floor(vFW.xz / 9.0) + fsd)) * step(abs(g.x - 0.5), 0.17) * step(abs(g.y - 0.5), 0.17); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.43, 0.44), unitM); }
     if (fk > 5.5 && fk < 6.5) diffuseColor.rgb *= 0.8 + 0.4 * fnoise(vFW.xz * 1.7);
+    if (fk > 9.5 && fk < 10.5) { float r = length(vFW.xz - vIB.xz); float fan = step(r, 0.33) * (0.35 + 0.25 * step(0.5, fract(r / 0.045))); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09) + fan * 0.1, step(r, 0.33)); } // a_houses: AC fan grille
+    if (fk > 11.5 && fk < 12.5) { if (hkBayer(gl_FragCoord.xy) < 0.68) discard; } // a_houses: screen roof
   } else if (fn.y > -0.5) {
     if (fk < 0.5) { // house: punched windows (1 or 2 floors), a darker plinth
       float fl = floor(fy / 3.0); float wy = fy - fl * 3.0; vec2 c = vec2(floor(fu / 3.4), fl); float wx = fract(fu / 3.4);
       float win = step(0.28, wx) * step(wx, 0.72) * step(0.95, wy) * step(wy, 2.25) * step(fy, vIH - 0.4) * step(0.25, fh12(c + fsd * 11.0));
       fGlass = win; fLit = win * step(0.55, fh12(c * 1.7 + fsd));
       diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 0.45, fy)) * 0.25;
+      { // a_houses: close-range wall detail by look (1 地中海 2 牧场 3 海岸 4 现代), faded out with the pixel footprint (far view unchanged)
+        float hst = floor((vK.x - fk) * 10.0 + 0.5); float hsub = floor((vK.x - fk) * 50.0 + 0.5) - hst * 5.0; // a_housepolish: 牧场 sub-style 0..2
+        bool shL = hst > 2.5 && hst < 3.5 || hst > 1.5 && hst < 2.5 && hsub > 0.5 && hsub < 1.5, shA = hst > 1.5 && hst < 2.5 && hsub < 0.5, stoneW = hst > 1.5 && hst < 2.5 && hsub > 1.5;
+        float fNr = (1.0 - smoothstep(0.05, 0.16, length(fwidth(vFW)))) * step(0.5, hst);
+        if (fNr > 0.0) { vec3 base = diffuseColor.rgb; vec3 dc = base; float g = fGlass;
+          float wOn = step(fy, vIH - 0.4) * step(0.25, fh12(c + fsd * 11.0)); float wm = wx * 3.4; float inX = step(0.952, wm) * step(wm, 2.448), inY = step(0.95, wy) * step(wy, 2.25);
+          float fwid = hst > 3.5 ? 0.06 : hst < 1.5 ? 0.13 : 0.08; vec3 trimC = hst < 1.5 ? vec3(0.95, 0.92, 0.84) : hst > 3.5 || stoneW ? vec3(0.13, 0.11, 0.10) : vec3(0.96, 0.96, 0.94);
+          dc *= 0.965 + 0.07 * fnoise(vec2(fu, fy) * 5.0); // stucco trowel
+          if (hst > 2.5 && hst < 3.5) dc *= 0.9 + 0.1 * smoothstep(0.0, 0.22, fract(fy / 0.19)); // lap siding
+          else { float vj = step(abs(fract(fu / 6.8 + 0.5) - 0.5) * 6.8, 0.012); dc *= 1.0 - 0.22 * vj; dc *= 1.0 - 0.25 * step(abs(fy - 3.0), 0.02) * step(4.5, vIH); } // control joints, floor reveal
+          dc *= 1.0 - 0.3 * step(abs(fy - 0.42), 0.015); // water-table reveal
+          if (stoneW) { float row = floor(fy / 0.17); float sx2 = fu / 0.42 + row * 0.5; float st = fh12(vec2(floor(sx2), row) + fsd * 13.0); // stone wainscot to 0.95 m, cap course
+            float jn = max(step(fract(fy / 0.17), 0.08), step(fract(sx2), 0.05)); vec3 sc2 = mix(vec3(0.62, 0.58, 0.52), vec3(0.80, 0.76, 0.68), st) * (1.0 - 0.35 * jn);
+            float inW = step(fy, 0.95); dc = mix(dc, sc2, inW); dc = mix(dc, vec3(0.84, 0.82, 0.77), step(0.95, fy) * step(fy, 1.02)); }
+          float fr = step(0.952 - fwid, wm) * step(wm, 2.448 + fwid) * step(0.95 - fwid, wy) * step(wy, 2.25 + fwid) * (1.0 - inX * inY) * wOn;
+          float sill = step(0.952 - fwid - 0.07, wm) * step(wm, 2.448 + fwid + 0.07) * step(0.95 - fwid - 0.07, wy) * step(wy, 0.95 - fwid) * wOn;
+          dc = mix(dc, trimC, max(fr, sill)); dc *= 1.0 - 0.35 * sill * step(wy, 0.95 - fwid - 0.045);
+          if (hst < 1.5 || shL) { float mun = (step(abs(wm - 1.7), 0.022) + step(abs(wy - 1.6), 0.022)) * inX * inY * wOn; g *= 1.0 - mun; dc = mix(dc, trimC, mun); }
+          float sh = fh12(vec2(fsd * 17.0, 3.0)); vec3 shC = sh < 0.25 ? vec3(0.14, 0.36, 0.38) : sh < 0.5 ? vec3(0.13, 0.19, 0.30) : sh < 0.75 ? vec3(0.42, 0.50, 0.40) : vec3(0.94, 0.94, 0.92);
+          if (shL) { // louvered shutters each side (海岸, 牧场 sub 1)
+            float sx = step(0.952 - fwid - 0.62, wm) * step(wm, 0.952 - fwid - 0.04) + step(2.448 + fwid + 0.04, wm) * step(wm, 2.448 + fwid + 0.62); sx *= step(0.95 - fwid, wy) * step(wy, 2.25 + fwid) * wOn;
+            float lv = 0.78 + 0.22 * smoothstep(0.0, 0.5, fract(wy / 0.055)); dc = mix(dc, shC * lv, sx); }
+          else if (shA) { // accordion storm shutters stacked open (牧场 sub 0)
+            float sx = step(0.952 - fwid - 0.2, wm) * step(wm, 0.952 - fwid - 0.01) + step(2.448 + fwid + 0.01, wm) * step(wm, 2.448 + fwid + 0.2); sx *= step(0.88, wy) * step(wy, 2.33) * wOn;
+            dc = mix(dc, vec3(0.78, 0.77, 0.72) * (0.75 + 0.25 * abs(sin(wm * 70.0))), sx); }
+          else if (hst < 1.5 && sh < 0.45) { // Bahama shutter propped over the upper window
+            float sx = step(0.952 - fwid, wm) * step(wm, 2.448 + fwid) * step(1.45, wy) * step(wy, 2.25 + fwid) * wOn; float lv = 0.8 + 0.2 * smoothstep(0.0, 0.5, fract(wy / 0.06));
+            dc = mix(dc, mix(shC, vec3(0.30, 0.42, 0.30), 0.5) * lv, sx); g *= 1.0 - sx; dc *= 1.0 - 0.3 * step(1.3, wy) * step(wy, 1.45) * inX * wOn; }
+          diffuseColor.rgb = mix(base, dc, fNr); fGlass = mix(fGlass, g, fNr); fLit *= mix(1.0, step(0.5, g), fNr); }
+      }
+    } else if (fk > 8.5) { // a_houses kit (vertical faces): 9 sectional garage door, 10 AC condenser, 11 house-number plaque, 12 screen, 13 entry door, 14 fence / gate boards
+      float lu = dot(vFW.xz - vIB.xz, ft); float fNr = 1.0 - smoothstep(0.04, 0.14, length(fwidth(vFW)));
+      if (fk < 9.5) { float shH = vIH / 4.0; float sec = fract(fy / shH); float px = fract(lu / 0.66 + 0.5); float ed = min(min(px, 1.0 - px) * 0.66, min(sec, 1.0 - sec) * shH);
+        float k = 0.86 + 0.14 * smoothstep(0.03, 0.08, ed); k *= 1.0 - 0.35 * (1.0 - step(0.012, min(sec, 1.0 - sec) * shH));
+        float top = step(3.0 * shH + 0.1, fy) * step(fy, vIH - 0.1) * step(0.06, ed) * step(0.6, fh12(vec2(fsd * 7.0, 1.0)));
+        diffuseColor.rgb *= mix(1.0, k, fNr); fGlass = top * fNr; }
+      else if (fk < 10.5) { float gr = step(0.08, fy) * step(fy, vIH - 0.08) * step(0.5, fract(lu / 0.035)); diffuseColor.rgb *= 1.0 - 0.45 * gr * fNr; }
+      else if (fk < 11.5) { vec2 dp = vec2(0.15 - lu, fy - 0.025) / vec2(0.1, 0.11); float n = floor(fsd * 900.0) + 100.0;
+        float dg = dp.x < 1.0 ? floor(n / 100.0) : dp.x < 2.0 ? mod(floor(n / 10.0), 10.0) : mod(n, 10.0); vec2 cp = vec2(fract(dp.x) * 1.25, dp.y);
+        float on = step(0.0, dp.x) * step(dp.x, 3.0) * step(0.0, dp.y) * step(dp.y, 1.0) * hkSeg(cp, int(dg)) * step(abs(fn.y), 0.5);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0) - diffuseColor.rgb * 0.85, on * fNr); }
+      else if (fk < 12.5) { if (hkBayer(gl_FragCoord.xy) < 0.68) discard; }
+      else if (fk < 13.5) { float lp = mod(lu + 40.0, 0.825) - 0.4125; float pa = step(0.07, abs(lp)) * step(abs(lp), 0.33); float py = step(0.25, fy) * step(fy, 0.95) + step(1.15, fy) * step(fy, 1.95);
+        float ed = pa * py; float rim = ed * (1.0 - step(0.1, abs(lp)) * 0.0); float bd = (1.0 - step(0.03, abs(abs(lp) - 0.07))) * py + (1.0 - step(0.03, abs(abs(lp) - 0.33))) * py;
+        diffuseColor.rgb *= mix(1.0, (0.92 + 0.08 * rim) * (1.0 - 0.3 * bd), fNr); float lite = step(1.95, fy) * step(fy, 2.08) * step(abs(lp), 0.33) * step(0.5, fh12(vec2(fsd * 5.0, 2.0))); fGlass = lite * fNr;
+        float knob = step(abs(abs(lp) - 0.36), 0.03) * step(abs(fy - 1.0), 0.05); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.75, 0.62, 0.36), knob * fNr); }
+      else if (fk > 14.5) { // a_strip kit: 15 shop entrance (3.0 m: double glass door + sidelites + transom, frame = instance colour), 16 light-box face, 17 lens (below)
+        if (fk < 15.5 && vIH < 2.0) { // a_stripfix: drive-through pickup window (1.5 x 1.35, frame = instance colour): fixed right half, left sash slid open over it, transom light
+          float ax = abs(lu); float fw = 0.055; float frm = max(max(step(0.75 - fw, ax), step(fy, fw)), step(vIH - fw, fy)); float tb = step(abs(fy - (vIH - 0.36)), 0.022);
+          float meet = step(abs(lu - 0.02), 0.024) * step(fy, vIH - 0.36); float st2 = step(abs(lu + 0.33), 0.024) * step(fy, vIH - 0.36); // meeting stile, stile of the slid sash
+          float opn = step(lu, -0.36) * step(fw, fy) * step(fy, vIH - 0.38) * (1.0 - frm); float bars = max(max(frm, tb), max(meet, st2));
+          float glz = (1.0 - bars) * (1.0 - opn); float pull = step(abs(lu + 0.06), 0.012) * step(abs(fy - 0.62), 0.09);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.52, 0.40) * (0.85 + 0.15 * step(0.5, fract(fy * 3.0))), opn); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2), pull);
+          fGlass = glz * (1.0 - pull); fLit = max(fGlass * 0.9, opn * 0.6); }
+        else if (fk < 15.5) { float ax = abs(lu); float inD = step(ax, 0.9); float leaf = abs(ax - 0.45);
+          float g1 = inD * step(leaf, 0.39) * step(0.24, fy) * step(fy, 2.2); float g2 = (1.0 - inD) * step(0.95, ax) * step(ax, 1.44) * step(0.47, fy) * step(fy, 2.2);
+          float g3 = step(2.3, fy) * step(fy, vIH - 0.06) * step(ax, 1.44) * step(0.04, abs(ax - 0.9)); float g = max(max(g1, g2), g3);
+          float bar = inD * step(abs(fy - 1.05), 0.025) * step(leaf, 0.3); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.81, 0.82), bar);
+          float hrs = inD * step(abs(ax - 0.62), 0.12) * step(abs(fy - 1.5), 0.1) * step(0.5, fract(fy * 22.0)); // vinyl opening-hours lines
+          fGlass = g * (1.0 - bar) * (1.0 - hrs); fLit = fGlass;${OLD_ASHOP ? '' : ' if (fDr > 0.5) { fLit = fGlass * mix(0.40 * mix(0.8, 1.1, smoothstep(0.3, 2.6, fy)), 0.03, fOff); fLC = vec3(0.97, 0.88, 0.76); } /* a_shopnight: door lit with its tenant (open / closed) */'} diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92), hrs * g); }
+        else if (fk < 16.5) { float e = min(1.0, step(fy, 0.045) + step(vIH - 0.045, fy)); diffuseColor.rgb *= 1.0 - 0.5 * e; fEm = 1.0 - e; }${OLD_ASHOP ? '' : `
+        else if (fk > 20.5 && fk < 21.5) { // a_shopnight: strip tenant glazing panel (night only, dithered in with uNight), seed = mullion parity 0.5 + open 0.25 + 0.2 * tone
+          if (hkBayer(gl_FragCoord.xy) > uNight * 1.8 - 0.05) discard;
+          float pPar = step(0.5, fsd), pS = fsd - 0.5 * pPar, pOpen = step(0.25, pS), pT = clamp((pS - 0.25 * pOpen) / 0.2, 0.0, 1.0); float gy = fy + 0.45;
+          float m = fract(lu / 1.5 + 0.5 * pPar); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tb = step(abs(gy - 2.36), 0.03);
+          float frm = max(mul, tb); fGlass = 1.0 - frm; diffuseColor.rgb = mix(vec3(0.20, 0.20, 0.21), vec3(0.08, 0.11, 0.14), fGlass);
+          float lev = (0.24 + 0.12 * pT) * shopIn(vec2(lu, gy), vFW - cameraPosition, fn, ft, pT);
+          fLit = mix(0.035 * smoothstep(2.9, 1.2, gy), lev, pOpen); // closed: only a dim back-of-house light
+          fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.58, fract(pT * 7.13))) * mix(vec3(1.0), sTint, pOpen); }`} }
+      else { float bd = 1.0 - step(0.012, abs(fract(lu / 0.15 + 0.5) - 0.5) * 0.15); float rail = step(vIH - 0.12, fy) + step(abs(fy - 0.3), 0.05); diffuseColor.rgb *= mix(1.0, (1.0 - 0.3 * bd) * (1.0 - 0.12 * clamp(rail, 0.0, 1.0)), fNr); }
+    } else if (fk < 1.5 && vK.x - fk > 0.02) { // a_strip: strip-mall shop, the lot-side normal angle rides in the fraction (0.05..0.45)
+      float th = (vK.x - fk - 0.05) / 0.4 * 6.2831853; float fr = dot(fn.xz, vec2(cos(th), sin(th))); float lu = dot(vFW.xz - vIB.xz, ft);
+      float jt = step(abs(fract(lu / 6.0 + 0.5) - 0.5) * 6.0, 0.012); float cap = step(vIH - 0.18, fy), rev = step(abs(fy - (vIH - 0.62)), 0.03);
+      if (fr > 0.7) { fStrip = 1.0; // storefront: tile bulkhead, glass 0.45-3.0 m on a 1.5 m mullion grid (the kit's piers / doors sit on it), transom bar, stucco above the canopy
+        float m = fract(lu / 1.5); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tb = step(abs(fy - 2.36), 0.03);
+        float gl = step(0.45, fy) * step(fy, 3.0) * (1.0 - mul) * (1.0 - tb); fGlass = gl; ${OLD_ASHOP ? 'fLit = gl * 0.85 * step(0.25, fh12(vec2(floor(lu / 4.5), fsd)));' : 'fLit = gl * 0.28 * shopIn(vec2(lu, fy), vFW - cameraPosition, fn, ft, fsd) * step(0.3, fh12(vec2(floor(lu / 4.5), fsd))); fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.5, fh12(vec2(floor(lu / 4.5), fsd * 3.0)))) * sTint;'} // a_shopnight: level ~ island shop rooms, brighter under the ceiling, cool / warm (near: the tenant panels cover it)
+        float frm = step(0.42, fy) * step(fy, 3.04) * max(mul, tb); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.20, 0.20, 0.21), frm);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.34, 0.32, 0.30) * (0.9 + 0.1 * step(0.5, fract(lu / 0.3))), step(fy, 0.42));
+        diffuseColor.rgb *= (1.0 - 0.25 * rev) * (1.0 + 0.06 * cap); }
+      else if (fr < -0.7) { fStrip = 2.0; // service wall: steel doors every 12 m, control joints, a darker splash band
+        float dz = step(abs(fract(lu / 12.0 + 0.31) - 0.5) * 12.0, 0.48) * step(fy, 2.12); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.52, 0.53, 0.52), dz);
+        diffuseColor.rgb *= (1.0 - 0.2 * jt) * (1.0 - 0.15 * (1.0 - smoothstep(0.0, 0.6, fy))) * (1.0 - 0.25 * rev); }
+      else { fStrip = 3.0; diffuseColor.rgb *= (1.0 - 0.2 * jt) * (1.0 - 0.25 * rev) * (1.0 - 0.18 * (1.0 - smoothstep(0.0, 0.45, fy))); }
     } else if (fk < 1.5) { // retail: storefront glazing band with mullions, painted sign band, parapet line
-      float mull = step(0.06, fract(fu / 3.0)); float gl = step(0.35, fy) * step(fy, 3.3) * mull; fGlass = gl; fLit = gl * 0.8;
+      float mull = step(0.06, fract(fu / 3.0)); float gl = step(0.35, fy) * step(fy, 3.3) * mull; fGlass = gl; ${OLD_ASHOP ? 'fLit = gl * 0.8;' : 'float rb = floor(fu / 9.0); fLit = gl * (0.24 + 0.1 * fh12(vec2(rb, fsd * 7.0))) * shopIn(vec2(fu, fy), vFW - cameraPosition, fn, ft, fsd + rb * 0.37) * step(0.3, fh12(vec2(rb, fsd * 5.0 + 1.7))); fLC = mix(vec3(0.90, 0.93, 0.97), vec3(1.0, 0.80, 0.58), step(0.5, fh12(vec2(rb, fsd * 3.0)))) * sTint;'} // a_shopnight: 9 m shop bays, ~70 % open at night
       float sb = step(3.65, fy) * step(fy, 4.75) * step(0.35, fract(fu / 47.0 + fsd));
       vec3 sc = mix(vec3(0.62, 0.16, 0.12), vec3(0.14, 0.34, 0.52), step(0.5, fh12(vec2(floor(fu / 47.0 + fsd), fsd))));
       diffuseColor.rgb = mix(diffuseColor.rgb, sc, sb * 0.85); diffuseColor.rgb *= 1.0 - step(vIH - 0.35, fy) * 0.18;
@@ -562,14 +725,94 @@ function mats(M) {
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.08, 0.085, 0.09), open);
     } else if (fk < 6.5) { diffuseColor.rgb *= 0.75 + 0.45 * fnoise(vec2(fu, fy) * 2.3); } // hedge
   }
+  float dtCov = -1.0; // a_downtown: downtown podium coverage for the far-view average (-1 = not a podium pixel)
+  if (fn.y > -0.5 && fn.y < 0.5) {
+    float dtF = vK.x - fk; bool dtM = fk > 2.5 && fk < 5.5 && dtF > 0.1; float lu = dot(vFW.xz - vIB.xz, ft);
+    // dtM: generated downtown mid-rise (3 residential 4 office 5 garage, street face in the fraction); 18 lobby glazing panel (towers)
+    float GF = dtM ? (fk < 3.5 ? 4.4 : fk < 4.5 ? 4.8 : 3.8) : vIH;
+    if ((dtM || (fk > 17.5 && fk < 18.5)) && fy < GF) {
+      float sF = floor((dtF - 0.15) / 0.07 + 0.5); vec2 sN = !dtM || sF > 3.5 ? vec2(0.0) : sF < 0.5 ? vec2(-1.0, 0.0) : sF < 1.5 ? vec2(1.0, 0.0) : sF < 2.5 ? vec2(0.0, -1.0) : vec2(0.0, 1.0);
+      float ent = step(0.9, dot(fn.xz, sN)) * step(abs(lu), 1.75); // double entrance door at the middle of the street face
+      float pl = step(fy, 0.55), fas = step(GF - 0.9, fy); float jn = step(fract(lu / 1.2 + 0.5), 0.025);
+      vec3 gran = mix(vec3(0.24, 0.235, 0.23), vec3(0.37, 0.355, 0.34), fh12(vec2(floor(lu / 1.2 + 0.5), fsd * 9.0))) * (1.0 - 0.45 * jn) * (1.0 - 0.3 * step(abs(fy - 0.53), 0.02));
+      vec3 fasC = vec3(0.72, 0.69, 0.63) * (1.0 - 0.35 * step(abs(fy - (GF - 0.45)), 0.018)) * (1.0 - 0.25 * step(GF - 0.06, fy)) * (1.0 - 0.3 * step(abs(fy - (GF - 0.9)), 0.03));
+      vec3 frmC = vec3(0.16, 0.15, 0.14);
+      if (dtM && fk > 4.5) { // garage base: board-formed concrete, a vehicle entry on the street face (striped header, clearance bar), louvre bands
+        float op = step(0.9, dot(fn.xz, sN)) * step(abs(lu), 3.1) * step(fy, 3.0); float hd = step(0.9, dot(fn.xz, sN)) * step(abs(lu), 3.4) * step(3.0, fy) * step(fy, 3.38);
+        vec3 conc = vec3(0.60, 0.59, 0.56) * (0.92 + 0.08 * step(0.5, fract(fy / 0.3))) * (1.0 - 0.3 * step(fract(lu / 4.0 + 0.5), 0.012));
+        float lv = (1.0 - op) * step(1.2, fy) * step(fy, 2.9) * step(0.12, fract(lu / 4.0 + 0.5)) * step(fract(lu / 4.0 + 0.5), 0.88) * step(0.45, fract(fy / 0.12));
+        vec3 c = mix(conc, vec3(0.13, 0.135, 0.14), lv); c = mix(c, gran, pl * (1.0 - op));
+        c = mix(c, mix(vec3(0.08), vec3(0.88, 0.70, 0.10), step(0.5, fract((lu + fy) / 0.5))), hd);
+        float bar = op * step(abs(fy - 2.45), 0.06) * step(abs(lu), 2.6); c = mix(c, mix(vec3(0.85, 0.66, 0.10), vec3(0.1), step(0.5, fract(lu / 0.6))), bar);
+        c = mix(c, vec3(0.045, 0.047, 0.05) * (1.0 + 2.0 * step(2.6, fy)), op * (1.0 - bar));
+        diffuseColor.rgb = c; fGlass = 0.0; fLit = 0.0; fEm = op * (1.0 - bar) * step(2.75, fy) * step(fy, 2.85) * step(0.5, fract(lu / 1.6)) * 0.6; dtCov = 0.0; }
+      else {
+        float m = fract(lu / 1.5 + 0.5); float mul = 1.0 - step(0.022, m) * step(m, 0.978); float tr = step(abs(fy - 3.2), 0.035) * step(4.0, GF);
+        float dr = ent * step(fy, 2.55); float ax = abs(lu); float dfr = ent * max(step(abs(fy - 2.55), 0.04), step(abs(ax - 0.875), 0.03) * step(fy, 2.55) + step(1.7, ax));
+        float bar = dr * step(abs(fy - 1.05), 0.022) * step(0.15, abs(ax - 0.875)) * step(abs(ax - 0.875), 0.62);
+        float pq = abs(fract(lu / 6.0 + 0.5) - 0.5) * 6.0; float pier = step(2.65, pq) * (1.0 - step(0.5, ent + step(abs(lu), 2.3) * step(0.9, dot(fn.xz, sN)))) * (1.0 - fas); // limestone pier every 6 m
+        float gl = (1.0 - pl) * (1.0 - fas) * (1.0 - max(mul * (1.0 - ent), tr)) * (1.0 - dfr) * (1.0 - bar) * (1.0 - pier);
+        vec3 lime = vec3(0.74, 0.71, 0.65) * (0.94 + 0.06 * fnoise(vec2(lu, fy) * 3.0)) * (1.0 - 0.3 * step(fract(fy / 0.9), 0.02));
+        vec3 room = mix(vec3(0.46, 0.42, 0.36), vec3(0.80, 0.75, 0.66), smoothstep(0.6, GF - 1.0, fy)) * (1.0 + 0.2 * step(GF - 1.35, fy)); // lobby seen through the glass
+        // a_downtown2: lobby depth behind the glass (view-ray parallax on the same program): pendant lights 2.4 m in, stone columns 3.6 m in
+        // (on the 6 m pier rhythm), a reception desk 5 m in on the entrance face, a polished floor and a washed back wall 7.5 m in
+        float iL = 1.0; { vec3 dV = vFW - cameraPosition; float dn = max(-dot(dV, fn), 0.12 * length(dV)); vec2 pr = vec2(dot(dV.xz, ft), dV.y) / dn; vec2 uv0 = vec2(lu, fy);
+          float tF = pr.y < -0.002 ? -fy / pr.y : 99.0; float tB = min(7.5, tF); vec2 bw = uv0 + pr * tB;
+          float wash = 0.62 + 0.5 * smoothstep(1.3, 0.0, abs(fract(bw.x / 3.0) - 0.5) * 3.0) * smoothstep(0.4, GF - 1.0, bw.y);
+          vec3 ic = tF < 7.5 ? mix(vec3(0.50, 0.47, 0.42), vec3(0.66, 0.62, 0.55), abs(step(0.5, fract(bw.x / 1.2)) - step(0.5, fract(tB / 1.2)))) : room * (0.85 + 0.15 * wash); iL = tF < 7.5 ? 0.62 + 0.25 * smoothstep(0.3, 0.0, abs(fract(bw.x / 3.0) - 0.5)) : wash;
+          float dsk = (dtM ? step(0.9, dot(fn.xz, sN)) : step(fh12(vec2(fsd * 7.0, 3.0)), 0.55)) * step(5.0, tF); vec2 d5 = uv0 + pr * 5.0;
+          float dk = dsk * step(abs(d5.x), 2.3) * step(d5.y, 1.08); ic = mix(ic, mix(vec3(0.34, 0.24, 0.17), vec3(0.82, 0.78, 0.70), step(0.98, d5.y)), dk); iL = mix(iL, 0.55 + 0.9 * step(0.98, d5.y), dk);
+          vec2 c3 = uv0 + pr * 3.6; float cl = step(abs(fract((c3.x - 3.0) / 6.0 + 0.5) - 0.5) * 6.0, 0.32) * step(c3.y, GF - 0.9) * step(3.6, tF);
+          ic = mix(ic, vec3(0.70, 0.67, 0.61) * (0.85 + 0.15 * step(0.0, (fract((c3.x - 3.0) / 6.0 + 0.5) - 0.5))), cl); iL = mix(iL, 0.45, cl);
+          vec2 p2 = uv0 + pr * 2.4; float pd = smoothstep(0.30, 0.10, length(vec2((fract(p2.x / 3.0) - 0.5) * 3.0, (p2.y - (GF - 1.75)) * 1.6))) * step(2.4, tF);
+          float cord = step(abs((fract(p2.x / 3.0) - 0.5) * 3.0), 0.012) * step(GF - 1.75, p2.y); ic = mix(ic, vec3(0.2), cord); ic = mix(ic, vec3(1.0, 0.93, 0.78), pd); iL = mix(iL, 2.4, pd);
+          room = ic; }
+        vec3 c = mix(mix(frmC, gran, pl * (1.0 - dr)), fasC, fas); c = mix(c, lime, pier * (1.0 - pl)); c = mix(c, vec3(0.78, 0.76, 0.72), bar); c = mix(c, vec3(0.12), dfr); c = mix(c, room, gl);
+        diffuseColor.rgb = c; fGlass = gl * 0.5; fLit = (0.62 + 0.38 * step(GF - 1.35, fy) + 0.25 * dr) * (0.8 + 0.2 * fh12(vec2(floor(lu / 6.0), fsd))) * 1.45 * mix(1.0, iL, gl); // lighter tint by day so the lit lobby reads through; fLit scaled so the night glow stays
+        dtCov = 0.6 * step(0.55, fy) * step(fy, GF - 0.9); } }
+    else if (fk > 18.5 && fk < 19.5) { // signal head: housing = instance colour, three lenses on the face the seed points at (seed = (lit + angle / 2pi) / 4, lit 0 red 1 amber 2 green)
+      float lt = floor(fsd * 4.0); float th = fract(fsd * 4.0) * 6.2831853; vec2 dv = vec2(cos(th), sin(th));
+      if (lt > 2.5) { // a_signals: pedestrian head, two cells (hand above, walking figure below), fraction = (quarter + state / 4 + 0.04) / 4
+        float pg = fract(fsd * 4.0) * 4.0; float pq = floor(pg); float pst = floor(fract(pg) * 4.0); th = pq * 1.5707963; dv = vec2(cos(th), sin(th));
+        if (dot(fn.xz, dv) > 0.7) { float cell = vIH * 0.5; float k = step(cell, fy); vec2 q = vec2(lu, fy - (k + 0.5) * cell) / cell; // q in cell units, -0.5..0.5
+          float frame = step(0.40, max(abs(q.x * 1.36), abs(q.y))); float vis = step(0.30, q.y) * step(abs(q.x), 0.36) * (1.0 - step(0.47, q.y));
+          float sym; vec3 lc; float on;
+          if (k > 0.5) { // raised hand (orange): palm + four fingers + thumb
+            vec2 h = q * 0.6; float palm = step(abs(h.x), 0.13) * step(-0.20, h.y) * step(h.y, 0.04);
+            float fg = 0.0; for (int i = 0; i < 4; i++) { float fx = -0.105 + float(i) * 0.07; float ft2 = 0.20 + 0.04 * (1.0 - abs(float(i) - 1.5) / 1.5); fg = max(fg, step(abs(h.x - fx), 0.026) * step(0.0, h.y) * step(h.y, ft2)); }
+            float th2 = step(fsgD(h, vec2(-0.13, -0.08), vec2(-0.22, 0.04)), 0.032);
+            sym = max(max(palm, fg), th2); lc = vec3(1.0, 0.46, 0.08); on = step(pst, 0.5); }
+          else { // walking figure (white): head, torso, arms, legs mid-stride
+            vec2 w = q * 0.6; float hd = step(length(w - vec2(0.03, 0.24)), 0.055);
+            float bd = min(fsgD(w, vec2(0.02, 0.15), vec2(-0.01, -0.04)), min(fsgD(w, vec2(-0.01, -0.04), vec2(-0.11, -0.24)), fsgD(w, vec2(-0.01, -0.04), vec2(0.09, -0.24))));
+            bd = min(bd, min(fsgD(w, vec2(0.02, 0.12), vec2(-0.09, 0.0)), fsgD(w, vec2(0.02, 0.12), vec2(0.11, 0.03))));
+            sym = max(hd, step(bd, 0.036)); lc = vec3(0.95, 0.96, 0.92); on = step(0.5, pst) * step(pst, 1.5); }
+          sym *= 1.0 - frame; diffuseColor.rgb = mix(diffuseColor.rgb * 0.55, mix(lc * 0.07, lc, on), sym); diffuseColor.rgb *= 1.0 - 0.5 * vis; fEm = sym * on * 1.25; } }
+      else if (dot(fn.xz, dv) > 0.7) { float cell = vIH / 3.0; float k = floor(fy / cell); vec2 q = vec2(lu, fy - (k + 0.5) * cell); float rr = length(q);
+        vec3 lc = k > 1.5 ? vec3(0.95, 0.10, 0.06) : k > 0.5 ? vec3(1.0, 0.62, 0.05) : vec3(0.10, 0.95, 0.55); float on = step(abs(k - (2.0 - lt)), 0.1);
+        float lens = step(rr, cell * 0.36); float vis = step(cell * 0.36, rr) * step(rr, cell * 0.44) * step(0.0, q.y);
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(lc * 0.12, lc, on), lens); diffuseColor.rgb *= 1.0 - 0.6 * vis; fEm = lens * on * 1.4; } }
+    else if (fk > 19.5 && fk < 20.5) { // lobby vestibule: glass box, revolving door (drum + wings) in the middle of the street face, swing doors each side
+      float th = fsd * 6.2831853; vec2 dv = vec2(cos(th), sin(th)); float fr = dot(fn.xz, dv); // seed = street-side normal angle / 2pi
+      float ax = abs(lu); float top = step(vIH - 0.42, fy); float m = fract(lu / 1.1 + 0.5); float mul = 1.0 - step(0.03, m) * step(m, 0.97);
+      float g = (1.0 - top) * step(0.06, fy); vec3 c = vec3(0.17, 0.16, 0.15);
+      if (fr > 0.7) { float drum = step(ax, 1.15); float post = drum * step(ax, 0.035); float wing = drum * step(abs(ax - 0.6), 0.025) * step(fy, 2.3);
+        float sw = (1.0 - drum) * step(ax, 2.1) * (step(abs(ax - 1.18), 0.05) + step(abs(fy - 1.0), 0.025) * step(abs(ax - 1.6), 0.25)); mul *= 1.0 - drum;
+        g *= (1.0 - post) * (1.0 - wing) * (1.0 - sw) * (1.0 - mul); c = mix(c, vec3(0.62, 0.58, 0.50), drum * step(abs(fy - 2.36), 0.05)); }
+      else g *= 1.0 - mul;
+      c = mix(c, vec3(0.56, 0.53, 0.48) * (1.0 - 0.3 * step(abs(fy - (vIH - 0.2)), 0.02)), top);
+      c = mix(c, mix(vec3(0.50, 0.46, 0.40), vec3(0.78, 0.73, 0.64), smoothstep(0.3, 2.4, fy)), g); diffuseColor.rgb = c; fGlass = g * 0.5; fLit = g * (0.8 + 0.5 * smoothstep(0.4, 2.6, fy)); dtCov = 0.6; } // a_downtown2: vestibule lit from above (was a flat 1.4 glow)
+  }
+  if (fk > 16.5 && fk < 17.5 && fn.y < -0.5) { diffuseColor.rgb = vec3(0.95, 0.93, 0.86); fEm = 1.6; } // a_strip: lot-light lens
   { // footprint anti-aliasing: past ~0.5 m per pixel the window grid becomes its average coverage (aerials sparkled white/black)
     float fAA = smoothstep(0.3, 1.1, length(fwidth(vFW))) * step(fn.y, 0.5) * step(-0.5, fn.y);
-    float cov = fk < 0.5 ? 0.13 : fk < 1.5 ? step(0.35, fy) * step(fy, 3.3) * 0.92 : fk < 2.5 ? step(vIH - 2.1, fy) * step(fy, vIH - 1.3) * 0.5 : fk < 3.5 ? 0.3 * step(0.6, fy) : fk < 4.5 ? 0.58 : 0.0;
+    float cov = fk < 0.5 ? 0.13 : fStrip > 1.5 ? 0.0 : fStrip > 0.5 ? step(0.45, fy) * step(fy, 3.0) * 0.9 : fk < 1.5 ? step(0.35, fy) * step(fy, 3.3) * 0.92 : fk < 2.5 ? step(vIH - 2.1, fy) * step(fy, vIH - 1.3) * 0.5 : fk < 3.5 ? 0.3 * step(0.6, fy) : fk < 4.5 ? 0.58 : 0.0;
+    if (dtCov >= 0.0) cov = dtCov; // a_downtown
     fGlass = mix(fGlass, cov, fAA); fLit = mix(fLit, 0.12, fAA); }
   vec3 fglassC = mix(vec3(0.07, 0.10, 0.13), vec3(0.14, 0.18, 0.22), fh12(vec2(fsd, fk)));
   diffuseColor.rgb = mix(diffuseColor.rgb, fglassC, fGlass);`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.12, fGlass); if (fk > 5.5 && fk < 6.5) roughnessFactor = 1.0;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * vec3(1.0, 0.72, 0.42) * 1.6;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += fLit * fGlass * uNight * ' + (OLD_ASHOP ? 'vec3(1.0, 0.72, 0.42)' : 'fLC') + ' * 1.6 + fEm * uNight * diffuseColor.rgb * 1.1;');
   });
   // b_envprog: roof / tree / flat differed only in one colour line -> one program, branch picked by uniform uFS (?oldenvmat: 3 programs)
   const fabSmall = (kind) => (s) => { s.uniforms.uFS = { value: kind };
@@ -584,7 +827,15 @@ function mats(M) {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>' + IVERT);
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vFW; varying vec3 vIB; varying float vIH;' + HASH)
       .replace('#include <color_fragment>', `#include <color_fragment>
-  { float rows = fract((vFW.y - vIB.y) * 3.2); diffuseColor.rgb *= 0.86 + 0.14 * smoothstep(0.0, 0.25, rows); diffuseColor.rgb *= 0.88 + 0.2 * fnoise(vFW.xz * 0.9 + vIB.xz); }`);
+  { float rows = fract((vFW.y - vIB.y) * 3.2); vec3 rc = diffuseColor.rgb; float warm = step(0.25, rc.r - rc.b), light = step(0.78, rc.r) * (1.0 - warm);
+    diffuseColor.rgb *= mix(0.86 + 0.14 * smoothstep(0.0, 0.25, rows), 1.0, light * 0.7); diffuseColor.rgb *= 0.88 + 0.2 * fnoise(vFW.xz * 0.9 + vIB.xz);
+    // a_houses: close range tile by roof colour: barrel (terracotta), staggered flat tile (grey / brown), standing seam (light metal)
+    float rNr = 1.0 - smoothstep(0.03, 0.11, length(fwidth(vFW)));
+    if (rNr > 0.0) { vec3 rn = cross(dFdx(vFW), dFdy(vFW)); vec2 rt = normalize(vec2(-rn.z, rn.x) + vec2(1e-6, 0.0)); float ru = dot(vFW.xz, rt); float row = floor((vFW.y - vIB.y) * 3.2); float k = 1.0;
+      if (warm > 0.5) { float b = sin(ru * 24.166 + row * 3.1416); k = (0.9 + 0.2 * b * b) * (0.9 + 0.2 * fh12(vec2(floor(ru / 0.26 + 0.5 * row), row) + vIB.xz)); }
+      else if (light > 0.5) { float sm = fract(ru / 0.45); k = 1.0 - 0.18 * (1.0 - step(0.025, sm)) + 0.08 * step(0.025, sm) * step(sm, 0.06); }
+      else { float j = fract(ru / 0.33 + 0.5 * mod(row, 2.0)); k = (1.0 - 0.25 * (1.0 - step(0.03, j))) * (0.94 + 0.12 * fh12(vec2(floor(ru / 0.33 + 0.5 * mod(row, 2.0)), row) + vIB.xz)); }
+      diffuseColor.rgb *= mix(1.0, k, rNr); } }`);
   });
   const tree = !OLDENV ? prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), 'fabS', fabSmall(1)) :
   prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92 }), 'fabTree', (s) => {
@@ -607,7 +858,8 @@ function mats(M) {
   const lot = prep(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 }), 'fabLot', (s) => {
     s.uniforms.tAs = { value: asph };
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 aP; varying vec4 vP; varying vec2 vLU; varying vec3 vFW;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvP = aP; vLU = uv; vFW = (modelMatrix * vec4(position, 1.0)).xyz;');
-    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tAs; varying vec4 vP; varying vec2 vLU; varying vec3 vFW;' + HASH)
+    s.uniforms.uLzA = { value: LOTZ.a }; s.uniforms.uLzB = { value: LOTZ.b };
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tAs; uniform vec4 uLzA[28]; uniform vec4 uLzB[28]; varying vec4 vP; varying vec2 vLU; varying vec3 vFW;' + HASH)
       .replace('#include <color_fragment>', `#include <color_fragment>
   { float mode = floor(vP.x + 0.5); vec3 as = texture2D(tAs, vFW.xz / 3.5).rgb; float n = fnoise(vFW.xz * 0.15) * 0.6 + fnoise(vFW.xz * 1.1) * 0.4;
     vec3 c = as * (0.82 + 0.3 * n);
@@ -624,6 +876,14 @@ function mats(M) {
       ln += step(abs(abs(q.y - 34.0) - 20.15), 0.09) * (step(q.x, 16.5) + step(88.5, q.x));
       c = mix(c, vec3(0.9), clamp(ln, 0.0, 1.0) * 0.9); }
     else { c = vec3(0.78, 0.76, 0.72) * (0.85 + 0.2 * n); }
+    for (int i = 0; i < 28; i++) { vec4 zA = uLzA[i], zB = uLzB[i]; if (zB.z < 0.5) break; vec2 d = vFW.xz - zA.xy; float la = d.x * zA.z - d.y * zA.w, lw = d.x * zA.w + d.y * zA.z; // a_strip zones (strip.js)
+      if (abs(la) < zB.x && abs(lw) < zB.y) {
+        if (zB.z < 1.5) { c = vec3(0.70, 0.69, 0.66) * (0.86 + 0.2 * n); vec2 g = abs(fract(vec2(la, lw) / 4.5) - 0.5); c *= 1.0 - 0.2 * step(0.485, max(g.x, g.y)); // filling-station apron: concrete slabs, oil stains, kerb band
+          c *= 1.0 - 0.22 * smoothstep(0.62, 0.85, fnoise(vFW.xz * 0.55)) * step(abs(lw), 6.0); c = mix(c, vec3(0.62, 0.61, 0.58), step(zB.x - 0.3, abs(la)) + step(zB.y - 0.3, abs(lw))); }
+        else { c = as * (0.80 + 0.28 * n); float e = step(zB.y - 0.15, abs(lw)) * step(0.5, fract(la / 3.0 + 0.25)) * zB.w + step(zB.y - 0.15, abs(lw)) * (1.0 - zB.w); // drive-through lane: no stalls, edge lines, arrows
+          float q = fract(la / 9.0) * 9.0 - 4.5; float ar = step(abs(lw), 0.11) * step(-1.8, q) * step(q, 0.2) + step(0.2, q) * step(q, 1.3) * step(abs(lw), (1.3 - q) * 0.62);
+          c = mix(c, vec3(0.90, 0.89, 0.84), clamp(e + ar, 0.0, 1.0) * 0.88); }
+        break; } }
     diffuseColor.rgb = c; }`);
   });
   const roadF = M.road.clone(); roadF.onBeforeCompile = M.road.onBeforeCompile; roadF.customProgramCacheKey = M.road.customProgramCacheKey; roadF.polygonOffset = true; roadF.polygonOffsetFactor = -1; roadF.polygonOffsetUnits = -4;
@@ -637,6 +897,7 @@ function mats(M) {
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vLP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvLP = position.xz;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNight; varying vec2 vLP;')
       .replace('#include <color_fragment>', '#include <color_fragment>\n  { float r = length(vLP) * 2.0; diffuseColor.rgb *= uNight * 0.62 * pow(max(0.0, 1.0 - r), 1.4); /* g3: pools read at street level */ }'); });
+  if (FAB_GLOW.c) glow.color.setRGB(...FAB_GLOW.c); // a_nightcheck (uniform only: same fabGlow program)
   MATS = { body, roof, tree, palm, trunk, car, lamp: lampM, glow, flat, pool, lot, road: roadF, walk: walkF };
   return MATS;
 }
@@ -648,6 +909,18 @@ function inst(geo, mat, n, fill, extra) {
   if (extra) for (const k in extra) geo === null || m.geometry.setAttribute(k, extra[k]);
   m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; m.computeBoundingSphere(); m.frustumCulled = true; return m;
 }
+// a_houses: the house kit draws on the existing fabBody program (same box geometry, same material object -> no new program)
+// a_strip: up to 28 oriented zones painted by the lot shader (strip.js fills them before the lot material exists): A = cx, cz, cos, sin; B = hl, hw, kind (1 apron 2 lane, 0 = end), dashed
+// a_nightcheck: night tuning of the map-A light pools (?oldanight = values before this pass). FAB_GLOW: fabric street-lamp pool decal
+// diameter (m) and linear colour (the fabGlow shader multiplies it by uNight * 0.62 * falloff); the old 24 m 0xffb070 pools overlapped
+// into one saturated orange carpet on the dense downtown / arterial grid.
+const _QN = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
+export const OLD_ANIGHT = _QN.has('oldanight');
+// a_shopnight: storefront night pass (strip-mall tenants open / closed, glass level + colour, walk / canopy light pools); ?oldashop = before
+export const OLD_ASHOP = _QN.has('oldashop');
+export const FAB_GLOW = OLD_ANIGHT ? { d: 24, c: null } : { d: 17, c: [0.92, 0.57, 0.29] };
+export const LOTZ = { a: new Float32Array(28 * 4), b: new Float32Array(28 * 4) };
+export function fabKit() { return { box: geos().box, body: MATS && MATS.body, flat: geos().flat, glow: MATS && MATS.glow }; }
 // attach: build every chunk's meshes once (resident; tiers toggle visibility), returns triangle counts
 export function attachFabric(fab, scene, M) {
   const G = geos(), MT = mats(M); let tris = 0, inst0 = 0;
@@ -659,7 +932,7 @@ export function attachFabric(fab, scene, M) {
     const pg = c.plaza.geometry(); if (pg) { add(new THREE.Mesh(pg, MT.walk), 'always'); tris += pg.index.count / 3; }
     const lg = c.lot.geometry('aP'); if (lg) { add(new THREE.Mesh(lg, MT.lot), 'always'); tris += lg.index.count / 3; }
     const I = c.I;
-    if (I.body.length) { const n = I.body.length; const ak = new Float32Array(n * 2); I.body.forEach((b, i) => { ak[i * 2] = b[10]; ak[i * 2 + 1] = b[11]; });
+    if (I.body.length) { const n = I.body.length; const ak = new Float32Array(n * 2); I.body.forEach((b, i) => { ak[i * 2] = b[10] + (b.hs || 0); ak[i * 2 + 1] = b[11]; }); // a_houses: house look in the fraction (0.1..0.4)
       const g = G.box.clone(); g.setAttribute('aK', new THREE.InstancedBufferAttribute(ak, 2));
       add(inst(g, MT.body, n, (i, m) => { const b = I.body[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), b[6]); m.compose(_v.set(b[0], b[1], b[2]), _q, _s.set(b[3], b[4], b[5])); return [b[7], b[8], b[9]]; }), 'bld', true); tris += n * 12; inst0 += n; }
     if (I.roof.length) { add(inst(G.roof, MT.roof, I.roof.length, (i, m) => { const b = I.roof[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), b[6]); m.compose(_v.set(b[0], b[1], b[2]), _q, _s.set(b[3], b[4], b[5])); return [b[7], b[8], b[9]]; }), 'bld', true); tris += I.roof.length * 6; }
@@ -672,7 +945,7 @@ export function attachFabric(fab, scene, M) {
     if (I.flat.length) { add(inst(G.flat, MT.flat, I.flat.length, (i, m) => { const p = I.flat[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), p[4]); m.compose(_v.set(p[0], p[8], p[1]), _q, _s.set(p[2], 1, p[3])); return [p[5], p[6], p[7]]; }), 'mid'); }
     if (I.lamp.length) { const n = I.lamp.length; const fillL = (sc, y) => (i, m) => { const p = I.lamp[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), p[2]); m.compose(_v.set(p[0], y, p[1]), _q, _s.set(sc, 1, sc)); return null; };
       add(inst(G.lamp, MT.lamp, n, fillL(1, 0)), 'near', false);
-      const gl = inst(G.flat, MT.glow, n, (i, m) => { const p = I.lamp[i]; const ox = Math.cos(p[2]) * 2.1, oz = -Math.sin(p[2]) * 2.1; m.compose(_v.set(p[0] + ox, 0.06, p[1] + oz), _q.identity(), _s.set(24, 1, 24)); return null; });
+      const gl = inst(G.flat, MT.glow, n, (i, m) => { const p = I.lamp[i]; const ox = Math.cos(p[2]) * 2.1, oz = -Math.sin(p[2]) * 2.1; m.compose(_v.set(p[0] + ox, 0.06, p[1] + oz), _q.identity(), _s.set(FAB_GLOW.d, 1, FAB_GLOW.d)); return null; });
       gl.renderOrder = 2; add(gl, 'night', false); }
     if (I.pool.length) { add(inst(G.flat, MT.pool, I.pool.length, (i, m) => { const p = I.pool[i]; _q.setFromAxisAngle(_v.set(0, 1, 0), p[4]); m.compose(_v.set(p[0], 0.03, p[1]), _q, _s.set(p[2], 1, p[3])); return null; }), 'mid'); }
     c.meshes = ms; c.I = null; c.road = c.walk = c.plaza = c.lot = null;
@@ -693,4 +966,6 @@ export function updateFabric(fab, cam) {
     for (const m of ms.night) { m.visible = U.uNight.value > 0.03 && d < 3200; m.receiveShadow = false; } }
 }
 // ground under the canals: notch polygons for city.js / region.js (water shows through), and a land query
+// a_orphans: inCanal() minus the bridge decks (region groundH only; inCanal itself is unchanged so the tree pass keeps its RNG order)
+export function inCanalWater(fab, x, z) { if (!fab.canals) return false; for (const c of fab.canals) { const d = sub(c.B, c.A), L = len2(d); const t = ((x - c.A[0]) * d[0] + (z - c.A[1]) * d[1]) / L; if (t < 0 || t > L) continue; const o = Math.abs((x - c.A[0]) * -d[1] + (z - c.A[1]) * d[0]) / L; if (o < c.hw && !(c.br && c.br.some(([tb, lo, hi]) => t - tb > lo && t - tb < hi))) return true; } return false; }
 export function inCanal(fab, x, z) { if (!fab.canals) return false; for (const c of fab.canals) { const d = sub(c.B, c.A), L = len2(d); const t = ((x - c.A[0]) * d[0] + (z - c.A[1]) * d[1]) / L; if (t < 0 || t > L) continue; const o = Math.abs((x - c.A[0]) * -d[1] + (z - c.A[1]) * d[0]) / L; if (o < c.hw) return true; } return false; }

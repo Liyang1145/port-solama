@@ -8,6 +8,14 @@ import { setCSM, buildingMaterial, roadMaterial, simpleMats, M } from './mats.js
 import { buildCity } from './city.js';
 import { buildVegetation } from './veg.js';
 import { buildWater } from './water.js';
+import { buildPromenade } from './maps/gta/promenade.js';
+import { buildSignage } from './maps/gta/signage.js';
+import { buildBacklot } from './maps/gta/backlot.js';
+import { applyColliderFits } from './maps/gta/colfix.js';
+import { applyCurbColliders } from './maps/gta/curbfix.js';
+import { attachStreetColliders } from './maps/gta/edgewalls.js'; import { attachHouseColliders, KIT_LAYER } from './maps/gta/houses.js'; import { attachStripColliders } from './maps/gta/strip.js'; // a_edgewalls / a_strip
+import { fixCityProps } from './maps/gta/propfix.js';
+import { fixStreetParking, attachParkedColliders } from './maps/gta/parkfix.js';
 import { buildProps, updateProps, updateLampLights, updateNeonLights, buildFurniture } from './props.js';
 import { buildPost } from './post.js';
 import { Game } from './game.js';
@@ -89,6 +97,7 @@ async function load() {
   if (CYBER) { water.setBed(bedTexture(city.bedH)); stream = new Stream(scene, M, city.parcels); city.stream = stream; }
   mark('world.build+stream');
   addStreetTrees(city);
+  if (!CYBER) city.propFix = fixCityProps(city); // a_canaledge: lamps / palms / trees / shrubs standing in the water moved to land or dropped (after placement, RNG untouched)
   if (!CYBER) city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
   const veg = buildVegetation(scene, city, T);
   if (CYBER) nature = buildNature(scene, city, T, city.wild);
@@ -96,6 +105,15 @@ async function load() {
   const props = buildProps(scene, city, T);
   buildFurniture(scene, city, G);
   const street = buildStreet(scene, city); const shopSigns = buildShopSigns(scene, city);
+  const prom = CYBER ? null : buildPromenade(scene, city); // a_promenade: map 索拉纳港 street-level detail (instanced, streamed)
+  const sign = CYBER ? null : buildSignage(scene, city); // a_signage: bus stops, road text, street-name posts, guide gantries (instanced, streamed)
+  const blot = CYBER ? null : buildBacklot(scene, city); // a_backlot: service lanes / back yards behind the inner-block rows (instanced, streamed)
+  if (!CYBER) city.parkFix = fixStreetParking(city); // a_parking: 海潮大道 kerb-lane slots: face the lane's traffic, clear of crosswalks / signals / hydrants / bus stops (after every layer)
+  if (!CYBER) city.curbCol = applyCurbColliders(city); // a_curbalign: boxes of the houses moved / yard walls cut off the streets (after every layer is placed)
+  if (!CYBER) applyColliderFits(city); // a_lane8fix: swap oversized / misplaced / orphan colliders for their visible footprint (after every layer is placed)
+  if (!CYBER) city.edgeCol = attachStreetColliders(city); // a_edgewalls: fabric street-light / street-tree trunks (own fine grid) + fitted boxes for the island kerb clutter that had none (after every layer)
+  if (!CYBER) { city.houseCol = attachHouseColliders(city); city.stripCol = attachStripColliders(city); if (city.region.fabric && (city.region.fabric.houseKit || city.region.fabric.stripKit)) { camera.layers.enable(KIT_LAYER); env.sunFar.shadow.camera.layers.enable(30); } } // a_houses: kit boxes (lazy per house cell) + the shadow kit is skipped by the far cascade
+  if (!CYBER) city.parkCol = attachParkedColliders(city); // a_parkcol: oriented boxes for the ~23k mainland parked cars (own fine grid, appended to col.query)
   if (CYBER) neon = buildNeon(scene, city);
   mark('props+furniture+street+neon');
   const post = buildPost(renderer, scene, camera, { ao: Q.get('ao') !== '0' });
@@ -169,7 +187,7 @@ async function load() {
     if (!CYBER) city.region.update(camera.position, SNAP ? 99 : 1);
     veg.update?.(camera.position);
     if (CYBER) { nature.update(camera.position); nature.frame(env, scene); neon.update(env.look.night, U.uTime.value); scene.fog.density = env.look.fogD * nature.fogMul(camera.position); }
-    updateProps(props, camera, env.look.night, game.trafficPhase || 0); street.update(env.look.night); shopSigns.update(env.look.night);
+    updateProps(props, camera, env.look.night, game.trafficPhase || 0); if (prom) prom.update(camera.position); if (sign) sign.update(camera.position, env.look.night, false, game.trafficPhase || 0); if (blot) blot.update(camera.position, env.look.night); street.update(env.look.night); shopSigns.update(env.look.night);
     updateLampLights(props, city.lamps, camera.position, env.look.night);
     updateNeonLights(props, city.signs, camera.position, env.look.night);
     renderer.toneMappingExposure = env.exposure; if (M.building.envMap) M.building.envMapIntensity = env.envIntensity * 1.1;

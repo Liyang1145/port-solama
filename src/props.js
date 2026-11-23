@@ -6,9 +6,32 @@ import { U } from './env.js';
 import { GeoBucket, box, prismWalls, rect } from './geo.js';
 import { mulberry } from './util.js';
 import { LAYOUT } from './city.js';
+import { serviceLanes } from './maps/gta/backlot.js';
 import { CYBER } from './mapsel.js';
 import { OLDENV2 } from './envprog.js'; // b_envprog2
-import { furnMat, PB } from './streetkit.js';
+import { SHOPS } from './maps/gta/shoppools.js'; // a_shopnight2
+import { furnMat, PB, stampAO, signalMastA, signalMastFarA, pedPoleA, hydrantA, bikeRackA, recycleBinA } from './streetkit.js';
+
+// a_props (map 索拉纳港): fine-detail parts (bolts, chains, buttons, cables, louvres) go into 160 m chunk meshes that are only
+// drawn within ~120 m of the camera; coarse parts merge into one always-on mesh per prop family.
+const FINE = new Map(), FINE_MESHES = [];
+function fineB(x, z) { const ix = Math.floor(x / 160), iz = Math.floor(z / 160), k = ix + ',' + iz; let e = FINE.get(k);
+  if (!e) FINE.set(k, e = { b: new GeoBucket({ aPbr: 3 }), x0: ix * 160, z0: iz * 160 }); return e.b; }
+// masts additionally: full model in 320 m 'mid' chunks drawn within ~260 m, a ~120-triangle far model in the same chunks otherwise
+const MIDF = new Map();
+function midB(x, z) { const ix = Math.floor(x / 320), iz = Math.floor(z / 320), k = ix + ',' + iz; let e = MIDF.get(k);
+  if (!e) MIDF.set(k, e = { b: new GeoBucket({ aPbr: 3 }), f: new GeoBucket({ aPbr: 3 }), x0: ix * 320, z0: iz * 320 }); return e; }
+function flushFine(scene) {
+  for (const e of FINE.values()) if (e.b.vc) { const m = new THREE.Mesh(e.b.build(), furnMat()); m.receiveShadow = true; m.visible = false; scene.add(m); FINE_MESHES.push({ m, x0: e.x0, z0: e.z0, s: 160, r: 120 }); }
+  FINE.clear();
+  for (const e of MIDF.values()) if (e.b.vc) { const m = new THREE.Mesh(e.b.build(), furnMat()); m.castShadow = true; m.receiveShadow = true; m.visible = false; scene.add(m);
+    const f = new THREE.Mesh(e.f.build(), furnMat()); f.castShadow = true; scene.add(f); FINE_MESHES.push({ m, far: f, x0: e.x0, z0: e.z0, s: 320, r: 260 }); }
+  MIDF.clear();
+}
+function stampMast(parts, far, m, y0) { const e = new THREE.Vector3().setFromMatrixPosition(m); const c = midB(e.x, e.z); stampAO(c.b, parts, m, y0, 0); stampAO(c.f, far, m, y0, 0); stampAO(fineB(e.x, e.z), parts, m, y0, 1); }
+// stamp a part list: lod-0 parts into the coarse bucket, lod-1 parts into the chunk bucket at (x, z); AO baked against ground y0
+function stampLod(coarse, parts, m, y0) { const e = new THREE.Vector3().setFromMatrixPosition(m); stampAO(coarse, parts, m, y0, 0); stampAO(fineB(e.x, e.z), parts, m, y0, 1); }
+
 
 function streetLightGeo() {
   const b = new GeoBucket();
@@ -85,6 +108,56 @@ function streetLightGeo2() {
   return mergeG(parts.map((g) => g.index ? g.toNonIndexed() : g));
 }
 
+// a_nightfix: 1.05 m beach bollard (8-sided open post, lens gap 0.875..0.955 m, cap; ~80 triangles) on the street-light material
+function bollardGeo() { const parts = []; const cy = (r0, r1, y0, y1, open) => { const c = new THREE.CylinderGeometry(r1, r0, y1 - y0, 8, 1, open); c.translate(0, (y0 + y1) / 2, 0); parts.push(c); };
+  cy(0.135, 0.13, 0, 0.05, true); cy(0.11, 0.1, 0.05, 0.86, true); cy(0.112, 0.112, 0.86, 0.875, true); cy(0.112, 0.112, 0.955, 0.97, true); // plinth, post, lens rings (lens = lamp-glow band 0.875..0.955)
+  const cap = new THREE.CylinderGeometry(0.09, 0.118, 0.07, 8, 1, false); cap.translate(0, 1.005, 0); parts.push(cap);
+  return mergeG(parts.map((g) => g.index ? g.toNonIndexed() : g)); }
+// a_nightfix: where the beach lights stand. Bollards: on the promenade side of the low beach wall (x1 - 0.67, 0.17 m from its inner
+// face) every 15 m, not within 4.5 m of a beach-access stair, a lamp or a tree; two at the foot of every access ramp (z +-2.0, the
+// ramp is +-1.2 wide) on the sand. Lifeguard towers: one lamp under the roof edge over the ramp (water side). Pools: wall bollards
+// spill 4-5 m onto the sand, the ramp pair lights the ramp foot, the tower lamp its ramp and the sand around it; the open sand stays
+// dark. One OBB collider per bollard (8-gon r 0.11: half 0.784 r, a_polecol). Fixed positions: no random draws.
+function beachNight(city) { const posts = [], lenses = [], pools = []; const col = city.col; const S = { wall: 0, ramp: 0, towers: 0, skipped: 0 };
+  const gh = (x, z) => Math.max(0, city.groundH(x, z));
+  const clear = (x, z) => { const l = col.query(x, z, 0.6); for (const b of l) if (b.maxX > x - 0.16 && b.minX < x + 0.16 && b.maxZ > z - 0.16 && b.minZ < z + 0.16 && b.h > 0.3) return false;
+    if (city.lamps.some((l) => Math.abs(l.x - x) < 4.5 && Math.abs(l.z - z) < 4.5)) return false;
+    for (const L of [city.palms, city.trees]) if (L && L.some((p) => Math.abs(p.x - x) < 1.2 && Math.abs(p.z - z) < 1.2)) return false; return true; };
+  const post = (x, z) => { const y = gh(x, z); posts.push([x, y, z]); lenses.push([x, y + 0.875, z, 0.19, 0.08]); const h = 0.784 * 0.11; col.addOBB(x, z, 1, 0, h, h, 1.05, 'bollard'); };
+  for (const b of city.blocks || []) { if (b.area !== 'promenade') continue; const zc = (b.z0 + b.z1) / 2 + 22, xw = b.x1 - 0.67;
+    for (let z = b.z0 + 8; z <= b.z1 - 8; z += 15) { if (Math.abs(z - zc) < 4.5) continue; if (!clear(xw, z)) { S.skipped++; continue; } post(xw, z); S.wall++;
+      const yp = Math.max(gh(xw, z), gh(b.x1 + 3, z)) + 0.05; pools.push([b.x1 + 0.2, z, 10.5, 8.5, yp]); }
+    const xr = b.x1 + 6.2; for (const s of [-1, 1]) { const z = zc + s * 2.0; if (!clear(xr, z)) { S.skipped++; continue; } post(xr, z); S.ramp++; }
+    pools.push([b.x1 + 6.6, zc, 9, 10]); }
+  for (const lg of city.deco.lifeguards) { const y0 = city.groundH(lg.x, lg.z); lenses.push([lg.x + 1.05, y0 + 4.36, lg.z, 0.2, 0.12]); pools.push([lg.x + 3.2, lg.z, 13, 11]); S.towers++; }
+  return { posts, lenses, pools, S }; }
+
+// a_portlamps (map A, ?oldaportlamps = off): believable port fixtures at night.
+// Marina piers: the a_nightfix low bollard (same geometry / lampMat / lamp-glow lens) on both deck edges every 12 m, half-way between
+// the edge piles (piles every 4 m from x0+1), 0.25 m in from the edge; a candidate inside a moored yacht's boarding gap (its aft
+// cockpit, x-Lh/2-0.6 .. x-0.3Lh+0.6 on that side) slides +-1/3/5 m (never onto a pile) or is dropped; the last one stays 3 m off the
+// seawall. Each bollard's pool is an ellipse on the deck (7 x 3 m, never past the deck edge). One OBB collider each (half 0.086 m).
+// North-bay shipyard gantry: 2 round high-bay floods under each beam (the bollard body scaled into a drum, lens disc underneath),
+// one big ground pool per flood pair biased into the yard, and a long light cone per flood (instances of the street-light cone).
+// Fixed positions, no random draws.
+function portNight(city) { const posts = [], lenses = [], pools = [], cones = []; const col = city.col; const S = { bollards: 0, slid: 0, dropped: 0, floods: 0, spacing: [] };
+  for (const l of city.lamps) { if (l.kind !== 'dock' || !l.pier) continue; const [x0, x1, pz, hw] = l.pier; const y = l.y;
+    for (const sd of [-1, 1]) { const zb = pz + sd * (hw - 0.25); let last = null;
+      const gaps = (l.berths || []).filter((b) => b[1] === sd).map(([bx, , Lh]) => [bx - Lh / 2 - 0.6, bx - Lh * 0.3 + 0.6]);
+      for (let xc = x0 + 7; xc <= x1 - 3; xc += 12) { let put = null;
+        for (const o of [0, -1, 1, -3, 3, -5, 5]) { const x = xc + o; if (x < x0 + 5 || x > x1 - 3) continue;
+          const pd = Math.abs(((x - x0 - 1) % 4 + 4) % 4); if (Math.min(pd, 4 - pd) < 0.6) continue; // edge pile
+          if (gaps.some(([a, b]) => x > a && x < b)) continue; put = x; if (o) S.slid++; break; }
+        if (put === null) { S.dropped++; continue; }
+        posts.push([put, y, zb, 1, 1]); lenses.push([put, y + 0.875, zb, 0.19, 0.08]); const h = 0.784 * 0.11; col.addOBB(put, zb, 1, 0, h, h, y + 1.05, 'bollard');
+        pools.push([put, pz + sd * 0.25, 7, 3.0, y + 0.045]); S.bollards++; if (last !== null) S.spacing.push(+(put - last).toFixed(1)); last = put; } } }
+  for (const yd of city.yards || []) { if (yd.kind !== 'shipyard') continue; const gx0 = yd.x0 + 3, gx1 = yd.x1 - 3, gz = yd.z0 + 2; const yb = 21.6; // gantry: beams y 22..24 at gz +-3, trolley at the middle
+    const gy = Math.max(0.2, city.groundH((gx0 + gx1) / 2, gz + 4)) + 0.05;
+    for (const t of [0.24, 0.76]) { const fx = gx0 + (gx1 - gx0) * t;
+      for (const dz of [-3, 3]) { posts.push([fx, yb, gz + dz, 2.6, 0.35]); lenses.push([fx, yb - 0.012, gz + dz, 0.62, 0.03]); cones.push([fx, yb - 0.05, gz + dz, 2.4, 1.25]); S.floods++; }
+      pools.push([fx, gz + 4, 26, 21, gy]); } }
+  return { posts, lenses, pools, cones, S }; }
+
 export function buildProps(scene, city, T) {
   const out = { lampLights: [] };
   const r = mulberry(99);
@@ -104,7 +177,21 @@ export function buildProps(scene, city, T) {
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position,1.0); }',
     fragmentShader: 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length(vUv-0.5)*2.0; float a = pow(max(1.0-d,0.0),2.2); gl_FragColor = vec4(uCol * a * uNight * 0.55, 1.0); }',
   });
-  const pools = new THREE.InstancedMesh(poolGeo, poolMat, lamps.length); pools.renderOrder = 2;
+  // a_nightcheck (map A, ?oldanight = off): the 「海风之眼」 wheel's bulb rings lit nothing below -> two extra instances of this pool
+  // (same draw, same program): an ellipse along the rim plane on each side of the boarding deck, which hides the centre (landmarks(): x 384, z 352)
+  // a_portnight (map A, ?oldaportnight = off): port-area night fixes
+  const OLD_PN = CYBER || /[?&]oldaportnight\b/.test(typeof location !== 'undefined' ? location.search : '');
+  const xPools = CYBER || /[?&]oldanight\b/.test(typeof location !== 'undefined' ? location.search : '') ? [] : [[384, 344.6, 30, 14], [384, 359.4, 30, 14]];
+  // a_nightfix (map A, ?oldanight2 / ?oldanight = off): low beach bollards (beach wall along the promenade, both sides of every
+  // beach-access ramp foot) and a lamp on each lifeguard tower, each with its pool as more instances of this same pool mesh
+  const BN = CYBER || /[?&]oldanight2?\b/.test(typeof location !== 'undefined' ? location.search : '') ? null : beachNight(city);
+  if (BN) for (const q of BN.pools) xPools.push(q);
+  const PN = CYBER || /[?&]oldaportlamps\b/.test(typeof location !== 'undefined' ? location.search : '') ? null : portNight(city); // a_portlamps
+  if (PN) for (const q of PN.pools) xPools.push(q);
+  // a_shopnight2 (map A; ?oldashop2 = none): island storefront pools (open shops only, from shoppools.js) as SHOP_CAP (640) more instances
+  // of this same pool mesh (same draw, same program), refilled by updateProps with the open shops within 200 m of the camera
+  const SHOP_CAP = !CYBER && SHOPS.isl.length ? 640 : 0, nFix = lamps.length + xPools.length;
+  const pools = new THREE.InstancedMesh(poolGeo, poolMat, nFix + SHOP_CAP); pools.renderOrder = 2;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1, 1, 1);
   const lampM = [];
   lamps.forEach((l, i) => {
@@ -112,8 +199,10 @@ export function buildProps(scene, city, T) {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ang);
     m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, s1); im.setMatrixAt(i, m4); glow.setMatrixAt(i, m4); const a = m4.clone();
     const hx = l.x + l.dir[0] * 3.05, hz = l.z + l.dir[1] * 3.05; l.hx = hx; l.hz = hz; l.hy = l.y + 9.0;
-    m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), CYBER ? POOL_S : s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
+    if (l.pool && !OLD_PN) { const [px, pz, sx, sz] = l.pool; m4.compose(new THREE.Vector3(px, l.y + 0.04, pz), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); } // a_portnight: marina pier lamp -> pool on the deck only (was a 16 m disc, 78% of it hovering 1.2 m over the water / through the moored yachts)
+    else m4.compose(new THREE.Vector3(hx, 0.04 + (city.groundH(hx, hz) > 0.1 ? 0.15 : 0), hz), new THREE.Quaternion(), CYBER ? POOL_S : s1); pools.setMatrixAt(i, m4); lampM.push([a, m4.clone(), l.x, l.z]);
   });
+  xPools.forEach(([x, z, sx, sz, py], k) => { m4.compose(new THREE.Vector3(x, py !== undefined ? py : Math.max(0, city.groundH(x, z)) + 0.16, z), new THREE.Quaternion(), new THREE.Vector3(sx / 16, 1, sz / 16)); pools.setMatrixAt(lamps.length + k, m4); }); // + 0.16: clears the sand ripple
   // light2: night light cones under the luminaires (in-scattering in the humid air): additive open cone, brightest just under
   // the lamp head, fading toward its rim (view-facing ratio) and the ground; warm sodium/LED white on 索拉纳港, the cyan/magenta
   // lamp tints on 霓港 (denser, rain-hazed air). One instanced draw, no depth reads.
@@ -141,15 +230,29 @@ export function buildProps(scene, city, T) {
     const VS = 'uniform float uPM; ' + head(coneMat.vertexShader) + 'varying vec2 vUv;\nvoid main(){ if (uPM > 0.5) {' + body(poolMat.vertexShader) + '} else {' + body(coneMat.vertexShader) + '\n} }';
     const FS = 'uniform float uPM; uniform vec3 uCol; ' + head(coneMat.fragmentShader) + 'varying vec2 vUv;\nvoid main(){ if (uPM > 0.5) {' + body(poolMat.fragmentShader) + '} else {' + body(coneMat.fragmentShader) + '\n} }';
     for (const [m, k] of [[poolMat, 1], [coneMat, 0]]) { m.vertexShader = VS; m.fragmentShader = FS; m.uniforms.uPM = { value: k }; }
-    pools.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(lamps.length * 3).fill(1), 3);
+    pools.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(pools.instanceMatrix.count * 3).fill(1), 3);
     poolMat.side = THREE.DoubleSide; poolMat.forceSinglePass = true; poolMat.userData.envCull = THREE.FrontSide; } // double-sided in the program like the cones, front-face culling restored after setMaterial (envprog.js)
-  const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length); cones.renderOrder = 3;
+  const cones = new THREE.InstancedMesh(coneGeo, coneMat, lamps.length + (PN ? PN.cones.length : 0)); cones.renderOrder = 3;
   { const cA = new THREE.Color(1.0, 0.66, 0.36), cL = new THREE.Color(1.0, 0.86, 0.68), cC = new THREE.Color(0.45, 0.82, 1.0), cM = new THREE.Color(1.0, 0.35, 0.85);
-    lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); }); }
+    lamps.forEach((l, i) => { const c = CYBER ? (i % 3 === 2 ? cM : cC) : (i % 4 === 3 ? cL : cA); l.mag = CYBER && i % 3 === 2; l.led = !CYBER && i % 4 === 3; cones.setMatrixAt(i, lampM[i][0]); cones.setColorAt(i, c); lampM[i].push(c); });
+    if (PN) PN.cones.forEach(([x, y, z, sy, k], j) => { m4.compose(new THREE.Vector3(x, y - 9.0 * sy, z - 2.95 * k), new THREE.Quaternion(), new THREE.Vector3(k, sy, k)); cones.setMatrixAt(lamps.length + j, m4); cones.setColorAt(lamps.length + j, cA); }); } // a_portlamps: gantry flood cones (apex at the lens)
+  if (BN && BN.posts.length) { // a_nightfix: bollard bodies on the street-light material, lenses / tower lamps on the lamp-glow material (same objects -> same programs)
+    const bm = new THREE.InstancedMesh(bollardGeo(), lampMat, BN.posts.length); bm.castShadow = true; bm.receiveShadow = true;
+    BN.posts.forEach(([x, y, z], i) => { m4.makeTranslation(x, y, z); bm.setMatrixAt(i, m4); }); bm.computeBoundingSphere(); scene.add(bm);
+    const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, true); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, BN.lenses.length);
+    BN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
+    out.beachNight = { posts: BN.posts.length, pools: BN.pools.length, lenses: BN.lenses.length, tris: bm.geometry.index ? bm.geometry.index.count / 3 * BN.posts.length : 0 }; }
+  if (PN && PN.posts.length) { // a_portlamps: pier bollards + gantry flood drums on the street-light material, lenses on the lamp-glow material (same objects -> same programs)
+    const pm = new THREE.InstancedMesh(bollardGeo(), lampMat, PN.posts.length); pm.castShadow = true; pm.receiveShadow = true;
+    PN.posts.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); pm.setMatrixAt(i, m4); }); pm.computeBoundingSphere(); pm.name = 'portLamps'; scene.add(pm);
+    const lg = new THREE.CylinderGeometry(0.5, 0.5, 1, 8, 1, false); lg.translate(0, 0.5, 0); const lm = new THREE.InstancedMesh(lg, glowMat, PN.lenses.length);
+    PN.lenses.forEach(([x, y, z, sx, sy], i) => { m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(sx, sy, sx)); lm.setMatrixAt(i, m4); }); lm.computeBoundingSphere(); scene.add(lm);
+    out.portNight = pm.userData.stats = Object.assign({ posts: PN.posts.length, lenses: PN.lenses.length, pools: PN.pools.length, cones: PN.cones.length }, PN.S); }
   for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
   if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
   out.lampGlow = glowMat; out.pools = pools;
+  if (SHOP_CAP) { pools.count = nFix; pools.computeBoundingSphere(); out.shopPools = SHOPS.islPools = { m: pools, nFix, cap: SHOP_CAP, at: null, n: 0 }; } // a_shopnight2
   // a pool of real point lights that follow the nearest lamps at night
   for (let i = 0; i < 10; i++) { const pl = new THREE.PointLight(0xffa860, 0, 30, 1.6); pl.castShadow = false; scene.add(pl); out.lampLights.push(pl); }
   // v4.1 neon practicals: 6 coloured point lights follow the nearest hotel neon signs at night (pink / cyan pools on the pavement)
@@ -296,10 +399,21 @@ export function buildProps(scene, city, T) {
   {
     const g = new GeoBucket(); const heads = [];
     const RH = 7;
+    const gA = CYBER ? null : new GeoBucket({ aPbr: 3 }); // a_props: map A signal assemblies (PBR furniture material, baked AO)
+    const near = (x, z, d) => city.palms.some((p) => Math.abs(p.x - x) < d && Math.abs(p.z - z) < d) || city.lamps.some((l) => Math.abs(l.x - x) < d && Math.abs(l.z - z) < d) || city.trees.some((t) => Math.abs(t.x - x) < d && Math.abs(t.z - z) < d);
     for (const it of city.inters) {
+      if (gA) { // a_props: pedestrian-signal poles on the two corners without a mast arm
+        for (const [sx, sz] of [[1, -1], [-1, 1]]) { const px = it.x + sx * (RH + 1.0), pz = it.z + sz * (RH + 1.0);
+          if (city.groundH(px, pz) < 0.1 || near(px, pz, 1.0)) continue;
+          stampLod(gA, pedPoleA(sx, sz), new THREE.Matrix4().makeTranslation(px, 0.15, pz), 0.15); city.col.add(px - 0.1, pz - 0.1, px + 0.1, pz + 0.1, 3.4, 'pole'); }
+      }
       for (const [sx, sz] of [[1, 1], [-1, -1]]) {
         const px = it.x + sx * (RH + 1.2), pz = it.z + sz * (RH + 1.2);
         const m = new THREE.Matrix4().makeTranslation(px, 0.15, pz);
+        if (gA) { // a_props: detailed mast arm (same pole / head positions as before)
+          { const pc = it.x > 170 ? [0.06, 0.09, 0.075] : null; stampMast(signalMastA(sx, sz, pc), signalMastFarA(sx, sz, pc), m, 0.15); }
+          for (const d of [3, 6.5]) heads.push({ x: px - sx * d, y: 5.7 + 0.15, z: pz, face: sz, axis: 'z' });
+          city.col.add(px - 0.2, pz - 0.2, px + 0.2, pz + 0.2, 6, 'pole'); continue; }
         const pole = new THREE.CylinderGeometry(0.13, 0.16, 6.5, 8); pole.translate(0, 3.25, 0); g.geom(pole, m, {}, [0.75, 0.75, 0.72]);
         const arm = new THREE.CylinderGeometry(0.07, 0.09, 8.5, 6); arm.rotateZ(Math.PI / 2); arm.translate(-sx * 4.25, 6.3, 0); g.geom(arm, m, {}, [0.75, 0.75, 0.72]);
         for (const d of [3, 6.5]) { const h = new THREE.BoxGeometry(0.34, 1.04, 0.3); h.translate(-sx * d, 5.7, 0); g.geom(h, m, {}, [0.12, 0.12, 0.1]);
@@ -310,7 +424,8 @@ export function buildProps(scene, city, T) {
         city.col.add(px - 0.2, pz - 0.2, px + 0.2, pz + 0.2, 6, 'pole');
       }
     }
-    const mm = new THREE.Mesh(g.build(), M.vcol); mm.castShadow = true; mm.receiveShadow = true; scene.add(mm);
+    if (gA) { const ma = new THREE.Mesh(gA.build(), furnMat()); ma.castShadow = true; ma.receiveShadow = true; scene.add(ma); flushFine(scene); }
+    else { const mm = new THREE.Mesh(g.build(), M.vcol); mm.castShadow = true; mm.receiveShadow = true; scene.add(mm); }
     // signal lamps: small emissive quads; colour updated from the traffic phase
     const lg = new THREE.PlaneGeometry(0.22, 0.22);
     const red = new THREE.MeshBasicMaterial({ color: 0xff2a1a }), green = new THREE.MeshBasicMaterial({ color: 0x2aff8a });
@@ -328,8 +443,20 @@ export function buildProps(scene, city, T) {
   return out;
 }
 
+// a_shopnight2: island shop-front pools (sidewalk in front of each lit storefront unit: 0.9 x unit width, 4 m deep), within 200 m,
+// refilled every 25 m moved; the fixed lamp / bollard instances stay in front, so the lamp pools are untouched
+const SHOP_R = 200, _sq = new THREE.Quaternion(), _sY = new THREE.Vector3(0, 1, 0), _sv = new THREE.Vector3(), _ss = new THREE.Vector3(), _sm = new THREE.Matrix4();
+function shopPools(S, p) { const L = SHOPS.isl; if (S.at && S.at[2] === L.length && Math.hypot(p.x - S.at[0], p.z - S.at[1]) <= 25) return; S.at = [p.x, p.z, L.length];
+  const C = []; for (let i = 0; i + 5 < L.length; i += 6) { const d = Math.hypot(L[i] - p.x, L[i + 1] - p.z); if (d < SHOP_R && L[i + 3] > 0) C.push(d, i); }
+  const ord = []; for (let j = 0; j < C.length; j += 2) ord.push(j); if (ord.length > S.cap) ord.sort((a, b) => C[a] - C[b]); // nearest first when over capacity
+  let k = 0; for (const j of ord) { if (k >= S.cap) break; const i = C[j + 1];
+    _sm.compose(_sv.set(L[i], L[i + 5], L[i + 1]), _sq.setFromAxisAngle(_sY, L[i + 2]), _ss.set(L[i + 3] / 16, 1, L[i + 4] / 16)); S.m.setMatrixAt(S.nFix + k++, _sm); }
+  S.n = k; S.m.count = S.nFix + k; S.m.instanceMatrix.needsUpdate = true; S.m.computeBoundingSphere(); }
 export function updateProps(P, cam, night, phase) {
   const n = night;
+  if (P.shopPools) shopPools(P.shopPools, cam.position);
+  if (FINE_MESHES.length) { const cx = cam.position.x, cz = cam.position.z; // a_props: fine-detail chunks within ~120 m
+    for (const f of FINE_MESHES) { const dx = Math.max(f.x0 - cx, 0, cx - f.x0 - f.s), dz = Math.max(f.z0 - cz, 0, cz - f.z0 - f.s); const v = dx * dx + dz * dz < f.r * f.r; f.m.visible = v; if (f.far) f.far.visible = !v; } }
   { const L = P.lampCull, cx = cam.position.x, cz = cam.position.z; if (L && Math.hypot(cx - L.lx, cz - L.lz) > 25) { L.lx = cx; L.lz = cz; let k = 0;
     for (const [a, b, x, z, ci] of L.lampM) { if ((x - cx) ** 2 + (z - cz) ** 2 > 450 * 450) continue; L.im.setMatrixAt(k, a); L.glow.setMatrixAt(k, a); L.pools.setMatrixAt(k, b); L.cones.setMatrixAt(k, a); L.cones.setColorAt(k, ci); k++; }
     for (const m of [L.im, L.glow, L.pools, L.cones]) { m.count = k; m.instanceMatrix.needsUpdate = true; } L.cones.instanceColor.needsUpdate = true; } }
@@ -387,9 +514,12 @@ export function buildFurniture(scene, city, G = {}) {
   const PH = { hyd: [], bin: [], cafe: [] };
   const g = new GeoBucket(); const r = mulberry(4242);
   const add = (geo, m, c) => g.geom(geo, m, {}, c); const fb = new GeoBucket({ aPbr: 3 });
+  const fA = CYBER ? null : new GeoBucket({ aPbr: 3 }); // a_props: map A corner kit (hydrants, recycling bins, bike racks)
+  const occ = (x, z, d) => city.palms.some((p) => Math.abs(p.x - x) < d && Math.abs(p.z - z) < d) || city.lamps.some((l) => Math.abs(l.x - x) < d && Math.abs(l.z - z) < d) || city.trees.some((t) => Math.abs(t.x - x) < d && Math.abs(t.z - z) < d);
   const T = (x, y, z, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(1, 1, 1));
   const umbCols = [[0.95, 0.95, 0.92], [0.9, 0.35, 0.4], [0.2, 0.55, 0.6], [0.95, 0.75, 0.45], [0.3, 0.3, 0.32]];
   const parking = [];
+  const binQ = []; // a_edgewalls: [x, z, ry] of the litter bins (GLB or cylinder), boxed after every layer (maps/gta/edgewalls.js)
   // café sets in front of the Tideline hotels (x 276..279), skipping intersections
   for (const b of city.blocks) {
     if (b.area !== 'island' || b.x1 < 280 || b.x0 < 170) continue;
@@ -400,8 +530,10 @@ export function buildFurniture(scene, city, G = {}) {
       if (G.ph_cafe) { if (k % 2 === 0) PH.cafe.push(TR(x, y, z, r() * 0.3 - 0.15)); } else {
       const top = new THREE.CylinderGeometry(0.42, 0.42, 0.04, 14); add(top, T(x, y + 0.74, z), [0.92, 0.92, 0.9]);
       const leg = new THREE.CylinderGeometry(0.04, 0.05, 0.72, 6); add(leg, T(x, y + 0.36, z), [0.2, 0.2, 0.2]); }
+      const odd = k % 2 === 1;
       if (k++ % 2 === 0) { const um = new THREE.ConeGeometry(1.5, 0.5, 10, 1, true); add(um, T(x, y + 2.45, z), col); const p = new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6); add(p, T(x, y + 1.2, z), [0.85, 0.85, 0.85]); }
-      city.col.add(x - 0.5, z - 0.5, x + 0.5, z + 0.5, 1.0, 'cafe');
+      const cb = city.col.add(x - 0.5, z - 0.5, x + 0.5, z + 0.5, 1.0, 'cafe');
+      if (!CYBER && G.ph_cafe && odd) cb.fit = []; // a_lane8fix: with the café GLB only every other slot gets a set, so this slot is empty: orphan box, dropped by maps/gta/colfix.js
     }
     // parallel parking on the west curb lane of Tideline Drive
     for (let z = b.z0 + 10; z < b.z1 - 10; z += 6.8) parking.push({ x: 284.6, z, yaw: r() < 0.5 ? 0 : Math.PI, fill: r() < 0.65 });
@@ -412,19 +544,42 @@ export function buildFurniture(scene, city, G = {}) {
     if (!CYBER) { fb.geom(BG.wood, T(x, 0.15, z), { aPbr: PB.wood }, [0.55, 0.40, 0.28]); fb.geom(BG.iron, T(x, 0.15, z), { aPbr: PB.paint }, [0.06, 0.09, 0.08]); } // r6.3 PBR bench (weathered teak, painted cast iron)
     else { add(BG.wood, T(x, 0.15, z), [0.58, 0.42, 0.29]); add(BG.iron, T(x, 0.15, z), [0.12, 0.13, 0.13]); }
     city.col.add(x - 0.35, z - 0.95, x + 0.35, z + 0.95, 1, 'bench');
+    if (!CYBER) binQ.push([x, z + 3, Math.PI / 2]); // a_edgewalls: promenade bin beside the bench had no box
     if (G.ph_bin) PH.bin.push(TR(x, 0.15, z + 3, Math.PI / 2)); else { const bin = new THREE.CylinderGeometry(0.28, 0.25, 0.95, 10); add(bin, T(x, 0.62, z + 3), [0.15, 0.3, 0.25]); }
   }
   for (const it of city.inters) {
     if (it.x < -160) continue;
     const hx = it.x + 7 + 1.0, hz = it.z + 7 + 2.5; // hydrant on one corner
     const bx = it.x - 7 - 1.0, bz = it.z - 7 - 3.0;
-    if (G.ph_hydrant) { PH.hyd.push(TR(hx, 0.15, hz, r() * 6.28, 1.05)); PH.bin.push(TR(bx, 0.15, bz, r() * 6.28)); } else {
+    if (fA && G.ph_hydrant) { const ry = r() * 6.28; stampLod(fA, hydrantA(), TR(hx, 0.15, hz, ry), 0.15); { const ry = r() * 6.28; PH.bin.push(TR(bx, 0.15, bz, ry)); binQ.push([bx, bz, ry]); } // a_edgewalls: corner bin box (same draw); a_props: procedural Florida hydrant (same rng draws)
+      city.col.add(hx - 0.18, hz - 0.18, hx + 0.18, hz + 0.18, 0.8, 'hyd');
+      const rx = it.x + 7 + 1.2, rz = it.z - 7 - 3.2 - 0.85; // recycling bin beside street.js' corner litter bin (same occupancy rule it uses)
+      if (it.x > -200 && !occ(rx, rz + 0.85, 1.0) && !occ(rx, rz, 1.0)) { stampLod(fA, recycleBinA(), TR(rx, 0.15, rz, Math.PI / 2), 0.15); city.col.add(rx - 0.25, rz - 0.28, rx + 0.25, rz + 0.28, 1.0, 'rbin'); }
+    } else if (G.ph_hydrant) { PH.hyd.push(TR(hx, 0.15, hz, r() * 6.28, 1.05)); PH.bin.push(TR(bx, 0.15, bz, r() * 6.28)); } else {
     const h = new THREE.CylinderGeometry(0.13, 0.16, 0.65, 8); add(h, T(hx, 0.47, hz), [0.85, 0.75, 0.15]);
     const cap = new THREE.SphereGeometry(0.14, 8, 6); add(cap, T(hx, 0.82, hz), [0.85, 0.75, 0.15]);
     const bin = new THREE.CylinderGeometry(0.3, 0.27, 1.0, 10); add(bin, T(bx, 0.65, bz), [0.2, 0.22, 0.24]); }
   }
+  if (fA) { // a_props: bike racks mid-block on the island streets (own rng stream; kerb furniture zone, clear of lamps / palms / trees / colliders)
+    const rb = mulberry(5150); const box = [];
+    for (const s of city.segs) {
+      if (s.bridge || s.a1 - s.a0 < 44) continue; const isl = s.axis === 'z' ? s.c > -160 : s.a0 > -160; if (!isl) continue;
+      const a = (s.a0 + s.a1) / 2 + (rb() - 0.5) * 12, side = rb() < 0.5 ? -1 : 1, keep = rb() < 0.6, n = 2 + Math.floor(rb() * 3);
+      if (!keep || (s.axis === 'z' && s.c === 290 && side > 0)) continue;
+      const off = side * (7 + 1.75); const x = s.axis === 'z' ? s.c + off : a, z = s.axis === 'z' ? a : s.c + off; const hl = (n - 1) * 0.45 + 0.4;
+      if (city.groundH(x, z) < 0.1 || occ(x, z, 0.6 + hl)) continue;
+      const ex = s.axis === 'z' ? 0.45 : hl, ez = s.axis === 'z' ? hl : 0.45;
+      if (city.col.query(x, z, hl + 1, box).some((b) => b.maxX > x - ex && b.minX < x + ex && b.maxZ > z - ez && b.minZ < z + ez)) continue;
+      if (serviceLanes(city).some((L) => x + ex > L.x - L.hw - 0.6 && x - ex < L.x + L.hw + 0.6 && z + ez > L.z0 - 1 && z - ez < L.z1 + 1)) continue; // a_lane8fix: keep the service-lane aprons (a_backlot) clear: a rack across lane 8's mouth stopped walkers dead at the kerb
+      stampLod(fA, bikeRackA(n), TR(x, 0.15, z, s.axis === 'z' ? 0 : Math.PI / 2), 0.15); city.col.add(x - ex + 0.3, z - ez + 0.3, x + ex - 0.3, z + ez - 0.3, 0.9, 'bike');
+    }
+    const fm = new THREE.Mesh(fA.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); flushFine(scene);
+  }
   const mesh = new THREE.Mesh(g.build(), M.vcolCloth); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
   if (fb.vc) { const fm = new THREE.Mesh(fb.build(), furnMat()); fm.castShadow = true; fm.receiveShadow = true; scene.add(fm); }
+  if (!CYBER && binQ.length) { let hx = 0.3, hz = 0.3, hy = 1.1; // a_edgewalls: GLB footprint (as instGLB places it), else the 0.28 m cylinder
+    if (G.ph_bin) { const bb = new THREE.Box3().setFromObject(G.ph_bin.scene); hx = (bb.max.x - bb.min.x) / 2; hz = (bb.max.z - bb.min.z) / 2; hy = bb.max.y - bb.min.y + 0.15; }
+    for (const [x, z, ry] of binQ) (city.clutAdd = city.clutAdd || []).push({ k: 'bin', x, z, ang: ry, hl: hx, hw: hz, h: hy }); }
   instGLB(scene, G.ph_hydrant, PH.hyd, 'hyd'); instGLB(scene, G.ph_bin, PH.bin, 'bin'); instGLB(scene, G.ph_cafe, PH.cafe, 'cafe');
   city.parking = parking;
 }

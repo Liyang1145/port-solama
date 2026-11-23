@@ -4,6 +4,7 @@
 //
 //   import { getPOIs, nearestRoad, roadPointAhead, districtAt, isOnLand, randomRoadPoint, roadNetwork } from './mapapi.js';
 import { POI, MISSION_STARTS, REGION } from './mapdata.js';
+import { NS_NAME, EW_NAME } from './streetnames.js'; // a_streetnames: same table as the signs
 import { buildRegionData, districtAt as _districtAt, shoreX, westCoast, beachOff, ISLE } from './mapgeo.js';
 
 // Original Deco-district grid (mirrors LAYOUT in city.js): NS avenues x = 50/170/290, EW streets z = ±300/±150/0, half width 7
@@ -20,7 +21,7 @@ export function nearestRoad(x, z) {
   let best = null;
   const consider = (r) => { if (!best || r.dist - r.hw < best.dist - best.hw) best = r; };
   for (const c of GRID.ns) { const zz = Math.max(GRID.z0, Math.min(GRID.z1, z)); consider({ id: 'ns' + c, name: NS_NAME[c], kind: 'grid', x: c, z: zz, tx: 0, tz: 1, hw: GRID.hw, dist: Math.hypot(x - c, z - zz) }); }
-  for (const c of GRID.ew) { const xx = Math.max(GRID.x0, Math.min(GRID.x1, x)); consider({ id: 'ew' + c, name: c === 0 ? '日光大街' : '横街', kind: 'grid', x: xx, z: c, tx: 1, tz: 0, hw: GRID.hw, dist: Math.hypot(x - xx, z - c) }); }
+  for (const c of GRID.ew) { const xx = Math.max(GRID.x0, Math.min(GRID.x1, x)); consider({ id: 'ew' + c, name: EW_NAME[c] || '横街', kind: 'grid', x: xx, z: c, tx: 1, tz: 0, hw: GRID.hw, dist: Math.hypot(x - xx, z - c) }); }
   const D = buildRegionData(); const q = {};
   for (const r of D.roads) { const b = r.path.box; if (x < b[0] - 400 || x > b[2] + 400 || z < b[1] - 400 || z > b[3] + 400) continue;
     r.path.nearest(x, z, q); const p = r.path.at(q.s); consider({ id: r.id, name: r.name, kind: 'ribbon', x: p.x, z: p.z, tx: p.tx, tz: p.tz, hw: r.hw, dist: q.dist, s: q.s, deckY: r.h(q.s, p.x) }); }
@@ -61,4 +62,3 @@ export function roadNetwork() {
     junctions: D.junctions.map((J) => ({ id: J.id, x: J.x, z: J.z, roads: J.roads.map((q) => q.r.id) })),
     pieces: D.pieces.map((p) => ({ road: p.road.id, s0: p.s0, s1: p.s1, a: p.a, b: p.b })), grid: GRID };
 }
-const NS_NAME = { 50: '椰影大道', 170: '珊瑚大街', 290: '海潮大道' };

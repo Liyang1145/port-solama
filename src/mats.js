@@ -4,6 +4,7 @@ import { U } from './env.js';
 import { CYBER } from './mapsel.js'; // r6.0: v4.5 cyberpunk / weathering shader parts only on map 霓港
 import { SHOTFAST } from './shotfast.js'; // b_verify: test-only ?shotfast
 import { envReg, envPatch, envFamily, envMerger, envUberWrap, OLDENV, OLDENV2, ENVDBG } from './envprog.js'; // b_envprog: merged environment programs
+import { OLD_ASHOP2 } from './maps/gta/shoppools.js'; // a_shopnight2
 
 export const M = {}; // material registry
 let CSMREF = null; let ANISO = 8;
@@ -200,8 +201,10 @@ uniform sampler2D tConc; uniform float uNight; uniform float uTime; uniform floa
 vec3 neonPal(float h){ h = fract(h); return h < 0.3 ? vec3(1.0, 0.17, 0.84) : h < 0.58 ? vec3(0.1, 0.94, 1.0) : h < 0.8 ? vec3(0.55, 0.36, 1.0) : vec3(1.0, 0.32, 0.45); } flat varying vec3 vCol; flat varying vec3 vGlass; flat varying vec3 vUp; varying vec2 vUvM; varying vec3 vWPb;
 ${HASH}${SHOPROOM}`)
       .replace('#include <map_fragment>', `
-float style = floor(vWin.x + 0.5); float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
-vec2 cf = vec2(vUvM.x / ww, vUvM.y / fh); vec2 cid = floor(cf); vec2 f = fract(cf);
+${!CYBER && !OLD_ASHOP2 ? `float wx0_ = floor(vWin.x + 0.5); float shopM = floor(wx0_ / 8.0); float style = wx0_ - shopM * 8.0;` : `float style = floor(vWin.x + 0.5);`} float fh = vWin.y; float ww = vWin.z; float seed = vWin.w;
+vec2 cf = vec2(vUvM.x / ww, vUvM.y / fh); vec2 cid = floor(cf); vec2 f = fract(cf);${!CYBER && !OLD_ASHOP2 ? `
+// a_shopnight2: storefront open bits decided in JS (shoppools.js: aWin.x = style + 8 * (1 + mask), one bit per 2-bay unit); -1 = old hash
+float shopOn = shopM > 0.5 ? float(((int(shopM) - 1) >> int(clamp(floor(cid.x * 0.5), 0.0, 23.0))) & 1) : -1.0;` : ``}
 float rnd = h12(cid + seed * 17.0); float rnd2 = h12(cid.yx * 1.7 + seed * 3.1);
 float isGlass = 0.0; float frame = 0.0; float lit = 0.0; float interior = 0.0; float shade = 1.0; float isMetal = 0.0; float posterM = 0.0; vec3 posterC = vec3(1.0);
 vec3 wall = vCol;
@@ -402,7 +405,7 @@ col = mix(col, glassCol, isGlass);
 posterM *= 1.0 - aa; col = mix(col, posterC, posterM); isGlass *= 1.0 - posterM;
 diffuseColor.rgb *= col;
 ${CYBER ? `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.36 : 0.42);` : `float litChance = style == 3.0 ? 0.86 : (style == 0.0 ? 0.42 : 0.5);`}
-lit = max(lit, step(rnd, litChance));
+lit = max(lit, step(rnd, litChance));${!CYBER && !OLD_ASHOP2 ? ` if (style == 3.0 && shopOn > -0.5) lit = shopOn; // a_shopnight2` : ``}
 `)
       .replace('#include <roughnessmap_fragment>', `
 float roughnessFactor = roughness;
@@ -508,7 +511,7 @@ ${CYBER ? `  warm = mix(warm, neonPal(rnd * 3.7 + seed * 0.1) * 0.9 + 0.1, step(
   if (style == 3.0 && isGlass > 0.01 && aa < 0.99) { // r6.3 parallax shop room (near); far bays keep the flat interior above
     float unit = floor(cid.x * 0.5); float st3 = floor(h12(vec2(seed * 3.7, unit)) * 4.0); float sv = h12(vec2(unit * 1.37 + 0.5, seed * 2.9));
     float RW = 2.0 * ww; float ux = (cid.x - unit * 2.0 + f.x) * ww; float RD = 4.2 + 3.2 * h12(vec2(seed, unit + 0.5));
-    float onU = max(1.0 - n, step(h12(vec2(unit, seed * 5.3)), 0.86));
+    float onU = max(1.0 - n, ${!CYBER && !OLD_ASHOP2 ? `shopOn > -0.5 ? shopOn : ` : ``}step(h12(vec2(unit, seed * 5.3)), 0.86));
     vec3 rdS = vec3(vt_.xy, max(vt_.z, 0.06));
     gLod = max(smoothstep(0.42, 0.16, rdS.z / length(rdS)), smoothstep(0.02, 0.06, max(fw.x * ww, fw.y * fh)));
     vec3 roomS = shopRoom(vec2(clamp(ux, 0.02, RW - 0.02), clamp(f.y * fh, 0.05, fh * 0.86 - 0.05)), rdS, RW, fh * 0.86, RD, st3, sv, n, onU);
@@ -630,7 +633,7 @@ float u = vRd.x, v = vRd.y, L = vRd.z, kind = floor(vRd.w + 0.5);
 float au = abs(u);
 vec3 paintW = vec3(0.86, 0.86, 0.82), paintY = vec3(0.86, 0.66, 0.16);
 float wpaint = 0.0, ypaint = 0.0, bikeM = 0.0, bikeG = 0.0;
-float wear = vnoise(vRW.xz * 0.35) * 0.6 + vnoise(vRW.xz * 2.3) * 0.4;
+${CYBER ? '' : 'float sgTrW = 0.0; // a_signage: transverse markings (zebra / stop line / arrows) take tyre wear\n'}float wear = vnoise(vRW.xz * 0.35) * 0.6 + vnoise(vRW.xz * 2.3) * 0.4;
 if (kind == 0.0 || kind == 3.0) {
   float hw = kind == 3.0 ? 10.5 : 7.0;
   ypaint = max(bandM(u, 0.18, 0.12), bandM(u, -0.18, 0.12));
@@ -648,14 +651,14 @@ ${BG ? `  // b_ground: worn zebra — paint gone in the wheel paths, ragged stri
     zebra *= keep * mix(1.0, 0.55, step(0.8, zh)); }
 ` : ``}  float stopl = bandM(e, 5.0, 0.45) * step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, hw - 0.5);
   wpaint = max(wpaint, max(zebra, stopl));
-  if (e < 5.4) ypaint *= step(5.4, e);
+${CYBER ? '' : '  sgTrW = max(zebra, stopl);\n'}  if (e < 5.4) ypaint *= step(5.4, e);
   // v3.4 lane arrows before the stop line (GTA6_REFERENCE §6 road markings)
   float laneC = au < 3.5 ? 1.75 : 5.25; float ue = abs(au - laneC);
   float inb = step(0.3, u * sign(v - L * 0.5) * -1.0) * step(au, 6.6);
   float shaft = step(ue, 0.11) * step(9.0, e) * step(e, 11.6);
   float head = step(11.6, e) * step(e, 13.0) * step(ue, 0.42 * (13.0 - e) / 1.4);
   wpaint = max(wpaint, (shaft + head) * inb * step(30.0, L));
-  // green bike lanes on island/bayfront streets (not the beachfront drive with its parking lane)
+${CYBER ? '' : '  sgTrW = max(sgTrW, (shaft + head) * inb * step(30.0, L));\n'}  // green bike lanes on island/bayfront streets (not the beachfront drive with its parking lane)
   bikeM = (kind == 0.0 && vRW.x > -620.0 && (vRW.x < 268.0 || vRW.x > 312.0)) ? 1.0 : 0.0;
   float bikeBand = bandM(au, 6.15, 0.95) * bikeM * step(5.4, e);
   float bikeDash = step(e, 22.0) * step(fract(v / 3.0), 0.5);
@@ -666,7 +669,12 @@ ${BG ? `  // b_ground: worn zebra — paint gone in the wheel paths, ragged stri
   wpaint = bandM(au, 3.9, 0.14);
 }
 float paintMask = clamp(wpaint + ypaint, 0.0, 1.0) * (0.55 + 0.45 * smoothstep(0.25, 0.75, wear));
-vec3 asph = texelColor.rgb * diffuse;
+${CYBER ? '' : `// a_signage (map A): wheel paths 0.85 m either side of each lane centre polish the zebra bars / stop line / arrows down to
+// the asphalt in patches; fine chipping everywhere else on them
+float sgWheel = smoothstep(0.5, 0.12, abs(abs(fract(au / 3.5) * 3.5 - 1.75) - 0.85));
+float sgChip = smoothstep(0.3, 0.8, vnoise(vRW.xz * 6.5)) * 0.7 + smoothstep(0.55, 0.9, vnoise(vRW.xz * 21.0)) * 0.3;
+paintMask *= 1.0 - sgTrW * clamp(sgWheel * (0.3 + 0.55 * sgChip) + (1.0 - sgWheel) * 0.28 * sgChip, 0.0, 0.85);
+`}vec3 asph = texelColor.rgb * diffuse;
 // tyre tracks: darker, smoother bands in each lane centre
 float lanePos = abs(fract((au) / 3.5) - 0.5);
 float tracks = (kind == 1.0) ? 0.0 : smoothstep(0.32, 0.18, abs(lanePos - 0.25)) * 0.2;
@@ -778,14 +786,39 @@ export function simpleMats(T) {
   vec2 sq = sp * 0.55; vec2 si = floor(sq); float sh = fract(sin(dot(si, vec2(7.7, 113.3))) * 9134.1); float stain = step(0.82, sh) * smoothstep(0.42, 0.1, length(fract(sq) - 0.5 + (sh - 0.9) * 0.4));
   diffuseColor.rgb *= 1.0 - stain * 0.16;
   vec2 lc = fract(sp / 1.6); float ck = step(0.72, hs) * smoothstep(0.012, 0.0, abs(lc.y - 0.5 - 0.25 * sin(lc.x * 6.0 + hs * 20.0)) ) * step(abs(lc.x - 0.5), 0.3 + 0.2 * hs);
-  diffuseColor.rgb *= 1.0 - ck * 0.35; }`))
+  diffuseColor.rgb *= 1.0 - ck * 0.35;
+  // a_promenade: per-slab tone (pour batches), every third joint a wider tooled expansion joint with dark sealant, spalled
+  // slab corners, and a grime band along the kerb on the island streets (leaf litter, tyre dust, run-off), fading 0-0.9 m
+  diffuseColor.rgb *= 0.965 + 0.07 * hs;
+  vec2 ej = abs(fract(sp / 4.8) - 0.5); float ex = smoothstep(0.4935, 0.499, max(ej.x, ej.y)); diffuseColor.rgb *= 1.0 - ex * 0.42;
+  vec2 cq = abs(lc - 0.5); float sp2 = step(0.55, fract(hs * 7.3)) * smoothstep(0.43, 0.49, min(cq.x, cq.y)) * step(0.46, max(cq.x, cq.y)); diffuseColor.rgb *= 1.0 - sp2 * 0.22;
+  if (sp.x > -22.0 && sp.x < 335.0 && abs(sp.y) < 372.0) {
+    float dk = min(min(abs(abs(sp.x - 50.0) - 7.0), abs(abs(sp.x - 170.0) - 7.0)), abs(abs(sp.x - 290.0) - 7.0));
+    float zr = sp.y - floor((sp.y + 75.0) / 150.0) * 150.0; dk = min(dk, abs(abs(zr) - 7.0));
+    float gn = fract(sin(dot(floor(sp * 3.0), vec2(17.1, 91.7))) * 4375.85);
+    float band = smoothstep(0.95, 0.25, dk) * (0.55 + 0.45 * gn);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 0.75, 0.7), band * 0.6);
+  } }`))
       .replace('#include <fog_pars_fragment>', '#include <fog_pars_fragment>\nvarying vec3 vSWP;');
     s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSWP;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvSWP = (modelMatrix * vec4(position,1.0)).xyz;');
   }, 'sidewalk'));
   const pav = texSet(T, 'pavers', 1); for (const t of [pav.map, pav.normalMap, pav.roughnessMap]) t.repeat.set(1 / 2.5, 1 / 2.5);
   M.pavers = prep(new THREE.MeshStandardMaterial({ map: pav.map, normalMap: pav.normalMap, roughnessMap: pav.roughnessMap, color: 0xffffff, roughness: 1, ...(CYBER ? { polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -2 } : {}) }), 'pavers');
   const conc = texSet(T, 'concrete', 1); for (const t of [conc.map, conc.normalMap, conc.roughnessMap]) t.repeat.set(1 / 4, 1 / 4);
-  M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete');
+  M.concrete = prep(new THREE.MeshStandardMaterial({ map: conc.map, normalMap: conc.normalMap, roughnessMap: conc.roughnessMap, color: 0xffffff, roughness: 1 }), 'concrete', CYBER ? null : (s) => {
+    // a_promenade (map 索拉纳港): kerb wear on the low kerb geometry only (world y < 0.16): black tyre-rub streaks on the vertical
+    // face, chipped / lighter arris, dirt line at the gutter foot. Same program key, compiled once as before.
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvKW = (modelMatrix * vec4(position, 1.0)).xyz; vKN = normalize(mat3(modelMatrix) * normal);');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vKW; varying vec3 vKN;')
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+  if (vKW.y < 0.16) { float al = dot(vKW.xz, vec2(abs(vKN.z), abs(vKN.x))); float h1 = fract(sin(floor(al * 0.7) * 12.989) * 43758.5);
+    float face = 1.0 - abs(vKN.y); float ty = smoothstep(0.02, 0.07, vKW.y) * smoothstep(0.15, 0.09, vKW.y);
+    float rub = step(0.55, h1) * smoothstep(0.0, 0.25, fract(al * 0.7)) * smoothstep(1.0, 0.6, fract(al * 0.7)) * ty * face;
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09, 0.09, 0.1), rub * 0.55); roughnessFactor = mix(roughnessFactor, 0.6, rub * 0.5);
+    float chip = step(0.86, fract(sin(floor(al * 6.0) * 78.23) * 1937.1)) * smoothstep(0.125, 0.15, vKW.y) * (1.0 - vKN.y * 0.5);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.76, 0.72), chip * 0.35);
+    diffuseColor.rgb *= 1.0 - smoothstep(0.035, 0.0, vKW.y) * face * 0.35; }`);
+  });
   const sand = texSet(T, 'sand', 1); for (const t of [sand.map, sand.normalMap, sand.roughnessMap]) t.repeat.set(1 / 6, 1 / 6);
   if (CYBER) {
   // v4.5: sand albedo 1.22 -> 0.98 (noon beach no longer glares), dune-scale tone variation, wind ripples (normal), a wrack line

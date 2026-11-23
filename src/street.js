@@ -9,12 +9,21 @@ import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
+import { EDGE_OFF } from './maps/gta/edgewalls.js'; // a_edgewalls
+import { NS_NAME, NS_PY, EW_NAME, EW_PY } from './maps/gta/streetnames.js';
 import { furnMat, PB, parkingMeter, litterBin, bollard, coverAtlas, coverQuad } from './streetkit.js';
 
 const RH = LAYOUT.roadHW;
 const STREETS_Z = ['北滨路', '珊瑚街', '鹈鹕路', '海葡萄街', '第五大道', '棕榈巷', '日落街', '灯塔路', '贝壳街']; // EW roads by index
+export const BLADE_NAMES = [], BLADE_LOG = []; // a_streetnames: map A atlas blade texts by cell (read back by tests through city.signage.streetNames())
 const STREETS_X = ['湾景路', '红树林大道', '火烈鸟街', '海潮大道', '金融大道', '港湾路', '运河街', '商业街', '中央大道'];
 
+// a_streetnames: map A blade cells read the shared table (EW roads at cells 0..4 by LAYOUT.islandEW index, NS at 9..11 by
+// LAYOUT.islandNS index — the same indices buildStreet's zIdx / xIdx pick). Fills names in place, returns cell -> pinyin.
+function bladeNamesA(names) {
+  const py = new Map(); LAYOUT.islandEW.forEach((z, i) => { if (EW_NAME[z]) { names[i] = EW_NAME[z]; py.set(i, EW_PY[z]); } }); LAYOUT.islandNS.forEach((x, i) => { if (NS_NAME[x]) { names[9 + i] = NS_NAME[x]; py.set(9 + i, NS_PY[x]); } });
+  BLADE_NAMES.length = 0; BLADE_NAMES.push(...names); return py;
+}
 function signAtlas() {
   // 8x4 cells of 128px: generic road signs (original drawings)
   const c = document.createElement('canvas'); c.width = 1024; c.height = 512; const g = c.getContext('2d');
@@ -43,7 +52,12 @@ function signAtlas() {
   ads.forEach(([t, bg, fg], k) => cell(8 + k, () => { const gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, bg); gr.addColorStop(1, '#000'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); g.fillStyle = fg; g.globalAlpha = 0.25; g.beginPath(); g.arc(90, 40, 34, 0, 7); g.fill(); g.globalAlpha = 1; txt(t, 64, 84, t.length > 6 ? 15 : 20, fg); }));
   // 16..31 street-name blades: 2 per row-cell pair (256x64 each, green)
   const names = [...STREETS_Z, ...STREETS_X].slice(0, 16);
-  names.forEach((n, k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; g.fillStyle = '#16703f'; g.fillRect(x, y, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, 248, 56); g.fillStyle = '#fff'; g.font = 'bold 34px "Noto Sans CJK SC","PingFang SC",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, x + 128, y + 33); });
+  if (!CYBER) { // a_streetnames: map A blades read the shared table (cell = layout index: EW k 0..4, NS k 9..11), pinyin under the name
+    const py = bladeNamesA(names);
+    names.forEach((n, k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; g.fillStyle = '#16703f'; g.fillRect(x, y, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, 248, 56); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const p = py.get(k); g.font = `bold ${p ? 30 : 34}px "WenQuanYi Zen Hei","Noto Sans CJK SC","PingFang SC",sans-serif`; const w = g.measureText(n).width; if (w > 232) g.font = `bold ${Math.floor((p ? 30 : 34) * 232 / w)}px "WenQuanYi Zen Hei","Noto Sans CJK SC","PingFang SC",sans-serif`; g.fillText(n, x + 128, y + (p ? 26 : 33));
+      if (p) { g.font = 'bold 12px "DejaVu Sans", Arial, sans-serif'; g.fillText(p, x + 128, y + 50); } });
+  } else names.forEach((n, k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; g.fillStyle = '#16703f'; g.fillRect(x, y, 256, 64); g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(x + 4, y + 4, 248, 56); g.fillStyle = '#fff'; g.font = 'bold 34px "Noto Sans CJK SC","PingFang SC",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, x + 128, y + 33); });
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.generateMipmaps = true;
   return t;
 }
@@ -140,6 +154,7 @@ export function buildStreet(scene, city) {
   }
 
   // ---------------- signs: street-name blades at signal poles, speed / crossing / parking signs along segments
+  if (!CYBER) bladeNamesA([...STREETS_Z, ...STREETS_X].slice(0, 16)); BLADE_LOG.length = 0;
   const zIdx = (z) => Math.max(0, LAYOUT.islandEW.indexOf(z) >= 0 ? LAYOUT.islandEW.indexOf(z) : LAYOUT.mainEW.indexOf(z)) % 9;
   const xIdx = (x) => { const i = LAYOUT.islandNS.indexOf(x); return i >= 0 ? i : 4 + Math.max(0, LAYOUT.mainNS.indexOf(x)); };
   const bladeUV = (k) => { const x = (k % 4) * 256, y = 256 + Math.floor(k / 4) * 64; return [x / 1024, 1 - (y + 64) / 512, (x + 256) / 1024, 1 - y / 512]; };
@@ -147,6 +162,7 @@ export function buildStreet(scene, city) {
     for (const [sx, sz] of [[1, 1], [-1, -1]]) {
       const px = it.x + sx * (RH + 1.2), pz = it.z + sz * (RH + 1.2);
       const kz = Math.min(15, zIdx(it.z)), kx = Math.min(15, 9 + (xIdx(it.x) % 7));
+      if (!CYBER) BLADE_LOG.push({ x: +px.toFixed(2), z: +pz.toFixed(2), ix: it.x, iz: it.z, ew: BLADE_NAMES[kz], ns: BLADE_NAMES[kx] }); // a_streetnames: read back by tests
       let [u0, v0, u1, v1] = bladeUV(kz); signFace(u0, v0, u1, v1, px - sx * 0.9, 4.7, pz, 0, 1.6, 0.4); signFace(u0, v0, u1, v1, px - sx * 0.9, 4.7, pz, Math.PI, 1.6, 0.4);
       [u0, v0, u1, v1] = bladeUV(kx); signFace(u0, v0, u1, v1, px, 5.15, pz - sz * 0.9, Math.PI / 2, 1.6, 0.4); signFace(u0, v0, u1, v1, px, 5.15, pz - sz * 0.9, -Math.PI / 2, 1.6, 0.4);
     }
@@ -174,7 +190,13 @@ export function buildStreet(scene, city) {
     const fm = new THREE.Matrix4().multiplyMatrices(m, T(2.0, 1.3, 0, Math.PI / 2)); const e = new THREE.Vector3(); e.setFromMatrixPosition(fm);
     signFace(ad[0], ad[1], ad[2], ad[3], e.x, e.y, e.z, sh.ry + Math.PI / 2, 1.1, 1.6); void lm;
     postSign(sh.x + Math.cos(sh.ry) * 2.8, sh.z - Math.sin(sh.ry) * 2.8, sh.ry, 4, 2.4, 0.6);
-    city.col.add(sh.x - 2.2, sh.z - 2.2, sh.x + 2.2, sh.z + 2.2, 2.5, 'shelter');
+    const sb = city.col.add(sh.x - 2.2, sh.z - 2.2, sh.x + 2.2, sh.z + 2.2, 2.5, 'shelter');
+    if (!CYBER) { // a_lane8fix: detail.busShelter footprint (local x along the street, +z out of the open front) instead of the 4.4 m square that spanned
+      // the whole promenade sidewalk: back glazing + bench strip, side wing pane, map-case end post, front post, litter bin (applied by maps/gta/colfix.js)
+      const c = Math.cos(sh.ry), s2 = Math.sin(sh.ry); const L = (u0, u1, v0, v1, h) => { const xs = [], zs = [];
+        for (const u of [u0, u1]) for (const v of [v0, v1]) { xs.push(sh.x + c * u + s2 * v); zs.push(sh.z - s2 * u + c * v); }
+        return [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs), h]; };
+      sb.fit = [L(-2.0, 2.0, -0.7, -0.12, 2.5), L(-2.0, -1.9, -0.12, 0.6, 2.5), L(1.9, 2.0, -0.12, 0.6, 2.5), L(2.15, 2.55, 0.0, 0.4, 0.75)]; }
   }
 
   // ---------------- corner clutter: newspaper boxes, utility cabinets, bins, bollards; parking meters on the beachfront drive
@@ -188,7 +210,8 @@ export function buildStreet(scene, city) {
       if (occupied(bx, bz, 1.2)) continue;
       const n = 1 + Math.floor(r() * 3);
       for (let k = 0; k < n; k++) { const c = boxCols[Math.floor(r() * boxCols.length)]; stamp(CYBER ? add : addP(PB.paint), newsBox(c), T(bx + k * 0.52 * sz, 0.15, bz, sz > 0 ? 0 : Math.PI)); }
-      city.col.add(bx - 0.3, bz - 0.3, bx + 1.6, bz + 0.3, 1.1, 'nbox');
+      const nb = city.col.add(bx - 0.3, bz - 0.3, bx + 1.6, bz + 0.3, 1.1, 'nbox');
+      if (!CYBER) { const xe = bx + (n - 1) * 0.52 * sz; nb.fit = [[Math.min(bx, xe) - 0.25, bz - 0.25, Math.max(bx, xe) + 0.25, bz + 0.25, 1.1]]; } // a_lane8fix: real run of n boxes (0.47 m, 0.52 m pitch toward sz), applied after every layer is placed (maps/gta/colfix.js)
     }
     if (r() < 0.7) { // utility cabinet
       const ux = it.x - (RH + 3.4), uz = it.z + (RH + 4.5);
@@ -196,7 +219,8 @@ export function buildStreet(scene, city) {
     }
     // bins (green island / black downtown)
     const tx = it.x + (RH + 1.2), tz = it.z - (RH + 3.2);
-    if (!occupied(tx, tz, 1.0)) { if (!CYBER) stamp3(litterBin(island ? [0.10, 0.26, 0.17] : [0.08, 0.085, 0.09]), T(tx, 0.15, tz, r() * 6.28)); else { const bin = new THREE.CylinderGeometry(0.3, 0.27, 0.95, 10); add(bin, T(tx, 0.62, tz), island ? [0.14, 0.32, 0.22] : [0.12, 0.12, 0.13]); const lid = new THREE.CylinderGeometry(0.32, 0.32, 0.06, 10); add(lid, T(tx, 1.12, tz), [0.1, 0.1, 0.1]); } }
+    if (!occupied(tx, tz, 1.0)) { if (!CYBER) { stamp3(litterBin(island ? [0.10, 0.26, 0.17] : [0.08, 0.085, 0.09]), T(tx, 0.15, tz, r() * 6.28)); (city.clutAdd = city.clutAdd || []).push({ k: 'bin', x: tx, z: tz, ang: 0, hl: 0.31, hw: 0.31, h: 1.1 }); } // a_edgewalls: litter bin had no box (applied after every layer, edgewalls.js)
+      else { const bin = new THREE.CylinderGeometry(0.3, 0.27, 0.95, 10); add(bin, T(tx, 0.62, tz), island ? [0.14, 0.32, 0.22] : [0.12, 0.12, 0.13]); const lid = new THREE.CylinderGeometry(0.32, 0.32, 0.06, 10); add(lid, T(tx, 1.12, tz), [0.1, 0.1, 0.1]); } }
     // r6.3 sidewalk utility lids (telecom / water) near the corner
     if (!CYBER && r() < 0.6) { const lx = it.x - (RH + 1.4), lz = it.z - (RH + 2.0 + r() * 3); if (city.groundH(lx, lz) > 0.1) covers(3, 0.62, 0.9, T(lx, 0.152, lz, r() < 0.5 ? 0 : Math.PI / 2)); }
   }
@@ -206,7 +230,9 @@ export function buildStreet(scene, city) {
     for (let z = s.a0 + 13.4; z < s.a1 - 10; z += 6.8) { const x = 282.3; if (occupied(x, z, 0.8)) continue;
       if (!CYBER) { // r6.3 smart meters: twin heads on a yoke every other bay (one per parking space), painted housings, galvanised posts
         if (mk++ % 2 === 1) continue; const body = [[0.10, 0.12, 0.16], [0.13, 0.13, 0.14], [0.08, 0.2, 0.16]][Math.floor(r() * 3)];
-        stamp3(parkingMeter(true, body), T(x, 0.15, z + 3.4, Math.PI / 2)); city.col.add(x - 0.12, z + 3.0, x + 0.12, z + 3.8, 1.5, 'meter'); continue; }
+        let zm = z + 3.4; if (!EDGE_OFF) { // a_edgewalls: the occupancy test above looks at z, the meter stands at z + 3.4: off a lamp / tree / palm there, slide along the kerb (no rng draw)
+          const busy = (q) => occupied(x, q, 0.55); if (busy(zm)) for (const dz of [1.0, -1.0, 1.6, -1.6]) if (!busy(z + 3.4 + dz)) { zm = z + 3.4 + dz; break; } }
+        stamp3(parkingMeter(true, body), T(x, 0.15, zm, Math.PI / 2)); city.col.add(x - 0.12, zm - 0.4, x + 0.12, zm + 0.4, 1.5, 'meter'); continue; }
       const p = new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6); add(p, T(x, 0.15 + 0.55, z), [0.3, 0.3, 0.32]); const hd = new THREE.CylinderGeometry(0.1, 0.1, 0.26, 14); hd.scale(1, 1, 0.75); add(hd, T(x, 0.15 + 1.22, z), [0.25, 0.27, 0.3]);
       const dome = new THREE.SphereGeometry(0.1, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2); dome.scale(1, 0.8, 0.75); add(dome, T(x, 0.15 + 1.35, z), [0.25, 0.27, 0.3]);
       const win = new THREE.CylinderGeometry(0.07, 0.07, 0.02, 12); win.rotateZ(Math.PI / 2); add(win, T(x - 0.07, 0.15 + 1.3, z), [0.55, 0.62, 0.62]);
@@ -214,7 +240,7 @@ export function buildStreet(scene, city) {
   }
   // bollards at the promenade crossings
   for (const z of LAYOUT.islandEW) for (let k = -3; k <= 3; k++) { const x = 299.4, zz = z + k * 1.6 ; if (Math.abs(k) < 1) continue;
-    if (!CYBER) { stamp3(bollard(), T(x, city.groundH(x, zz), zz, r() * 6.28)); continue; }
+    if (!CYBER) { stamp3(bollard(), T(x, city.groundH(x, zz), zz, r() * 6.28)); (city.clutAdd = city.clutAdd || []).push({ k: 'bollard', x, z: zz, ang: 0, hl: 0.11, hw: 0.11, h: 1.0 }); continue; } // a_edgewalls: box (edgewalls.js)
     const b = new THREE.CylinderGeometry(0.11, 0.12, 0.9, 8); add(b, T(x, 0.6, zz), [0.92, 0.92, 0.9]); }
   // r6.3 tree grates around the sidewalk street trees
   if (!CYBER) for (const t of city.trees) if (t.street && city.groundH(t.x, t.z) > 0.1) covers(1, 1.3, 1.3, T(t.x, city.groundH(t.x, t.z) + 0.004, t.z));

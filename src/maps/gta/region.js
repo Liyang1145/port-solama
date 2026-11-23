@@ -6,9 +6,10 @@
 // murals) is generated when the camera comes within ~320 m and disposed past ~460 m.
 import * as THREE from 'three';
 import { World, prismWalls, polyCap, box } from '../../geo.js';
-import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, smooth } from './mapgeo.js';
+import { buildRegionData, shoreX, beachOff, westCoast, ISLE, pearlPoly, pointInPoly, smooth } from './mapgeo.js';
 import { REGION } from './mapdata.js';
 import { rng, rand, randi, pick, clamp } from '../../util.js';
+import { shopMural } from './shoppools.js'; // a_shopnight2
 
 const SW = REGION.sw, DY = REGION.deckY;
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -23,6 +24,50 @@ function quadUp(bk, P4, uv4, rd4, col) {
   bk.quad(v[o[0]], v[o[1]], v[o[2]], v[o[3]], o.flatMap((i) => uv4[i]), {}, col || null);
   if (rd4) { const k = bk.custom.aRd; k.length -= 16; for (const i of o) k.push(...rd4[i]); }
 }
+// a_stripfix: the mainland ground caps were a few kilometre-long slivers (the coast fanned to the far corners). At eye height
+// the triangle under the camera reaches kilometres sideways; once the near plane cuts it, its screen-space depth plane is
+// built from vertices ~1e6 px off screen and SwiftShader's interpolated depth there was off by more than the 6.6 cm between the
+// ground (y -0.06) and the lots / aprons / drives (y +0.006, polygon offset -1/-4): the grass won and covered the parking lots.
+// The caps are now cut on a lattice (133 m cells over the modelled city, 400 m cells elsewhere, coarse cells that border fine ones
+// carry the fine lattice points on that side so there are no T-junctions) and emitted as plain indexed triangles (polyCap wrote
+// each triangle as a degenerate quad): same buckets / draw calls / material, a little more than double the triangles.
+const GQ = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
+const GC = 400, GSUB = +(GQ.get('gsub') || 3), GF = GC / GSUB, GBOX = [-3600, -3200, -800, 3200]; // fine box (x0, z0, x1, z1), multiples of GC
+export function gridCap(bk, poly, y) {
+  if (GQ.has('nogrid')) { polyCap(bk, poly, y); return; }
+  const n = poly.length; let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const p of poly) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
+  const fineC = (i, j) => i * GC >= GBOX[0] && (i + 1) * GC <= GBOX[2] && j * GC >= GBOX[1] && (j + 1) * GC <= GBOX[3];
+  const eg = new Map(); // poly edges bucketed by coarse cell
+  for (let k = 0; k < n; k++) { const a = poly[k], b = poly[(k + 1) % n]; for (let i = Math.floor(Math.min(a[0], b[0]) / GC); i <= Math.floor(Math.max(a[0], b[0]) / GC); i++) for (let j = Math.floor(Math.min(a[1], b[1]) / GC); j <= Math.floor(Math.max(a[1], b[1]) / GC); j++) { const key = i * 65536 + j; let l = eg.get(key); if (!l) eg.set(key, l = []); l.push(k); } }
+  const touches = (L, cx0, cz0, cx1, cz1) => { if (L) for (const k of L) { const a = poly[k], b = poly[(k + 1) % n]; if (Math.max(a[0], b[0]) >= cx0 - 1e-6 && Math.min(a[0], b[0]) <= cx1 + 1e-6 && Math.max(a[1], b[1]) >= cz0 - 1e-6 && Math.min(a[1], b[1]) <= cz1 + 1e-6) return true; } return false; };
+  const clip = (P, ax, v, keepLess) => { const out = []; for (let k = 0; k < P.length; k++) { const a = P[k], b = P[(k + 1) % P.length]; const ia = keepLess ? a[ax] <= v : a[ax] >= v, ib = keepLess ? b[ax] <= v : b[ax] >= v;
+      if (ia) out.push(a); if (ia !== ib) { const t = (v - a[ax]) / (b[ax] - a[ax]); const q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; q[ax] = v; out.push(q); } } return out; };
+  const emit = (P) => { // polygon (xz) -> indexed triangles, normal up
+    const m = []; for (const p of P) { const l = m[m.length - 1]; if (!l || Math.abs(l[0] - p[0]) > 1e-4 || Math.abs(l[1] - p[1]) > 1e-4) m.push(p); }
+    while (m.length > 1 && Math.abs(m[0][0] - m[m.length - 1][0]) < 1e-4 && Math.abs(m[0][1] - m[m.length - 1][1]) < 1e-4) m.pop(); if (m.length < 3) return;
+    const tris = m.length === 4 ? [[0, 1, 2], [0, 2, 3]] : THREE.ShapeUtils.triangulateShape(m.map((p) => new THREE.Vector2(p[0], p[1])), []); const base = bk.vc;
+    for (const p of m) { bk.p.push(p[0], y, p[1]); bk.n.push(0, 1, 0); bk.uv.push(p[0], p[1]); for (const k in bk.custom) for (let j = 0; j < bk.attrSizes[k]; j++) bk.custom[k].push(0); } bk.vc += m.length;
+    for (const t of tris) { const a = m[t[0]], b = m[t[1]], c = m[t[2]]; const cr = (b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]); if (Math.abs(cr) < 1e-6) continue; // y-up normal: (b-a) x (c-a) .y > 0
+      if (cr > 0) bk.idx.push(base + t[0], base + t[1], base + t[2]); else bk.idx.push(base + t[0], base + t[2], base + t[1]); } };
+  // a cell [cx0,cx1]x[cz0,cz1]; sides: extra lattice spacing per side (0 = none) [z=cz0, x=cx1, z=cz1, x=cx0]
+  const cell = (cx0, cz0, cx1, cz1, L, side) => {
+    let P;
+    if (!touches(L, cx0, cz0, cx1, cz1)) { if (!pointInPoly((cx0 + cx1) / 2, (cz0 + cz1) / 2, poly)) return; P = [[cx0, cz0], [cx1, cz0], [cx1, cz1], [cx0, cz1]]; }
+    else { P = clip(clip(clip(clip(poly, 0, cx0, false), 0, cx1, true), 1, cz0, false), 1, cz1, true); if (P.length < 3) return; }
+    if (!side) { emit(P); return; }
+    const on = (p, k) => k === 0 ? Math.abs(p[1] - cz0) < 1e-4 : k === 1 ? Math.abs(p[0] - cx1) < 1e-4 : k === 2 ? Math.abs(p[1] - cz1) < 1e-4 : Math.abs(p[0] - cx0) < 1e-4;
+    const Q = []; for (let k = 0; k < P.length; k++) { const a = P[k], b = P[(k + 1) % P.length]; Q.push(a);
+      for (let sd = 0; sd < 4; sd++) { const s = side[sd]; if (!s || !on(a, sd) || !on(b, sd)) continue; const ax = sd & 1 ? 1 : 0; const lo = Math.min(a[ax], b[ax]), hi = Math.max(a[ax], b[ax]); const pts = [];
+        const o0 = ax ? cz0 : cx0; for (let q = Math.ceil((lo - o0 + 1e-4) / s); o0 + q * s < hi - 1e-4; q++) pts.push(o0 + q * s); if (a[ax] > b[ax]) pts.reverse(); for (const v of pts) { const q = [a[0], a[1]]; q[ax] = v; Q.push(q); } } }
+    emit(Q); };
+  for (let i = Math.floor(x0 / GC); i <= Math.floor(x1 / GC); i++) for (let j = Math.floor(z0 / GC); j <= Math.floor(z1 / GC); j++) {
+    const X0 = i * GC, Z0 = j * GC, X1 = X0 + GC, Z1 = Z0 + GC; const L = eg.get(i * 65536 + j);
+    if (fineC(i, j)) { const sub = !touches(L, X0, Z0, X1, Z1); if (sub && !pointInPoly(X0 + GC / 2, Z0 + GC / 2, poly)) continue;
+      for (let qa = 0; qa < GSUB; qa++) for (let qb = 0; qb < GSUB; qb++) { const a = X0 + qa * GF, b = Z0 + qb * GF, a1 = X0 + (qa + 1) * GF, b1 = Z0 + (qb + 1) * GF;
+        if (sub) emit([[a, b], [a1, b], [a1, b1], [a, b1]]); else cell(a, b, a1, b1, L, null); } continue; }
+    const side = [fineC(i, j - 1) ? GF : 0, fineC(i + 1, j) ? GF : 0, fineC(i, j + 1) ? GF : 0, fineC(i - 1, j) ? GF : 0];
+    cell(X0, Z0, X1, Z1, L, side.some((v) => v) ? side : null); }
+}
 // vertical/sloped quad facing (ox, oz)
 function wallQ(bk, a, b, ya0, ya1, yb0, yb1, ox, oz, col, u0 = 0) {
   const A = V3(a[0], ya0, a[1]), B = V3(b[0], yb0, b[1]), C = V3(b[0], yb1, b[1]), D = V3(a[0], ya1, a[1]);
@@ -31,6 +76,21 @@ function wallQ(bk, a, b, ya0, ya1, yb0, yb1, ox, oz, col, u0 = 0) {
   if (n.x * ox + n.z * oz >= 0) bk.quad(A, B, C, D, [u0, ya0, u0 + len, yb0, u0 + len, yb1, u0, ya1], {}, col || null);
   else bk.quad(B, A, D, C, [u0 + len, yb0, u0, ya0, u0, ya1, u0 + len, yb1], {}, col || null);
 }
+
+// a_canaledge: canal bank wall + 0.12 m coping, cut at the bridge decks (fabric c.decks, [t0, t1] along the canal from c.A): the coping
+// used to run straight across every deck (a 0.18 m vertical strip standing across the road / sidewalk / promenade); under a deck the
+// bulkhead stops just below its top (-0.1) so the bank still reads as one wall from the water. Geometry only; no collider, no RNG.
+const BANK_CUT = { cuts: 0 };
+const PEARL_POLY = pearlPoly();
+function bankWall(bk, e, c, ox, oz) {
+  const dx = e.s[0] - e.w[0], dz = e.s[1] - e.w[1], L = Math.hypot(dx, dz); const ux = dx / L, uz = dz / L;
+  const t0w = c ? (e.w[0] - c.A[0]) * c.d[0] + (e.w[1] - c.A[1]) * c.d[1] : 0; // bank start, along the canal from c.A
+  const iv = ((c && c.decks) || []).map(([a, b]) => [Math.max(0, a - t0w), Math.min(L, b - t0w)]).filter(([a, b]) => b > a).sort((p, q) => p[0] - q[0]);
+  const P = (t) => [e.w[0] + ux * t, e.w[1] + uz * t]; let t = 0;
+  for (const [a, b] of iv) { if (a > t) wallQ(bk, P(t), P(a), -3.2, 0.12, -3.2, 0.12, ox, oz, null, t); wallQ(bk, P(a), P(b), -3.2, -0.1, -3.2, -0.1, ox, oz, null, a); BANK_CUT.cuts++; t = Math.max(t, b); }
+  if (L > t) wallQ(bk, P(t), P(L), -3.2, 0.12, -3.2, 0.12, ox, oz, null, t);
+}
+export const bankCutStats = BANK_CUT;
 
 export function buildRegion(ctx, H) {
   const { W, col, lamps, palms, trees, shrubs } = ctx;
@@ -93,14 +153,14 @@ export function buildRegion(ctx, H) {
   const inMouth = (za, zb) => ccut.some((q) => zb > q.lo.s[1] - 1 && za < q.hi.s[1] + 1);
   {
     const district = [[-1380, -480], [-1380, 480]]; for (let z = 480; z >= -480; z -= 10) district.push([shoreX(z), z]);
-    polyCap(W.b('mgroundC', -1100, 0), wind(district), -0.06);
+    gridCap(W.b('mgroundC', -1100, 0), wind(district), -0.06);
     // vis-sweep: the ground slab used to stop at x=-2700 / z=±1500 -> a hard rectangular map edge in every aerial. It now runs
     // out to the far fade (env.js / water.js fade everything into the horizon haze at 2.3–4 km), the coast following shoreX.
     const XG = -4600, ZG = 4600;
     const north = [[XG, 480], [XG, ZG], ...shoreRun(ZG, 480)];
     const south = [[XG, -ZG], [XG, -480], ...shoreRun(-480, -ZG)];
-    polyCap(W.b('mgroundG', -1500, 900), wind(north), -0.06); polyCap(W.b('mgroundG', -1500, -900), wind(south), -0.06);
-    polyCap(W.b('mgroundG', -2000, 0), wind([[XG, -480], [XG, 480], [-1380, 480], [-1380, -480]]), -0.06);
+    gridCap(W.b('mgroundG', -1500, 900), wind(north), -0.06); gridCap(W.b('mgroundG', -1500, -900), wind(south), -0.06);
+    gridCap(W.b('mgroundG', -2000, 0), wind([[XG, -480], [XG, 480], [-1380, 480], [-1380, -480]]), -0.06);
     // bay park strip: from the outer sidewalk edge of 湾岸大道 to the seawall, raised 0.15, grass + palms
     const sh = D.byId.shore; const park = [];
     for (let s = 0; s <= sh.path.len; s += 6) { const q = sh.path.at(s); const sideBay = Math.sign(-q.tz) || 1; park.push([q.x - q.tz * sideBay * (sh.hw + SW + 0.01), q.z + q.tx * sideBay * (sh.hw + SW + 0.01)]); }
@@ -124,11 +184,14 @@ export function buildRegion(ctx, H) {
     }
   }
   // canal banks: bulkhead walls + coping on both sides and across the head; short seawall stubs to the mouths
+  // a_orphans: the bank boxes (0.8 m high, 0.6 m wide, the whole ~400 m bank from the inland head to the seawall) stand over a
+  // 0.12 m coping with no railing, and run straight across the coastal boulevard / canal bridges -> invisible walls on the road
+  // and a swimmer trap; registered as before (layout unchanged), removed by colfix (fit = [])
   { const cw = W.b('concrete', -900, 2000);
-    for (const q of ccut) { const mc = [(q.hi.w[0] + q.lo.w[0] + q.hi.s[0] + q.lo.s[0]) / 4, (q.hi.w[1] + q.lo.w[1] + q.hi.s[1] + q.lo.s[1]) / 4];
+    ccut.forEach((q, qi) => { const mc = [(q.hi.w[0] + q.lo.w[0] + q.hi.s[0] + q.lo.s[0]) / 4, (q.hi.w[1] + q.lo.w[1] + q.hi.s[1] + q.lo.s[1]) / 4];
       for (const e of [q.hi, q.lo]) { const dx = e.s[0] - e.w[0], dz = e.s[1] - e.w[1]; const l = Math.hypot(dx, dz); const c = [(e.w[0] + e.s[0]) / 2, (e.w[1] + e.s[1]) / 2];
-        wallQ(cw, e.w, e.s, -3.2, 0.12, -3.2, 0.12, mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail'); }
-      wallQ(cw, q.hi.w, q.lo.w, -3.2, 0.12, -3.2, 0.12, 1, 0); } }
+        bankWall(cw, e, canals[qi], mc[0] - c[0], mc[1] - c[1]); col.addOBB(c[0], c[1], dx / l, dz / l, l / 2, 0.3, 0.8, 'rail').fit = []; }
+      wallQ(cw, q.hi.w, q.lo.w, -3.2, 0.12, -3.2, 0.12, 1, 0); }); }
   // ------------------------------------------------------------------ causeway: berm, rock revetment, guard rails, bridge ----
   {
     const R = sun; const sEnd = D.sunShoreS + 6; const g = W.b('grass', -400, 0), rk = W.b('vcol', -400, 0), m = W.b('metal', -400, 0), cn = W.b('concrete', -400, 0);
@@ -217,7 +280,10 @@ export function buildRegion(ctx, H) {
     for (let i = 0; i < 40; i++) { const a = rand(0, 6.28), r = rand(6, 38); shrubs.push({ x: pearl.cx + Math.cos(a) * r, z: pearl.cz + Math.sin(a) * r, s: rand(0.8, 1.5) }); }
     const fv = W.b('vcol', pearl.cx, pearl.cz); const ring = new THREE.CylinderGeometry(5, 5.3, 0.6, 28, 1, true); H.gput(fv, ring, pearl.cx, DY + 0.3, pearl.cz, [0.86, 0.84, 0.8]);
     const pool = W.b('pool', pearl.cx, pearl.cz); const disc = new THREE.CircleGeometry(4.9, 28); disc.rotateX(-Math.PI / 2); H.gput(pool, disc, pearl.cx, DY + 0.45, pearl.cz, null);
-    col.add(pearl.cx - 4, pearl.cz - 4, pearl.cx + 4, pearl.cz + 4, DY + 0.6, 'fountain');
+    // a_orphans: the 8 x 8 m box sat inside the r 5.0-5.3 basin wall (player walked through the rim into the pool on the axes,
+    // stopped 0.7 m short of it on the diagonals); colfix swaps it for 12 thin boxes on the rim
+    col.add(pearl.cx - 4, pearl.cz - 4, pearl.cx + 4, pearl.cz + 4, DY + 0.6, 'fountain').fit = Array.from({ length: 12 }, (_, i) => { const a = (i + 0.5) * Math.PI / 6;
+      return { obb: [pearl.cx + Math.cos(a) * 5.15, pearl.cz + Math.sin(a) * 5.15, -Math.sin(a), Math.cos(a), 5.3 * Math.tan(Math.PI / 12) + 0.05, 0.16], h: DY + 0.6 }; });
   }
   // ------------------------------------------------------------------ island natural ends (dunes N, mangroves S) ----
   {
@@ -294,15 +360,19 @@ export function buildRegion(ctx, H) {
     const az = Math.abs(z);
     // pearl island
     const dp = Math.hypot(x - pearl.cx, z - pearl.cz);
-    if (dp < pearl.r * 0.97) { nearestRoad(x, z, nr); if (nr.road && (nr.road.id === 'pring' || nr.road.id === 'plink')) { const ad = nr.dist - nr.road.hw; if (ad < 0) return DY; if (ad < SW) return DY + 0.15; } return DY; }
-    if (x < -22 && x > shoreX(z) - 1) { // over the bay: causeway / link bridge
+    // a_canaledge: the whole island polygon (its rim reaches 1.055 r; palms on the rim were planted 4 m down)
+    if (dp < pearl.r * 0.97 || (dp < pearl.r * 1.06 && pointInPoly(x, z, PEARL_POLY))) { nearestRoad(x, z, nr); if (nr.road && (nr.road.id === 'pring' || nr.road.id === 'plink')) { const ad = nr.dist - nr.road.hw; if (ad < 0) return DY; if (ad < SW) return DY + 0.15; } return DY; }
+    // a_canaledge: the natural island ends reach west of x = -22 (westCoast down to about -70); their grass + shore skirt used to be
+    // read as open bay here (undefined -> -4 m), so the dune / mangrove vegetation there was planted 4 m under the grass and walkers swam on it
+    const islandEnd = az > ISLE.z0 && az < ISLE.tip + 30 && x > -200 && x >= westCoast(z) - 9;
+    if (x < -22 && x > shoreX(z) - 1 && !islandEnd) { // over the bay: causeway / link bridge
       nearestRoad(x, z, nr); if (!nr.road) return undefined; const r = nr.road;
       if (r.id === 'sun') { const h = r.h(nr.s, x); const ad = nr.dist - r.hw; if (ad < 0) return h; if (inBridge(x)) return ad < 1.6 ? h + 0.15 : undefined; if (ad < 5.2) return h + 0.15; if (ad < 9) return h + 0.15 - (ad - 5.2) * (1.75 + h) / 3.8; if (ad < 13.5) return -1.6 - (ad - 9) * 0.4; return undefined; }
       if (r.id === 'plink') return nr.dist - r.hw < 1.4 ? DY + (nr.dist > r.hw ? 0.15 : 0) : undefined;
       return undefined;
     }
     if (x <= shoreX(z) - 1) { // mainland
-      if (H.inCanal && Math.abs(z) > 1000 && H.inCanal(H.fab, x, z)) return undefined; // r6.3 finger canals
+      if (H.inCanal && Math.abs(z) > 1000 && (H.inCanalWater || H.inCanal)(H.fab, x, z)) return undefined; // r6.3 finger canals (a_orphans: bridge decks stay dry)
       if (Math.abs(z) > 520 || x < -1420) return 0;
       nearestRoad(x, z, nr); const r = nr.road; if (r) { const ad = nr.dist - r.hw; const h = r.h(nr.s, x); if (ad < 0) return h; if (ad < SW) return h + 0.15; }
       const sh = D.byId.shore; if (x > -975) { sh.path.nearest(x, z, nq); if (nq.dist > sh.hw + SW && x > sh.path.at(nq.s).x && Math.abs(z - 16) > 14) return 0.15; } // bay park
@@ -450,7 +520,7 @@ function murals(ctx, L, y0, y1, r, all) {
     const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2; if ((mx - L.cx) * ox + (mz - L.cz) * oz < 0) { ox = -ox; oz = -oz; }
     const facesStreet = ox * L.face[0] + oz * L.face[1] > 0.6; if (!all && facesStreet) continue; if (r() < (all ? 0.15 : 0.35)) continue;
     const m = 'mural' + Math.floor(r() * 6); const bk = ctx.W.b(m, mx, mz, {});
-    const i0 = len * R01(r, 0.04, 0.18), i1 = len * R01(r, 0.82, 0.96); const ya = y0, yb = Math.min(y1, y0 + (i1 - i0) * 0.62 + r() * 2);
+    const i0 = len * R01(r, 0.04, 0.18), i1 = len * R01(r, 0.82, 0.96); if (y0 < 1) shopMural(a, b, i0, i1); /* a_shopnight2: no shop-front pool under a mural */ const ya = y0, yb = Math.min(y1, y0 + (i1 - i0) * 0.62 + r() * 2);
     const A = [a[0] + ux * i0 + ox * 0.045, a[1] + uz * i0 + oz * 0.045], Bq = [a[0] + ux * i1 + ox * 0.045, a[1] + uz * i1 + oz * 0.045];
     const v0 = V3(A[0], ya, A[1]), v1 = V3(Bq[0], ya, Bq[1]), v2 = V3(Bq[0], yb, Bq[1]), v3 = V3(A[0], yb, A[1]);
     const n = new THREE.Vector3().subVectors(v1, v0).cross(new THREE.Vector3().subVectors(v3, v0));

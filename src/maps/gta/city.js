@@ -6,7 +6,18 @@ import { ColliderGrid, rng, rand, randi, pick, clamp, withSeed } from '../../uti
 import { buildRegion } from './region.js';
 import { beachOff, westCoast, ISLE } from './mapgeo.js';
 import { detailStream, job, mulb, seedOf } from './bldgdetail.js';
-import { planFabric, attachFabric, updateFabric, inCanal } from './fabric.js';
+import { planFabric, attachFabric, updateFabric, inCanal, inCanalWater } from './fabric.js';
+import { prepDowntown, attachDowntown, updateDowntown } from './downtown.js'; // a_downtown
+import { fixFabricProps } from './propfix.js';
+import { fixFabricCars } from './parkfix.js';
+import { curbPass } from './curbfix.js'; // a_curbalign
+import { prepHouses, attachHouses, updateHouses, auditHouses } from './houses.js'; // a_houses
+import { prepStrip, attachStrip, updateStrip, stripGroundH } from './strip.js'; // a_strip (a_stripfix: stripGroundH)
+const HOUSE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('houseaudit');
+import { collectYardCol } from './yardcol.js'; import { collectPoleCol } from './polecol.js'; // a_yardcol / a_polecol (same point as collectTrunks: after every bake-hashed pass)
+import { yardTrees, fixEdgeHedges, collectTrunks, auditEdgeWalls, EDGE_OFF } from './edgewalls.js'; // a_edgewalls (after curbfix / propfix / parkfix: their bake inputs are unchanged)
+const EDGE_AUDIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('edgeaudit');
+import { shopEdge } from './shoppools.js'; // a_shopnight2
 import { decoHotelDetail, midriseDetail, condoTowerDetail, towerDetail, lotDetail, bridgeDetail, beachDetail } from './archdetail.js';
 
 export const LAYOUT = {
@@ -165,12 +176,12 @@ export function buildCity(scene, mats, T) {
   marina(bld); landmarks(bld);
   fab.populate(col); // own RNG stream: the shared rng sequence (island / district layout) is unchanged
   // r5.0 big map phase 1 (MAP_DESIGN.md): natural island ends, causeway, artificial island, mainland district (streamed)
-  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal });
+  const region = buildRegion({ ...bld, palms, trees, shrubs, deco }, { volume, balconies, gput, rgeo, PASTEL, GLASS, ACCENT, fab, inCanal, inCanalWater });
   // r6.2: hook the detail stream into the region's attach/update, and add per-lot detail to every streamed mainland chunk
   {
     const rAttach = region.attach.bind(region), rUpdate = region.update.bind(region), rLoad = region.load.bind(region);
-    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); region.fabStats = attachFabric(fab, scene, M); };
-    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); };
+    region.attach = (scene, M) => { rAttach(scene, M); DS.attach(scene, M); const yard = yardTrees(fab); const lots = fab.lots; region.curbFix = curbPass(fab, groundH); region.propFix = fixFabricProps(fab, groundH); region.parkFix = fixFabricCars(fab, groundH); region.edgeAudit = EDGE_AUDIT ? { pre: auditEdgeWalls(fab) } : null; region.edgeFix = fixEdgeHedges(fab); if (EDGE_AUDIT) region.edgeAudit.post = auditEdgeWalls(fab); { const t1 = performance.now(); fab._trunks = collectTrunks(fab, yard, EDGE_AUDIT); region.edgeFix.msTrunks = Math.round(performance.now() - t1); } region.yardCol = (fab._ycol = collectYardCol(fab, yard)) && fab._ycol.S; fab._pcol = collectPoleCol(fab); /* a_polecol: same point, read-only */ fab.houseKit = prepHouses(fab, lots); fab.stripKit = prepStrip(fab); region.stripAudit = fab.stripKit && fab.stripKit.audit; fab.dtKit = prepDowntown(fab, col, palms); region.fabStats = attachFabric(fab, scene, M); region.houses = attachHouses(fab.houseKit, scene); region.strip = attachStrip(fab.stripKit, scene); region.downtown = attachDowntown(fab.dtKit, scene); if (HOUSE_AUDIT) region.houseAudit = auditHouses(fab.houseKit); }; // a_houses: lot records read after every fix (bake inputs untouched), kit meshes around the camera // a_canaledge: fabric props off the water before their instances are made
+    region.update = (cam, budget = 1) => { rUpdate(cam, budget); DS.update(cam, budget); updateFabric(fab, cam); updateHouses(fab.houseKit, cam); updateStrip(fab.stripKit, cam); updateDowntown(fab.dtKit, cam); };
     region.fabric = fab;
     region.load = (c) => { rLoad(c); const Wd = DS.world(); for (const Lt of c.lots) lotDetail(Wd, Lt); const ms = Wd.build(region.scene, region.M, { glassRail: { cast: false } }); DS.mark(ms); for (const m of ms) c.det.push(m); };
     region.detail = DS;
@@ -222,13 +233,13 @@ export function buildCity(scene, mats, T) {
     return false;
   };
   const groundH = (x, z) => {
-    { const h = region.groundH(x, z); if (h !== undefined) return h; }
+    { const h = region.groundH(x, z); if (h !== undefined) { if (h === 0 && fab.stripKit) { const r = stripGroundH(fab.stripKit, x, z); if (r !== undefined) return r; } return h; } } // a_stripfix: strip-mall front walks
     if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60) return Math.max(beachH(x, z), -1.6);
     if (!isLand(x, z)) return L.waterY - 3;
     if (x < L.islandX[0]) return 0.15; // v4.3 marina piers
     return blockAt(x, z) ? 0.15 : 0;
   };
-  return { detail: DS, fabric: fab, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS };
+  return { detail: DS, fabric: fab, region, world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, clutAdd: bld.clutAdd || [] }; // a_edgewalls: clutAdd = boxes queued for kerb clutter (edgewalls.js)
 }
 
 function roadQuad(rd, s) {
@@ -291,6 +302,11 @@ function promenade(W, b, shrubs, trees) {
 function facadeAttrs(style, fh, ww, seed, wallC, glassC, up = [0, 0, 0]) {
   return (i, len) => { const n = Math.max(1, Math.round(len / ww)); return { aWin: [style, fh, len / n, seed], aCol: wallC, aGlass: glassC, aUp: up }; };
 }
+// a_shopnight2: storefront (style 3) edges at street level carry their per-unit open bits in aWin.x (shoppools.js; no rng draw)
+function shopAttrs(poly, y0, style, ww, seed, f) {
+  if (style !== 3 || y0 >= 1) return f;
+  return (i, len) => { const a = f(i, len); const n = Math.max(1, Math.round(len / ww)); a.aWin[0] = shopEdge(3, poly[i], poly[(i + 1) % poly.length], len, n, seed, i, y0); return a; };
+}
 // one building volume (polygon footprint) with ground-floor storefront band + upper style
 function volume(ctx, poly, y0, y1, opts) {
   const { W, col } = ctx; const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
@@ -298,9 +314,9 @@ function volume(ctx, poly, y0, y1, opts) {
   const seed = rand(0, 100);
   const ground = opts.ground ?? 4.6;
   if (opts.store && y0 < 1) {
-    prismWalls(b, poly, y0, y0 + ground, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13]), null, 0, true);
+    prismWalls(b, poly, y0, y0 + ground, shopAttrs(poly, y0, 3, opts.storeW || 4.5, seed, facadeAttrs(3, ground, opts.storeW || 4.5, seed, opts.wall, [0.12, 0.13, 0.13])), null, 0, true);
     prismWalls(b, poly, y0 + ground, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
-  } else prismWalls(b, poly, y0, y1, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up), null, 0, true);
+  } else prismWalls(b, poly, y0, y1, shopAttrs(poly, y0, opts.style, opts.ww, seed, facadeAttrs(opts.style, opts.fh, opts.ww, seed, opts.wall, opts.glass, opts.up)), null, 0, true);
   if (opts.relief !== false && (opts.style === 0 || opts.style === 2 || opts.style === 1)) relief(ctx, poly, opts.store && y0 < 1 ? y0 + ground : y0, y1, opts.fh, opts.ww, opts.style, opts.wall, y1 - y0 > 40 || opts.lite);
   if (opts.store && y0 < 1 && opts.canopy !== false) canopies(ctx, poly, y0 + ground, opts.wall);
   if (opts.store && y0 < 1) shopfront(ctx, poly, y0, ground, opts.storeW || 4.5, opts.wall);
@@ -776,7 +792,7 @@ function districtEdges(ctx, deco) {
         _m4.makeRotationFromEuler(new THREE.Euler(rand(0, 6), rand(0, 6), rand(0, 6))).scale(new THREE.Vector3(s2 * 1.2, s2 * 0.7, s2)).setPosition(xw - rand(0.8, 3.2), L.waterY + rand(-0.6, 0.3), z);
         v.geom(rock, _m4, {}, [c, c * 0.97, c * 0.9]); }
       const bol = new THREE.CylinderGeometry(0.16, 0.2, 0.5, 10); const cap = new THREE.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-      for (let z = -L.islandZ[1] + 10; z < L.islandZ[1]; z += 16) { if (Math.abs(z) < RH + 4) continue; _m4.makeTranslation(xw + 1.0, 0.4, z); v.geom(bol, _m4, {}, [0.12, 0.13, 0.14]); _m4.makeTranslation(xw + 1.0, 0.65, z); v.geom(cap, _m4, {}, [0.12, 0.13, 0.14]); }
+      for (let z0 = -L.islandZ[1] + 10; z0 < L.islandZ[1]; z0 += 16) { if (Math.abs(z0) < RH + 4) continue; let z = z0; if (!EDGE_OFF) { const c = L.islandEW.find((e) => Math.abs(z0 - e) < RH + 1); if (c !== undefined) z = c + (z0 >= c ? 1 : -1) * (RH + 1.5); } /* a_edgewalls: the row also stood in the cross-street ends at the seawall -> slid onto the sidewalk */ _m4.makeTranslation(xw + 1.0, 0.4, z); v.geom(bol, _m4, {}, [0.12, 0.13, 0.14]); (ctx.clutAdd = ctx.clutAdd || []).push({ k: 'swbol', x: xw + 1.0, z, ang: 0, hl: 0.18, hw: 0.18, h: 0.85 }); /* a_edgewalls: cast-iron seawall bollard had no box */ _m4.makeTranslation(xw + 1.0, 0.65, z); v.geom(cap, _m4, {}, [0.12, 0.13, 0.14]); }
     }
     // jetty: rubble mound of boulders, concrete deck, rails, end lamp
     const zj = zE + sg * 6, x0 = L.beachX[0] + 38, x1 = L.beachX[1] + 45; // r5.0: jetty root starts past the dry sand so the beach walk continues
@@ -810,13 +826,13 @@ function skyline(ctx) {
   // shared rng sequence is exactly as before (and records every pick); phase 2 snaps the downtown towers into the fabric's paved
   // blocks (shrunk / slid / dropped if they would hit a street or a neighbour) and builds them for real, replaying the picks.
   const recs = []; const SCR = { W: new World(1e6), col: { add() {}, addOBB() {} }, ds: null };
-  let REC = null, REPLAY = null; const draw = (f) => { if (REPLAY) return REPLAY.shift(); const v = f(); REC.push(v); return v; };
+  let REC = null, REPLAY = null, CUR_B = null; const draw = (f) => { if (REPLAY) return REPLAY.shift(); const v = f(); REC.push(v); return v; };
   const rngR = () => draw(rng), pickR = (a) => draw(() => pick(a));
   const tower = (cx, cz, w, d, h, kind) => { REC = []; build(SCR, cx, cz, w, d, h, kind); recs.push({ cx, cz, w, d, h, kind, picks: REC, seed: Math.floor(cx * 31 + cz * 17) }); REC = null; };
   const build = (ctx, cx, cz, w, d, h, kind) => {
     const opt = { collide: false, relief: false }; const rng = rngR, pick = pickR;
-    const tdet = (poly, wall) => { if (!ctx.ds) return; const p = { kind, poly, cx, cz, w, d, h, wall }; ctx.ds.add(cx, cz, Math.max(w, d) / 2 + 4, job('tower', (Wd) => towerDetail(Wd, p))); };
-    ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); // r5.0: the far skyline is reachable now (causeway / island ends)
+    const tdet = (poly, wall) => { if (ctx.fab && CUR_B) (ctx.fab.dtTowers || (ctx.fab.dtTowers = [])).push({ kind, poly, cx, cz, w, d, h, wall, b: CUR_B, cb: tcb }); if (!ctx.ds) return; const p = { kind, poly, cx, cz, w, d, h, wall, dt: !!CUR_B }; /* a_downtown: downtown towers recorded for the podium pass (no rng draws) */ ctx.ds.add(cx, cz, Math.max(w, d) / 2 + 4, job('tower', (Wd) => towerDetail(Wd, p))); };
+    const tcb = ctx.col.add(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, h, 'bld'); /* a_downtown2: kept so downtown.js can swap it for a fitted one */ // r5.0: the far skyline is reachable now (causeway / island ends)
     if (kind === 0) { const poly = rng() < 0.5 ? chamfer(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2, Math.min(w, d) * 0.15) : rect(cx - w / 2, cz - d / 2, cx + w / 2, cz + d / 2);
       volume(ctx, poly, 0, h, { ...opt, style: 0, fh: 3.8, ww: 2, wall: [0.55, 0.58, 0.6], glass: pick(glassT) });
       if (rng() < 0.6) crownLights(ctx, poly, h - 0.6, pick(lightCols)); tdet(poly); }
@@ -846,7 +862,7 @@ function skyline(ctx) {
       if (!fits(x, z)) { let best = null, bd = 1e9; for (let zz = b.iz0 + 1 + d / 2; zz <= b.iz1 - 1 - d / 2; zz += 2) for (let xx = b.ix0 + 1 + w / 2; xx <= b.ix1 - 1 - w / 2; xx += 2) { const dd = Math.hypot(xx - x, zz - z); if (dd < bd && fits(xx, zz)) { bd = dd; best = [xx, zz]; } } if (!best) continue; [x, z] = best; }
       b.towers.push([x - w / 2, z - d / 2, x + w / 2, z + d / 2, r.h]); r.cx = x; r.cz = z; r.w = w; r.d = d;
     }
-    REPLAY = r.picks.slice(); withSeed(r.seed >>> 0, () => build(ctx, r.cx, r.cz, r.w, r.d, r.h, r.kind)); REPLAY = null;
+    CUR_B = b || null; REPLAY = r.picks.slice(); withSeed(r.seed >>> 0, () => build(ctx, r.cx, r.cz, r.w, r.d, r.h, r.kind)); REPLAY = null; CUR_B = null;
   }
 }
 // coast to the north and south of the district (beyond the jetties): condo/hotel strips on the barrier island
@@ -911,10 +927,14 @@ function marina(ctx) {
     for (let x = p.x0 + 0.5; x < p.x1; x += 1.2) box(v, x - 0.02, 0.15, p.z - p.hw, x + 0.02, 0.152, p.z + p.hw, {}, [0.3, 0.22, 0.15], false); // plank gaps
     for (let x = p.x0 + 1; x < p.x1; x += 4) for (const sz of [-1, 1]) box(v, x - 0.15, L.waterY - 2, p.z + sz * (p.hw - 0.15) - 0.15, x + 0.15, 0.5, p.z + sz * (p.hw - 0.15) + 0.15, {}, [0.3, 0.24, 0.18]);
     // dock lamps on the outer end (night practicals)
-    ctx.lamps.push({ x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock' });
+    // a_portnight: pool = [cx, cz, sx, sz] of the deck this lamp lights (props.js clips the ground light pool to it; no rng)
+    // a_portlamps: pier = deck extent, berths = [x, side, Lh] of the moored yachts (props.js keeps the deck bollards out of each
+    // yacht's boarding gap); plain fields on the same object, no extra random draws
+    const dockLamp = { x: p.x0 + 2, z: p.z + p.hw - 0.3, y: 0.15, dir: [0, -1], kind: 'dock', pool: [p.x0 + 5.5, p.z, 11, p.hw * 1.9], pier: [p.x0, p.x1, p.z, p.hw], berths: [] };
+    ctx.lamps.push(dockLamp);
     // yachts on both sides
     for (const sz of [-1, 1]) for (let x = p.x0 + 8; x < p.x1 - 8; x += rand(13, 17)) {
-      if (rng() < 0.25) continue; const Lh = rand(9, 14), Bh = rand(3, 3.8); const zc = p.z + sz * (p.hw + Bh / 2 + 0.8);
+      if (rng() < 0.25) continue; const Lh = rand(9, 14), Bh = rand(3, 3.8); const zc = p.z + sz * (p.hw + Bh / 2 + 0.8); dockLamp.berths.push([x, sz, Lh]);
       const hull = new THREE.CylinderGeometry(Bh / 2, Bh / 2 * 0.75, Lh, 14, 1); hull.rotateZ(Math.PI / 2); hull.scale(1, 0.55, 1);
       gput(v, hull, x, L.waterY + 0.7, zc, [0.94, 0.94, 0.92]);
       const bow = new THREE.ConeGeometry(Bh / 2, 3, 14); bow.rotateZ(-Math.PI / 2); bow.scale(1, 0.55, 1); gput(v, bow, x + Lh / 2 + 1.5, L.waterY + 0.7, zc, [0.94, 0.94, 0.92]);
