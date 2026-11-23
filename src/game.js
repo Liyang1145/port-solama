@@ -18,6 +18,7 @@ import { POI } from './mapdata.js';
 import { CYBER } from './mapsel.js';
 import { routeWaypoint } from './roadroute.js';
 import { ActionPose } from './actionpose.js';
+const OLD_EXIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldexit'); // fix_pt6 #4
 const OLDMANAGE = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmanage'); // perf_debug6
 const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one save per map (positions differ)
 
@@ -117,7 +118,18 @@ export class Game {
     if (P.car) { // exit on the left side
       const v = P.car; const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw);
       let x = v.x + lx * (v.dims.W / 2 + 0.6), z = v.z + lz * (v.dims.W / 2 + 0.6);
-      if (this.city.col.resolve(x, z, 0.35, 0.5).hit) { x = v.x - lx * (v.dims.W / 2 + 0.6); z = v.z - lz * (v.dims.W / 2 + 0.6); }
+      if (OLD_EXIT) { if (this.city.col.resolve(x, z, 0.35, 0.5).hit) { x = v.x - lx * (v.dims.W / 2 + 0.6); z = v.z - lz * (v.dims.W / 2 + 0.6); } }
+      else { // fix_pt6 #4 (?oldexit = old): the old test probed at a fixed y 0.5 (wrong on raised ground) with r 0.35 and took the right side
+        // unchecked; playtest2 B (160.9,787.6): player + camera inside a box for 5 frames after getting out. Now: left / right door, then
+        // further out, behind / in front, diagonals; a spot must be free at the player's real height (r 0.4) and reachable from the
+        // cabin without crossing a collider; none free -> the left spot pushed out of whatever holds it.
+        const col = this.city.col, fx = Math.sin(v.yaw), fz = Math.cos(v.yaw), hw = v.dims.W / 2, hl = (v.dims.L || 4.5) / 2; const r = {}; let ok = false;
+        const C = [[lx, lz, hw + 0.6], [-lx, -lz, hw + 0.6], [lx, lz, hw + 1.1], [-lx, -lz, hw + 1.1], [-fx, -fz, hl + 0.7], [fx, fz, hl + 0.7], [lx - fx, lz - fz, hw + 0.9], [-lx - fx, -lz - fz, hw + 0.9], [lx + fx, lz + fz, hw + 0.9], [-lx + fx, -lz + fz, hw + 0.9], [lx, lz, hw + 1.8], [-lx, -lz, hw + 1.8]];
+        for (const [ax, az, d] of C) { const n = Math.hypot(ax, az), cx = v.x + ax / n * d, cz = v.z + az / n * d, gy = this.city.groundH(cx, cz);
+          if (Math.abs(gy - v.y) > 1.2 || col.resolve(cx, cz, 0.4, gy + 0.5, r).hit) continue;
+          if (col.raycast(v.x, v.y + 0.9, v.z, cx, gy + 0.9, cz) < 1 - 0.4 / Math.max(0.5, d)) continue; x = cx; z = cz; ok = true; break; }
+        if (!ok) { const gy = this.city.groundH(x, z); for (let i = 0; i < 4; i++) { const q = col.resolve(x, z, 0.4, gy + 0.5, r); if (!q.hit) break; x = q.x; z = q.z; } }
+      }
       v.driver = null; v.input.throttle = 0; v.input.steer = 0; v.input.handbrake = true;
       P.car = null; P.onFoot = true; this.player.root.visible = true; this.tp(x, z, v.yaw); this.cam.yaw = v.yaw + Math.PI;
       this.headlight.intensity = 0; if (v.type === 'police') v.siren = false;
@@ -496,7 +508,22 @@ export class Game {
     }
     let want = target.clone().add(off); want.y += height;
     // collide with buildings
-    const t = this.city.col.raycast(target.x, target.y, target.z, want.x, want.y, want.z);
+    let t = this.city.col.raycast(target.x, target.y, target.z, want.x, want.y, want.z);
+    // fix_pt6 #2 (?oldcamwall = old): back to a wall, the boom was pulled in to 0.45-0.64 m and the fix_pt3 near-cut then hid the player
+    // (playtest2 B (257.9,-11.2): 3 of 16 orbit yaws showed only the wall). When the free boom is short, try booms swung along the wall
+    // (yaw +-0.5..1.6 rad) and raised (+0.8 / +1.6 m, looking down over the shoulder); take the longest free one (small penalty for
+    // swinging / raising), and ease the swing / raise in and out so the camera slides instead of jumping.
+    if (!P.car && !(this.oldCamWall ?? (this.oldCamWall = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldcamwall')))) {
+      const free0 = t * dist; let by = 0, bu = 0;
+      if (free0 < 1.6) { let best = free0 - 0.2;
+        for (const dy of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6]) for (const du of [0, 0.8, 1.6]) { if (!dy && !du) continue;
+          const yw = C.yaw + dy, px = Math.sin(yw) * cp * dist, pz = Math.cos(yw) * cp * dist, py = -sp * dist + height + du;
+          const tt = this.city.col.raycast(target.x, target.y, target.z, target.x + px, target.y + py, target.z + pz); const fr = tt * Math.hypot(px, py, pz);
+          const sc = Math.min(fr, dist) - 0.35 * Math.abs(dy) - 0.25 * du; if (fr > free0 + 0.3 && sc > best) { best = sc; by = dy; bu = du; } } }
+      const k = snap ? 1 : 1 - Math.exp(-6 * dt); C.wy = (C.wy || 0) + (by - (C.wy || 0)) * k; C.wu = (C.wu || 0) + (bu - (C.wu || 0)) * k;
+      if (Math.abs(C.wy) > 0.01 || C.wu > 0.01) { const yw = C.yaw + C.wy; want.set(target.x + Math.sin(yw) * cp * dist, target.y - sp * dist + height + C.wu, target.z + Math.cos(yw) * cp * dist);
+        t = this.city.col.raycast(target.x, target.y, target.z, want.x, want.y, want.z); }
+    } else if (P.car) { C.wy = 0; C.wu = 0; }
     if (t < 1) want = target.clone().lerp(want, Math.max(0.05, t - 0.25 / Math.max(1, dist)));
     want.y = Math.max(want.y, this.city.groundH(want.x, want.z) + 0.3);
     if (snap) C.pos.copy(want); else C.pos.lerp(want, 1 - Math.exp(-(P.car ? 14 : 20) * dt));

@@ -6,6 +6,9 @@ const root = path.resolve(__dirname, '..'); const TAG = process.argv[2] || 'x'; 
 const W = +(process.env.W || 480), H = +(process.env.H || 270), FR = +(process.env.FR || 3);
 const srv = http.createServer((q, s) => { const p = path.join(root, DIST, decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': p.endsWith('.html') ? 'text/html' : p.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); s.end(d); }); });
 const rss = () => { try { const out = cp.execSync(`ps -eo pid=,ppid=,rss=`).toString().trim().split('\n').map((l) => l.trim().split(/\s+/).map(Number)); const kids = new Set([process.pid]); let ch = true; while (ch) { ch = false; for (const [p, pp] of out) if (kids.has(pp) && !kids.has(p)) { kids.add(p); ch = true; } } let s = 0; for (const [p, , r] of out) if (p !== process.pid && kids.has(p)) s += r; return Math.round(s / 1024); } catch (e) { return -1; } };
+const smaps = () => { try { const out = cp.execSync(`ps -eo pid=,ppid=,comm=`).toString().trim().split('\n').map((l) => l.trim().split(/\s+/)); const kids = new Set([String(process.pid)]); let ch = true; while (ch) { ch = false; for (const [p, pp] of out) if (kids.has(pp) && !kids.has(p)) { kids.add(p); ch = true; } }
+  const agg = {}; for (const [p, , c] of out) { if (!kids.has(p) || p === String(process.pid) || !/chrome/.test(c)) continue; let cur = null; for (const l of fs.readFileSync('/proc/' + p + '/smaps', 'utf8').split('\n')) { const m = l.match(/^[0-9a-f]+-[0-9a-f]+ (\S+) \S+ \S+ \S+\s*(.*)$/); if (m) { const nm = m[2] ? (m[2].startsWith('/') ? m[2].split('/').pop() : m[2]) : 'anon'; cur = m[1] + ' ' + nm.slice(0, 30); continue; } const r = l.match(/^Rss:\s+(\d+)/); if (r && cur) agg[cur] = (agg[cur] || 0) + +r[1]; } }
+  return Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => k + ' ' + Math.round(v / 1024)).join(' | '); } catch (e) { return 'smaps err ' + e.message; } };
 const avail = () => +cp.execSync("free -m | awk '/Mem:/{print $7}'").toString().trim();
 let peak = 0; const iv = setInterval(() => { const r = rss(); if (r > peak) peak = r; }, 1000);
 const INIT = () => {
@@ -22,7 +25,7 @@ const INIT = () => {
   const ts = P.texStorage2D; P.texStorage2D = function (t, lv, ifmt, w, h) { let b = 0, ww = w, hh = h; for (let i = 0; i < lv; i++) { b += ww * hh * bpp(ifmt); ww = Math.max(1, ww >> 1); hh = Math.max(1, hh >> 1); } if (t === 0x8513) b *= 6; setT(t, { key: 's', b, w, h, f: ifmt, cube: t === 0x8513 }); return ts.apply(this, arguments); };
   const ts3 = P.texStorage3D; P.texStorage3D = function (t, lv, ifmt, w, h, d) { let b = 0, ww = w, hh = h; for (let i = 0; i < lv; i++) { b += ww * hh * d * bpp(ifmt); ww = Math.max(1, ww >> 1); hh = Math.max(1, hh >> 1); } setT(t, { key: 's', b, w, h, d, f: ifmt }); return ts3.apply(this, arguments); };
   const ti3 = P.texImage3D; P.texImage3D = function (t, lv, ifmt, w, h, d, bo, fmt, type) { setT(t, { key: 'i' + lv, b: w * h * d * bpp(ifmt, type), w, h, d, f: ifmt }); return ti3.apply(this, arguments); };
-  const gm = P.generateMipmap; P.generateMipmap = function (t) { const x = bound.get('t' + unit + ':' + t); const o = x && T.tex.get(x); if (o && !o.lv.mip) { const base = o.lv[t + ':0'] || o.lv[Object.keys(o.lv)[0]] || 0; const add = o.cube ? 0 : Math.round(base / 3); o.lv.mip = add; o.b += add; T.tb += add; o.mip = 1; } return gm.call(this, t); };
+  const gm = P.generateMipmap; P.generateMipmap = function (t) { const x = bound.get('t' + unit + ':' + t); const o = x && T.tex.get(x); if (o && !o.lv.mip && !o.lv.s) { const base = o.lv[t + ':0'] || o.lv[Object.keys(o.lv)[0]] || 0; const add = o.cube ? 0 : Math.round(base / 3); o.lv.mip = add; o.b += add; T.tb += add; o.mip = 1; } return gm.call(this, t); };
   const dt = P.deleteTexture; P.deleteTexture = function (x) { const o = T.tex.get(x); if (o) { T.tb -= o.b; T.tex.delete(x); } return dt.call(this, x); };
   const wr = P.bindRenderbuffer; P.bindRenderbuffer = function (t, r) { bound.set('r', r); return wr.call(this, t, r); };
   const rs = P.renderbufferStorage; P.renderbufferStorage = function (t, f, w, h) { const r = bound.get('r'); if (r) { const n = w * h * 4; T.rbb += n - (T.rb.get(r) || 0); T.rb.set(r, n); } return rs.apply(this, arguments); };
@@ -31,6 +34,12 @@ const INIT = () => {
   T.summary = () => { const MB = (b) => +(b / 1048576).toFixed(1); const tl = [...T.tex.values()].sort((a, b) => b.b - a.b); const bl = [...T.buf.values()].sort((a, b) => b - a);
     return { buffers: { n: T.buf.size, MB: MB(T.bb), peakMB: MB(T.peakB), top: bl.slice(0, 8).map(MB) }, textures: { n: T.tex.size, MB: MB(T.tb), peakMB: MB(T.peakT), top: tl.slice(0, 30).map((o) => `${o.w}x${o.h}${o.d > 1 ? 'x' + o.d : ''}${o.cube ? 'c' : ''} f${o.f.toString(16)}${o.mip ? 'm' : ''} ${MB(o.b)}`) }, rb: { n: T.rb.size, MB: MB(T.rbb) }, bySrc: (() => { const r = {}; for (const o of T.tex.values()) { const k = (o.src || 'storage') + (o.d > 1 ? '3d' : ''); r[k] = +((r[k] || 0) + o.b / 1048576).toFixed(1); } return r; })(), morph: window.__MORPHC || null }; };
 };
+const ABT = () => { const L = window.__ABL = new Map(); let id = 0; const reg = new FinalizationRegistry((k) => L.delete(k));
+  const rec = (buf, n) => { if (n < 262144) return; const st = (new Error().stack || '').split('\n').slice(2, 9).map((l) => l.trim().replace(/^at /, '').replace(/https?:\/\/[^/]+\//, '')).join(' < '); const k = ++id; L.set(k, { n, st }); reg.register(buf, k); };
+  for (const nm of ['Float32Array', 'Float64Array', 'Uint8Array', 'Uint16Array', 'Uint32Array', 'Int32Array', 'Int16Array', 'Int8Array', 'Uint8ClampedArray']) { const C = window[nm];
+    window[nm] = new Proxy(C, { construct(t, a, nt) { const r = Reflect.construct(t, a, nt === window[nm] ? t : nt); if (typeof a[0] === 'number' || (a[0] && a[0].length !== undefined && !(a[0] instanceof ArrayBuffer))) rec(r.buffer, r.byteLength); return r; } }); C.prototype.constructor = window[nm]; }
+  const AB = window.ArrayBuffer; window.ArrayBuffer = new Proxy(AB, { construct(t, a, nt) { const r = Reflect.construct(t, a, nt === window.ArrayBuffer ? t : nt); rec(r, r.byteLength); return r; } });
+  window.__ABsum = () => { const m = new Map(); let tot = 0; for (const { n, st } of L.values()) { tot += n; const k = st.split(' < ').slice(0, 4).join(' < '); const e = m.get(k) || [0, 0]; e[0] += n; e[1]++; m.set(k, e); } return { liveMB: +(tot / 1048576).toFixed(1), top: [...m.entries()].sort((a, b) => b[1][0] - a[1][0]).slice(0, 30).map(([k, v]) => (v[0] / 1048576).toFixed(1) + ' MB x' + v[1] + ' ' + k.slice(0, 400)) }; }; };
 const CENSUS = () => { const G = window.__G; const seen = new Set(); const groups = {}; const MB = (b) => +(b / 1048576).toFixed(2); let cpu = 0; const cpuG = {};
   const top = (o) => { let p = o, path = []; while (p.parent && p.parent !== G.scene) { p = p.parent; } return (p.name || p.type) + (o.name && p !== o ? '/' + o.name.slice(0, 18) : ''); };
   G.scene.traverse((o) => { const g = o.geometry; if (!g || seen.has(g)) return; seen.add(g); let b = 0, c = 0; for (const k in g.attributes) { const a = g.attributes[k]; const arr = a.array || (a.data && a.data.array); if (!arr) continue; const n = a.count * a.itemSize * (arr.BYTES_PER_ELEMENT || 4); b += a.isInterleavedBufferAttribute ? a.data.array.byteLength / Math.max(1, Object.keys(g.attributes).length) : arr.byteLength || n; if (arr.length) c += arr.byteLength; }
@@ -47,19 +56,23 @@ srv.listen(0, async () => {
   const p = await (await b.newContext({ viewport: { width: W, height: H } })).newPage(); p.setDefaultTimeout(900000); let perr = 0;
   p.on('pageerror', (e) => { perr++; console.log('PAGEERROR', e.message.slice(0, 200)); });
   p.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.text().slice(0, 200)); });
-  await p.addInitScript(INIT);
+  await p.addInitScript(INIT); if (process.env.ABTRACK) await p.addInitScript(ABT);
   const t0 = Date.now(); console.log(TAG, 'start avail', avail());
   await p.goto(`http://127.0.0.1:${srv.address().port}/index.html?snap&map=${MAPN}&dpr=1&lowshadow&nopost&far=140${process.env.Q || ''}`);
   await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
   const c = await p.context().newCDPSession(p);
-  const hu = async () => { const h = await c.send('Runtime.getHeapUsage'); return Math.round(h.usedSize / 1048576); };
+  const hu = async () => { const h = await c.send('Runtime.getHeapUsage'); return Math.round(h.usedSize / 1048576) + '/back' + Math.round((h.backingStorageSize || 0) / 1048576) + '/emb' + Math.round((h.embedderHeapUsedSize || 0) / 1048576); };
   console.log(TAG, 'ready', ((Date.now() - t0) / 1000).toFixed(0) + 's', 'rss', rss(), 'heap', await hu(), 'avail', avail(), 'peak', peak);
+  console.log(TAG, 'SMAPS@ready', smaps()); if (process.env.PROGS) console.log(TAG, 'programs', await p.evaluate('__G.renderer.info.programs.length'));
   console.log(TAG, 'GL@ready', JSON.stringify(await p.evaluate('__GLM.summary()')));
   for (let i = 0; i < FR; i++) { const t = Date.now(); await p.evaluate('void __G.tick(1/30, true)'); const fin = await p.evaluate('__G.finish ? __G.finish() : 0'); console.log(TAG, 'frame', i, ((Date.now() - t) / 1000).toFixed(1) + 's', 'rss', rss(), 'heap', await hu(), 'avail', avail(), 'peak', peak); if (avail() < 500) { console.log('LOW'); break; } }
+  console.log(TAG, 'SMAPS@frames', smaps()); if (process.env.PROGS) console.log(TAG, 'programs', await p.evaluate('__G.renderer.info.programs.length'));
   console.log(TAG, 'GL@frames', JSON.stringify(await p.evaluate('__GLM.summary()')));
+  if (process.env.DATALIST) console.log(TAG, 'DATATEX', JSON.stringify(await p.evaluate('[...__GLM.tex.values()].filter((o) => o.src === "data" || o.d > 1).sort((a, b) => b.b - a.b).slice(0, 25).map((o) => [o.w, o.h, o.d, o.f.toString(16), +(o.b / 1048576).toFixed(2)])')));
   if (process.env.GLLIST) fs.writeFileSync(process.env.GLLIST, JSON.stringify(await p.evaluate('[...__GLM.tex.values()].sort((a, b) => b.b - a.b).map((o) => [o.w, o.h, o.d, o.cube ? 1 : 0, o.f, o.mip ? 1 : 0, +(o.b / 1048576).toFixed(2)])')));
   console.log(TAG, 'CENSUS', JSON.stringify(await p.evaluate(CENSUS), null, 1));
   await c.send('HeapProfiler.collectGarbage'); await p.waitForTimeout(1000);
+  if (process.env.ABTRACK) { await c.send('HeapProfiler.collectGarbage'); await p.waitForTimeout(1500); console.log(TAG, 'AB', JSON.stringify(await p.evaluate('__ABsum()'), null, 1)); }
   console.log(TAG, 'END rss', rss(), 'heap', await hu(), 'peak', peak, 'PAGEERROR', perr);
   if (process.env.SHOT) { const d = await p.evaluate('void __G.render(), document.getElementById("c").toDataURL("image/jpeg", 0.85)'); fs.writeFileSync(process.env.SHOT, Buffer.from(d.split(',')[1], 'base64')); console.log('shot', process.env.SHOT); }
   clearInterval(iv); await b.close(); process.exit(0);

@@ -64,6 +64,7 @@ const OF_OFF = typeof location !== 'undefined' && /[?&]nooverlayfit/.test(locati
 // b_core test switch: ?nobcore restores the old (overlapping, slab-like) PVC door strips
 const BC_OFF = typeof location !== 'undefined' && /[?&]nobcore/.test(location.search);
 const DUPNAME = typeof location !== 'undefined' && /[?&]olddupname/.test(location.search); // fix_pt1
+const OLDDUP3 = typeof location !== 'undefined' && /[?&]olddup3/.test(location.search); // fix_pt6
 function pickType() { let r = rng() * TW; for (const t of TYPES) { r -= t[2]; if (r <= 0) return t; } return TYPES[0]; }
 
 // ------------------------------------------------------------------ unit geometries ----
@@ -260,8 +261,10 @@ export class StorefrontLayer {
     const synced = r.sg === 1 && r.sk >= 0 && r.sk < SIGN_TYPE.length; let T = synced ? TYPE_BY_ID[SIGN_TYPE[r.sk]] : pickType();
     // fix_pt1 (?olddupname = old): two neighbouring bays could draw the same one-name type (two 霓虹药房 side by side, PLAYTEST_1H V4);
     // the neighbour's type is remembered per frontage and a repeat of a single-name type moves to the next type (no extra rng draw)
-    const fk = r.F0 || (src + '|' + r.fx + '|' + r.z1); const prevN = DUPNAME ? null : (this._lastName || (this._lastName = new Map())).get(fk); const adj = prevN && prevN.i === r.i - 1;
-    if (!synced && adj && prevN.type === T[0] && T[1].length === 1) { let j = TYPES.indexOf(T); do { j = (j + 1 + (r.i % 2)) % TYPES.length; } while (TYPES[j][0] === T[0] || TYPES[j][1].includes(prevN.nk)); T = TYPES[j]; this.stats.dupFix = (this.stats.dupFix || 0) + 1; }
+    // fix_pt6 #3 (?olddup3 = fix_pt1 adjacent-only): playtest2 still saw the same board on bays 1 and 3 of one row -> the last 3 bays of the frontage count
+    const fk = r.F0 || (src + '|' + r.fx + '|' + r.z1); const hist = DUPNAME ? null : (this._lastName || (this._lastName = new Map())).get(fk); const WIN = OLDDUP3 ? 1 : 3;
+    const recent = hist ? hist.filter((e) => r.i - e.i >= 1 && r.i - e.i <= WIN) : []; const adj = recent.length > 0; const rT = recent.map((e) => e.type), rN = recent.map((e) => e.nk);
+    if (!synced && adj && rT.includes(T[0]) && T[1].length === 1) { let j = TYPES.indexOf(T), g = 0; do { j = (j + 1 + (r.i % 2)) % TYPES.length; } while (++g < 2 * TYPES.length && (rT.includes(TYPES[j][0]) || TYPES[j][1].some((q) => rN.includes(q)))); T = TYPES[j]; this.stats.dupFix = (this.stats.dupFix || 0) + 1; }
     const type = T[0]; this.stats.types[type]++; this.stats.shops++;
     const bs = this.stats.bySrc[src]; bs.shops++; bs.types[type] = (bs.types[type] || 0) + 1;
     if (synced) this.stats.signSync++; else if (r.sg === 1) this.stats.signOther++;
@@ -355,8 +358,8 @@ export class StorefrontLayer {
         if (type === 'pharm' && r.aw) wl = Math.min(wl, Math.max(0.6, w - 0.9)); } // room beside it for the pharmacy cross, clear of the awning brace
       asm = 'lb'; if (!lbDrop) P0('lbBody', 0, yl, lz, wl, hl, 0.18); asm = null;
       const c = new THREE.Vector3(0, yl, lz + 0.096).applyMatrix4(BM); const n = new THREE.Vector3(0, 0, 1).transformDirection(BM);
-      let nk = synced ? r.sk : pick(T[1]); if (!synced && adj && prevN.nk === nk) { const alt = T[1].filter((q) => q !== nk); if (alt.length) { nk = alt[r.i % alt.length]; this.stats.dupFix = (this.stats.dupFix || 0) + 1; } }
-      if (!DUPNAME) this._lastName.set(fk, { i: r.i, nk, type }); if (!lbDrop) shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
+      let nk = synced ? r.sk : pick(T[1]); if (!synced && adj && rN.includes(nk)) { const alt = T[1].filter((q) => !rN.includes(q)); if (alt.length) { nk = alt[r.i % alt.length]; this.stats.dupFix = (this.stats.dupFix || 0) + 1; } }
+      if (!DUPNAME) { const h = this._lastName.get(fk) || []; h.push({ i: r.i, nk, type }); if (h.length > 3) h.shift(); this._lastName.set(fk, h); } if (!lbDrop) shop.uniq.push({ k: nk, x: c.x, y: c.y, z: c.z, ry: Math.atan2(n.x, n.z), w: wl * 0.95, h: hl * 0.86 }); }
     // ---- window display card (lit panel + dark strokes) in front of the parallax room, behind the glass
     const card = (k, x0, x1, ya, yb2) => { if (yb2 - ya < 0.15 || x1 - x0 < 0.2) return false; P(k, (x0 + x1) / 2, (ya + yb2) / 2, 0.12, x1 - x0, yb2 - ya, 0.02); return true; };
     const ink = (x, y, sx, sy) => P('ink', x, y, 0.135, sx, sy, 0.006);

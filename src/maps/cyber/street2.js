@@ -266,11 +266,14 @@ export const STALLS = [noodleStall, bbqStall, repairStall];
 // ------------------------------------------------------------------ shop fronts ----
 // Chinese light-box signboard across a bay (replaces kit.js signboard on some bays): metal box, lit text face, end caps
 const DUPNAME2 = typeof location !== 'undefined' && /[?&]olddupname/.test(location.search);
+const OLDDUP3 = typeof location !== 'undefined' && /[?&]olddup3/.test(location.search); // fix_pt6
 export function cnSignboard(W, F, a0, a1, y, h = 0.8) {
   const w = a1 - a0; const ry = yawOf(F); const c = V3(F, (a0 + a1) / 2, 0.36, y + h / 2); const v = W.b('vcol', c[0], c[2]);
   put(v, kg().box, c[0], c[1], c[2], w, h, 0.3, [0.1, 0.1, 0.11], ry);
   let k = randi(0, 17); // fix_pt1 (?olddupname = old): never the same name as the light box on the bay right next to it on this facade
-  if (!DUPNAME2 && F.__lastSign && F.__lastSign.k === k && Math.abs(F.__lastSign.a - a0) < (a1 - a0) + 1.5) k = (k + 5) % 18; F.__lastSign = { k, a: a0 };
+  if (OLDDUP3) { if (!DUPNAME2 && F.__lastSign && F.__lastSign.k === k && Math.abs(F.__lastSign.a - a0) < (a1 - a0) + 1.5) k = (k + 5) % 18; F.__lastSign = { k, a: a0 }; }
+  else if (!DUPNAME2) { // fix_pt6 #3 (?olddup3 = adjacent only): no repeat among the last 3 light boxes of this facade (playtest2: bays 1 and 3 of a row matched)
+    const H = F.__signs || (F.__signs = []); const near = H.filter((e) => Math.abs(e.a - a0) < 3 * ((a1 - a0) + 1.5)).map((e) => e.k); for (let g = 0; g < 18 && near.includes(k); g++) k = (k + 5) % 18; H.push({ k, a: a0 }); if (H.length > 3) H.shift(); }
   const fw = Math.min(w - 0.12, (h - 0.1) * 2.2 * (w > 4 ? 1.15 : 1)); // keep the 2:1 cell aspect roughly; centre it
   const f = V3(F, (a0 + a1) / 2, 0.515, y + h / 2); cnFace(W, k, f[0], f[1], f[2], ry, fw, h - 0.1, 1);
   if (fw < w - 0.5) for (const s of [-1, 1]) { const e = V3(F, (a0 + a1) / 2 + s * (fw / 2 + (w - fw) / 4), 0.515, y + h / 2); put(W.b('neon', e[0], e[2]), kg().box, e[0], e[1], e[2], (w - fw) / 2 - 0.12, h - 0.16, 0.01, pick(NEONC).map((q) => q * 0.12), ry); }

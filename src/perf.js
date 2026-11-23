@@ -102,11 +102,17 @@ export function makeDRS(apply) {
 // landmark position edits) stay, so bounding volumes, collision builders and the code that rewrites attributes are unaffected.
 const DROP = new Set(['normal', 'uv', 'uv1', 'uv2', 'color']); let dropped = 0; const reg = new WeakSet();
 function freeArr() { dropped += this.array.byteLength; this.array = new this.array.constructor(0); }
+// fix_pt6 #1 (?oldrelease = old): onUpload only fires on an upload that happens AFTER it is registered. The load-time precompile pass
+// (and a streamed chunk drawn before the next 60-frame sweep) uploads first, so those arrays were never freed (A spawn: ~110 MB of
+// normal / uv / color arrays still on the CPU at ready). Every attribute now marks itself when uploaded (prototype default callback);
+// one already on the GPU is freed at once.
+const UPL = new WeakSet(); const OLDREL = Q.has('oldrelease');
+if (!OLDREL) THREE.BufferAttribute.prototype.onUploadCallback = function () { UPL.add(this); };
 export function releaseCpuAttrs(scene) {
   if (Q.has('keepgeo')) return 0; let n = 0;
   scene.traverse((o) => { if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || o.morphTargetInfluences) return; const g = o.geometry; if (!g || reg.has(g)) return; reg.add(g);
     if (Object.keys(g.morphAttributes).length) return; if (!g.boundingSphere) g.computeBoundingSphere(); if (!g.boundingBox) g.computeBoundingBox();
-    for (const k in g.attributes) { const a = g.attributes[k]; if (!DROP.has(k) || a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute || a.usage !== THREE.StaticDrawUsage || !a.array || a.array.length < 3000) continue; a.onUpload(freeArr); n++; } });
+    for (const k in g.attributes) { const a = g.attributes[k]; if (!DROP.has(k) || a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute || a.usage !== THREE.StaticDrawUsage || !a.array || a.array.length < 3000) continue; if (!OLDREL && UPL.has(a)) freeArr.call(a); else a.onUpload(freeArr); n++; } });
   return n;
 }
 export const releasedMB = () => +(dropped / 1048576).toFixed(1);
