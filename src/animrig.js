@@ -47,21 +47,33 @@ function ik2(up, mid, end, target, pole) {
 function init(c) {
   const B = {}; for (const n of NAMES) B[n] = c.model.getObjectByName(n) || null;
   const ok = B.Hips && B.Spine1 && B.LeftUpLeg && B.LeftLeg && B.LeftFoot && B.RightUpLeg && B.RightLeg && B.RightFoot;
+  const bl = NAMES.map((n) => B[n]).filter(Boolean); // bones this layer (and the look-at after it) edits
   const rest = {}; for (const n of AMP) if (B[n]) rest[n] = B[n].quaternion.clone(); // idle frame-0 pose (constructor ran mixer.update(0) on idle)
   const r = Math.random;
-  return { B, ok, rest, roll: 0, pitch: 0, acc: 0, lsp: 0, exert: 0, bt: r(), st: r() * 50, sway: r() * 6.28, hq: new THREE.Quaternion(), hqOk: false,
+  return { B, ok, rest, bl, clean: new Float64Array(bl.length * 4), out: new Float64Array(bl.length * 4), hasOut: false, roll: 0, pitch: 0, acc: 0, lsp: 0, exert: 0, bt: r(), st: r() * 50, sway: r() * 6.28, hq: new THREE.Quaternion(), hqOk: false,
     aq: { LeftArm: new THREE.Quaternion(), RightArm: new THREE.Quaternion() }, aqOk: false, drop: 0, slope: 0,
     feet: [mkFoot(B.LeftUpLeg, B.LeftLeg, B.LeftFoot, B.LeftToeBase), mkFoot(B.RightUpLeg, B.RightLeg, B.RightFoot, B.RightToeBase)], ank: null };
 }
 const mkFoot = (u, l, f, t) => ({ u, l, f, t, off: 0, lock: new THREE.Vector3(), lw: 0, locked: false, step: 0, from: new THREE.Vector3(), prevA: new THREE.Vector3(), has: false, nq: new THREE.Quaternion() });
+// three's PropertyMixer only writes a bone when the blended value changed since its last write: a bone whose tracks are constant
+// (or a frame the mixer re-applies the same value) keeps last frame's procedural edit, which would then accumulate. So: remember the
+// clean (mixer) pose and the edited result; a bone still holding our result was not rewritten -> put the clean pose back first.
+function restoreClean(R) { const L = R.bl, C = R.clean, O = R.out;
+  for (let i = 0, j = 0; i < L.length; i++, j += 4) { const q = L[i].quaternion;
+    if (R.hasOut && q.x === O[j] && q.y === O[j + 1] && q.z === O[j + 2] && q.w === O[j + 3]) q.set(C[j], C[j + 1], C[j + 2], C[j + 3]);
+    else { C[j] = q.x; C[j + 1] = q.y; C[j + 2] = q.z; C[j + 3] = q.w; } } }
+// end of Character.update (after the look-at): remember what we left on the bones
+export function rigEnd(c) { const R = c._rg; if (!R || !R.full) return; const L = R.bl, O = R.out;
+  for (let i = 0, j = 0; i < L.length; i++, j += 4) { const q = L[i].quaternion; O[j] = q.x; O[j + 1] = q.y; O[j + 2] = q.z; O[j + 3] = q.w; } R.hasOut = true; }
 // reset the model transform the layer owns (seated / dead / layer off)
-export function rigReset(c) { const R = c._rg; if (!R) return; if (!c.dead) c.model.rotation.set(0, 0, 0); c.model.position.x = 0; c.model.position.z = 0; R.roll = R.pitch = R.drop = 0; R.hqOk = R.aqOk = false; for (const f of R.feet) { f.locked = false; f.lw = 0; f.has = false; f.step = 0; } }
+export function rigReset(c) { const R = c._rg; if (!R) return; if (R.hasOut) { restoreClean(R); R.hasOut = false; R.full = false; } if (!c.dead) c.model.rotation.set(0, 0, 0); c.model.position.x = 0; c.model.position.z = 0; R.roll = R.pitch = R.drop = 0; R.hqOk = R.aqOk = false; for (const f of R.feet) { f.locked = false; f.lw = 0; f.has = false; f.step = 0; } }
 // called each frame after mixer.update; posed = the mixer re-posed the bones this frame (bone edits are only safe then)
 export function rigApply(c, dt, posed, groundFn) {
   if (ARIG.off || dt <= 0) return;
-  if (c.dead || c._seat || !c.root.visible || c.lod > 1 && !c.isPlayer) { if (c._rg && !c.dead && !c._seat) rigReset(c); return; }
+  if (c.dead || c._seat || !c.root.visible || c.lod > 1 && !c.isPlayer) { const R = c._rg; if (R) { if (!c.dead && !c._seat) rigReset(c); else if (R.hasOut) { restoreClean(R); R.hasOut = false; R.full = false; } } return; }
   const t0 = performance.now(); const R = c._rg || (c._rg = init(c)); if (!R.ok) return;
-  const full = (c.isPlayer || c.lod === 0) && posed; ARIG_ST.calls++; if (full) ARIG_ST.full++; else ARIG_ST.lean++;
+  const full = (c.isPlayer || c.lod === 0) && posed; ARIG_ST.calls++; R.full = full;
+  if (R.hasOut) { restoreClean(R); if (!full) R.hasOut = false; } else if (full) restoreClean(R); if (full) ARIG_ST.full++; else ARIG_ST.lean++;
   const sp = c.speed, moveT = sm(sp, 0.08, 0.7), runT = sm(sp, 2.3, 3.8), sprT = sm(sp, 4.4, 6.6), gnd = (1 - c.swimW) * (1 - c.airW);
   // ---- signals: forward acceleration, lateral (turn) acceleration, slope of travel
   const a = (sp - R.lsp) / dt; R.lsp = sp; R.acc += (clamp(a, -20, 20) - R.acc) * ex(10, dt);
@@ -139,11 +151,12 @@ function footIK(c, R, dt, G, gnd) {
     if (plant && !f.locked && f.step <= 0) { f.locked = true; f.lock.set(f.Ax, 0, f.Az); ARIG_ST.locks++; }
     if (f.locked) {
       const drag = Math.hypot(f.Ax - f.lock.x, f.Az - f.lock.z);
-      if (!plant || drag > 0.22) { f.locked = false; if (drag > 0.22 && plant) { f.step = 1; f.from.copy(f.lock); ARIG_ST.steps++; } }
+      if (!plant || drag > 0.22) { f.locked = false; if (drag > 0.22 && drag < 1.2 && plant) { f.step = 1; f.from.copy(f.lock); ARIG_ST.steps++; } } // > 1.2 m: teleport, no step
     }
     f.lw += ((f.locked ? 1 : 0) - f.lw) * ex(f.locked ? 30 : 9, dt);
     let tx = f.Ax, tz = f.Az;
     if (f.step > 0) { // re-step: from the old lock to the clip foot along a small arc
+      if (Math.hypot(f.Ax - f.from.x, f.Az - f.from.z) > 1.2) f.step = 0;
       f.step = Math.max(0, f.step - dt / 0.2); const u = 1 - f.step, e = u * u * (3 - 2 * u);
       tx = f.from.x + (f.Ax - f.from.x) * e; tz = f.from.z + (f.Az - f.from.z) * e; ty += Math.sin(u * Math.PI) * 0.07; f.lw = 0;
     } else if (f.lw > 0.001) { tx += (f.lock.x - tx) * f.lw; tz += (f.lock.z - tz) * f.lw; }

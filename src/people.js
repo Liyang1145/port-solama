@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { OLD, CHAR_LAYER } from './perf.js'; // perf_debug1
-import { ARIG, rigApply, rigReset } from './animrig.js'; // anim1
+import { ARIG, rigApply, rigReset, rigEnd } from './animrig.js'; // anim1
 export const charLodReady = MeshoptSimplifier.ready;
 // v4.2 character LOD: per proto geometry, two simplified index buffers sharing the skinned vertex data (meshoptimizer)
 // r6.2 memory: glTF morph targets are per mesh, so every sub-mesh of a cast model (clothes, shoes, hair, ...) carried all 34 ARKit /
@@ -493,6 +493,7 @@ export class Character {
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
     if (!ARIG.off && !(this.dead && !this.deathA)) rigApply(this, dt, this.mixer.time !== posed0 || this._posed0Always, Character.groundFn); // anim1 procedural layer
     if (!this.dead && this.lod === 0) this.lookAt(dt); else this.lookY = 0;
+    if (this._rg) rigEnd(this);
     if (this.weaponMesh) this.poseWeapon();
     if (this.phone || this.var === 'phone' || this.var === 'text' || this.lastVar === 'phone' || this.lastVar === 'text') this.posePhone();
   }
