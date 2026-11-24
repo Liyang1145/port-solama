@@ -101,7 +101,7 @@ export function landmarksBase(ctx, pick, ds) {
       for (let k = 0; k < 48; k++) { const a = (k + 0.5) / 48 * Math.PI * 2; rput(rb, g.bulb, Math.cos(a) * (R + 0.36), Math.sin(a) * (R + 0.36), sz, BULB, 0, 0, a, 0.1, 0.13, 0.1); } // rim bulbs
       for (let k = 0; k < 48; k++) { const a = (k + 0.5) / 48 * Math.PI * 2; const v0 = fv.vc; rput(fv, g.bulb2, 0, 0, 0, null); fg.push([v0, fv.vc, Math.cos(a) * (R + 0.36), Math.sin(a) * (R + 0.36), sz * 1.05]); } // a4: far glow points (same bulbs, scaled with distance)
       for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.08, 0.08, R - 1.5, 4); sp.translate(0, (R - 1.5) / 2, 0); sp.rotateZ(a); rput(rv, sp, 0, 0, sz, [0.9, 0.9, 0.9]); }
-      for (const dx of [-1, 1]) { const L = Math.hypot(H, R * 0.55); const leg = new THREE.CylinderGeometry(0.3, 0.48, L, 8); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, L / 2, 0); leg.rotateZ(ang); rput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
+      for (const dx of [-1, 1]) { const L = Math.hypot(H, R * 0.55); const leg = new THREE.CylinderGeometry(0.3, 0.48, L, 8); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, L / 2, 0); leg.rotateZ(-ang); rput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
     }
     rput(m, g.cyl16, x, H, z - 1.7, null, Math.PI / 2, 0, 0, 1.1, 3.4, 1.1);   // hub drum (along z)
     rput(m, g.cyl8, x, H, z - 2.4, null, Math.PI / 2, 0, 0, 0.32, 4.8, 0.32);  // axle

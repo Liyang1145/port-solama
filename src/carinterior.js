@@ -148,7 +148,7 @@ function buildRaw(C) {
     add(box(0.02, 0.07, 0.02), M.trim, 0, my + 0.05, mz + 0.04);
     add(rbox(0.25, 0.065, 0.03, 0.012), M.trim, 0, my, mz);
     add(new THREE.PlaneGeometry(0.22, 0.05), M.mirror, 0, my, mz - 0.017, 0, Math.PI, 0);
-    if (!C.open) for (const s of [-1, 1]) add(box(0.3, 0.012, 0.13), M.head, s * 0.33, C.headY - 0.012, C.zWsTop - 0.1, 0.04); } // visors folded up
+    if (!C.open) for (const s of [-1, 1]) add(box(0.28, 0.01, 0.095), M.head, s * 0.33, C.headY - 0.008, C.zWsTop - 0.07, 0.02); } // visors folded flush against headliner
   // ---- parcel shelf / rear wall
   if (C.shelf && C.rear) { const z0 = C.zBack, z1 = C.rear.z - 0.25; if (z1 > z0) add(box(C.hwRear * 2, 0.025, z1 - z0), M.trim, 0, C.yBack, (z0 + z1) / 2); }
   if (!C.rear && C.backWall) add(box(C.hwRear * 2, C.headY - fy, 0.03), M.trim, 0, (C.headY + fy) / 2, C.zBack);
@@ -187,5 +187,5 @@ export function buildInterior(C, seatIdx = 0) {
   const piv = new THREE.Group(); piv.position.copy(B.spinPos); piv.quaternion.copy(B.spinQuat); near.add(piv);
   const steer = new THREE.Group(); piv.add(steer); const wm = new THREE.Mesh(B.spinGeo, M.cabin); wm.receiveShadow = true; steer.add(wm);
   const F = B.F;
-  return { group: grp, near, steer, grips: B.grips, seats: { driver: new THREE.Vector3(F.x, F.y, F.z), passenger: new THREE.Vector3(-F.x, F.y, F.z) }, pedalZ: B.zD + 0.32, floorY: C.floorY, headY: C.headY };
+  return { group: grp, near, steer, grips: B.grips, seats: { driver: new THREE.Vector3(F.x, F.y, F.z), passenger: new THREE.Vector3(-F.x, F.y, F.z) }, pedalZ: B.zD + 0.32, floorY: C.floorY, headY: C.headY, yCowl: C.yCowl };
 }

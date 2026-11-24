@@ -90,8 +90,13 @@ export function buildBody(kind) {
     if (S.bed && inZ(u, S.bed) && a.up) return (a.yf + b.yf) / 2 > 0.25 ? -1 : 0; // open bed: only the rail cap remains
     if (S.tub && inZ(u, S.tub) && a.up) return (a.yf + b.yf) / 2 > 0.3 ? -1 : 0; // r6.4 open cockpit (convertible, top down)
     if (!a.up || !b.up) { if (!a.up && b.t > 0.83) return 2; return 0; } // sill / underside black
-    if (!greenhouse) return 0;
     const ym = (a.yf + b.yf) / 2;
+    // windscreen & rear window glass extend down to the cowl / trunk seal even where Bh tapers below the greenhouse threshold
+    if (ym >= 0.86) {
+      if (S.ws[1] > S.ws[0] && inZ(u, S.ws)) return u > S.ws[1] - 0.008 ? 2 : 1;
+      if (S.rw[1] > S.rw[0] && inZ(u, S.rw)) return u < S.rw[0] + 0.006 ? 2 : 1;
+    }
+    if (!greenhouse) return 0;
     const side = ym < 0.66, corner = ym >= 0.66 && ym < 0.86;
     const sideGlassLow = ym < 0.07; // last strip above the belt = window seal (black)
     if (side) {
@@ -102,7 +107,6 @@ export function buildBody(kind) {
       return 0;
     }
     if (corner) return 0; // roof rail / A pillar
-    if (inZ(u, S.ws) || inZ(u, S.rw)) { if (u > S.ws[1] - 0.008 || u < S.rw[0] + 0.006) return 2; return 1; }
     return 0;
   };
   // build mirrored shell

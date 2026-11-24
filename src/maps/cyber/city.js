@@ -1036,9 +1036,9 @@ function landmarks(ctx) {
   { const x = 384, z = 352, R = 16, H = R + 3; const v = W.b('vcol', x, z); const n = W.b('neon', x, z);
     for (const sz of [-1.2, 1.2]) {
       const rim = new THREE.TorusGeometry(R, 0.22, 6, 64); gput(v, rim, x, H, z + sz, [0.95, 0.95, 0.95]);
-      const rim2 = new THREE.TorusGeometry(R + 0.35, 0.07, 4, 64); gput(n, rim2, x, H, z + sz, [1.0, 0.45, 0.7]);
+      const rim2 = new THREE.TorusGeometry(R + 0.35, 0.11, 6, 64); gput(n, rim2, x, H, z + sz, [1.0, 0.45, 0.7]);
       for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; const sp = new THREE.CylinderGeometry(0.07, 0.07, R, 4); sp.translate(0, R / 2, 0); sp.rotateZ(a); gput(v, sp, x, H, z + sz, [0.9, 0.9, 0.9]); }
-      for (const dx of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.3, 0.45, Math.hypot(H, R * 0.55), 6); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, Math.hypot(H, R * 0.55) / 2, 0); leg.rotateZ(ang); gput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
+      for (const dx of [-1, 1]) { const leg = new THREE.CylinderGeometry(0.3, 0.45, Math.hypot(H, R * 0.55), 6); const ang = Math.atan2(R * 0.55, H) * dx; leg.translate(0, Math.hypot(H, R * 0.55) / 2, 0); leg.rotateZ(-ang); gput(v, leg, x - dx * R * 0.55, 0, z + sz * 1.3, [0.9, 0.9, 0.9]); }
     }
     for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.1; const gx = x + Math.cos(a) * R, gy = H + Math.sin(a) * R;
       box(v, gx - 0.8, gy - 2.2, z - 0.9, gx + 0.8, gy - 0.6, z + 0.9, {}, pick([[0.95, 0.4, 0.45], [0.25, 0.65, 0.75], [0.98, 0.8, 0.3], [0.95, 0.95, 0.92]])); }

@@ -116,18 +116,25 @@ function seagrapeGeo(seed, lod) {
 }
 // saw palmetto: ground-level fans on short petioles (fan alpha texture), uv polar like veg.js fanTex
 function palmettoGeo(seed, lod) {
-  const r = mulberry(seed); const G = GA(); const nF = lod ? 6 : 11; const NA = lod ? 5 : 8, NR = lod ? 1 : 2;
+  const r = mulberry(seed); const G = GA(); const nF = lod ? 6 : 11; const NA = lod ? 6 : 9, NR = lod ? 2 : 3;
   for (let f = 0; f < nF; f++) {
     const az = f * 2.39996 + r() * 0.4; const dir = V(Math.cos(az), 0, Math.sin(az)); const side = V(-dir.z, 0, dir.x);
-    const Lp = 0.35 + r() * 0.5, up = 0.5 + r() * 1.0, R = 0.55 + r() * 0.3; const top = V(dir.x * 0.15, 0.05, dir.z * 0.15);
-    const c = top.clone().addScaledVector(dir, Lp).add(V(0, Lp * up, 0));
-    const fdir = dir.clone().add(V(0, up * 0.7 + 0.25, 0)).normalize(); const fn = V().crossVectors(side, fdir).normalize(); if (fn.y < 0) fn.negate();
-    const st = G.p.length / 3; const tint = [0.62 + r() * 0.12, 0.80 + r() * 0.1, 0.70 + r() * 0.12]; // silver-blue green
-    for (let ir = 0; ir <= NR; ir++) for (let ia = 0; ia <= NA; ia++) { const rr = ir / NR; const a = (ia / NA - 0.5) * Math.PI * 0.95;
-      const fold = (ia % 2 ? 1 : -1) * 0.06 * R * rr; const sag = -rr * rr * R * 0.25;
+    const Lp = 0.20 + r() * 0.32, up = 0.42 + r() * 0.65, R = 0.50 + r() * 0.26; const top = V(dir.x * 0.06, 0.0, dir.z * 0.06);
+    const c = top.clone().addScaledVector(dir, Lp).add(V(0, Lp * up + 0.06, 0));
+    const fdir = dir.clone().add(V(0, up * 0.55 + 0.18, 0)).normalize(); const fn = V().crossVectors(side, fdir).normalize(); if (fn.y < 0) fn.negate();
+    const st = G.p.length / 3; const tint = [0.72 + r() * 0.14, 0.90 + r() * 0.12, 0.72 + r() * 0.12]; // silver-blue green
+    for (let ir = 0; ir <= NR; ir++) for (let ia = 0; ia <= NA; ia++) { const rr = ir / NR; const a = (ia / NA - 0.5) * Math.PI * 0.9;
+      const fold = (ia % 2 ? 1 : -1) * 0.05 * R * rr; const sag = -rr * rr * R * 0.30;
       const q = c.clone().addScaledVector(side, Math.sin(a) * R * rr).addScaledVector(fdir, Math.cos(a) * R * rr).addScaledVector(fn, fold + sag);
-      G.p.push(q.x, Math.max(0.02, q.y), q.z); G.n.push(fn.x, fn.y, fn.z); G.uv.push(0.5 + Math.sin(a) * rr * 0.48, 0.012 + Math.cos(a) * rr * 0.97); G.c.push(...tint); G.s.push(0.15 + rr * 0.5); }
-    for (let ir = 0; ir < NR; ir++) for (let ia = 0; ia < NA; ia++) { const a = st + ir * (NA + 1) + ia, b = a + NA + 1; G.i.push(a, b, a + 1, b, b + 1, a + 1); }
+      G.p.push(q.x, Math.max(0.02, q.y), q.z); G.n.push(fn.x, fn.y, fn.z); G.uv.push(0.5 + Math.sin(a) * rr * 0.48, 0.012 + Math.cos(a) * rr * 0.97); G.c.push(...tint); G.s.push(0.12 + rr * 0.45); }
+    // wind CCW around +fn (side x fdir = +fn) so topside is front-facing instead of inverted downward normal
+    for (let ir = 0; ir < NR; ir++) for (let ia = 0; ia < NA; ia++) { const a = st + ir * (NA + 1) + ia, b = a + NA + 1; G.i.push(a, a + 1, b, b, a + 1, b + 1); }
+    // petiole stem rooting each fan to the ground crown (prevents hovering fans)
+    const pst = G.p.length / 3; const ptc = [0.58, 0.68, 0.42];
+    for (const [k, pt, w] of [[0, top, 0.04], [1, c, 0.025]]) {
+      for (const sg of [-1, 1]) { G.p.push(pt.x + side.x * w * sg, pt.y, pt.z + side.z * w * sg); G.n.push(fn.x, fn.y, fn.z); G.uv.push(0.5, 0.06); G.c.push(...ptc); G.s.push(k * 0.12); }
+    }
+    G.i.push(pst, pst + 1, pst + 2, pst + 2, pst + 1, pst + 3);
   }
   return gaBuild(G);
 }

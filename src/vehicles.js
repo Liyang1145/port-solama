@@ -540,8 +540,8 @@ export class Vehicle {
     const loc = c ? c.seats[which] : new THREE.Vector3(which === 'driver' ? 0.38 : -0.38, 0.5, 0);
     outP.copy(loc); (c ? c.group.parent : this.body).localToWorld(outP); this.body.getWorldQuaternion(outQ); return { pos: outP, quat: outQ };
   }
-  // r6.2 in-cabin camera: between the front seats at eye height (the old fixed y=1.25 clipped through low roofs)
-  cockpitCam(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); const c = this.cabin; if (!c) return out.set(this.x, this.y + 1.1, this.z).addScaledVector(this.forward(), 0.3); const s = c.seats.driver; out.set(s.x * 0.35, s.y + 0.68, s.z + 0.12); return (c.group.parent).localToWorld(out); }
+  // r6.2 in-cabin camera: driver eye point kept above cowl/wipers and below headliner across all vehicle body heights
+  cockpitCam(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); const c = this.cabin; if (!c) return out.set(this.x, this.y + 1.1, this.z).addScaledVector(this.forward(), 0.3); const s = c.seats.driver; const ey = Math.min(Math.max(s.y + 0.67, (c.yCowl || 0) + 0.17), (c.headY || 9) - 0.13); out.set(s.x * 0.55, ey, s.z + 0.14); return (c.group.parent).localToWorld(out); }
   dispose() { this.scene.remove(this.root); }
 }
 
