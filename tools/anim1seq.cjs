@@ -38,7 +38,7 @@ srv.listen(0, async () => {
               const gl = G.renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); window.__PX = px; return { w, h, sp: +c.speed.toFixed(2) }; })()`);
             const nn = info.w * info.h * 4, CH = 1 << 20; const buf = Buffer.alloc(nn);
             for (let o = 0; o < nn; o += CH) { const s = await p.evaluate(`(() => { const a = __PX.subarray(${o}, ${Math.min(nn, o + CH)}); let s = ''; for (let i = 0; i < a.length; i += 8192) s += String.fromCharCode.apply(null, a.subarray(i, i + 8192)); return btoa(s); })()`); Buffer.from(s, 'base64').copy(buf, o); }
-            const raw = path.join(out, `${vn}_${sc}_${n}.rgba`); fs.writeFileSync(raw, buf); execSync(`python3 /workspace/work/patches/playtest/rgba2jpg.py ${raw} ${info.w} ${info.h} ${path.join(out, `${vn}_${sc}_${n}.jpg`)}`); n++;
+            const raw = path.join(out, `${vn}_${sc}_${n}.rgba`); fs.writeFileSync(raw, buf); execSync(`python3 /workspace/work/patches/playtest/rgba2jpg.py ${raw} ${info.w} ${info.h} ${path.join(out, `${vn}_${sc}_${n}.jpg`)}`); n++; console.log(vn, sc, n, ((Date.now() - T0) / 1000 | 0) + 's');
           }
         }
       }
