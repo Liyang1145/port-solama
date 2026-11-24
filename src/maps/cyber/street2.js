@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { envAdopt } from '../../mats.js'; // b_envprog2
 import { rng, rand, randi, pick } from '../../util.js';
-import { kg, beam, tube, put, cable, cableBundle, NEONC, RUST, DARK, STEEL } from './kit.js';
+import { kg, beam, tube, put, putWheel, cable, cableBundle, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { cnText, cnMeasure, cnReady, cnWhenReady } from './cnglyph.js';
 import { clutSnap, clutGrab } from './clutcap.js'; // b_clutter
@@ -187,7 +187,7 @@ export function noodleStall(W, F, a, d, y0) {
   const body = pick([[0.72, 0.73, 0.74], [0.62, 0.15, 0.12], [0.18, 0.35, 0.55]]);
   const cb = V3(F, a, d, y0 + 0.45); put(v, G.box, cb[0], cb[1], cb[2], L, 0.8, D, body, ry);
   const top = V3(F, a, d, y0 + 0.87); put(v, G.box, top[0], top[1], top[2], L + 0.1, 0.05, D + 0.12, [0.78, 0.79, 0.8], ry);
-  for (const s of [-1, 1]) { const w = V3(F, a + s * (L / 2 - 0.3), d - D / 2 - 0.02, y0 + 0.18); put(c, G.cyl8, w[0], w[1], w[2], 0.18, 0.07, 0.18, DARK); }
+  for (const s of [-1, 1]) { const w = V3(F, a + s * (L / 2 - 0.3), d - D / 2 - 0.02, y0 + 0.18); putWheel(c, w[0], w[1], w[2], 0.18, 0.07, DARK, ry); }
   // glass display case on the street side (noodles, greens, eggs inside)
   const gc0 = V3(F, a + 0.35, d + D / 2 - 0.22, y0 + 0.9);
   for (const [u, w2] of [[-0.55, 0], [0.55, 0]]) put(v, G.box, gc0[0] + F.dx * u, gc0[1] + 0.25, gc0[2] + F.dz * u, 0.03, 0.5, 0.4, [0.75, 0.76, 0.77], ry + w2);
@@ -225,7 +225,7 @@ export function bbqStall(W, F, a, d, y0) {
   for (let i = 0; i < 4; i++) { const p = V3(F, a - 0.75 + i * 0.5, d - 0.35, y0 + 0.83); put(c, G.box, p[0], p[1], p[2], 0.42, 0.04, 0.32, [0.85, 0.85, 0.85], ry);
     put(c, G.box, p[0], p[1] + 0.035, p[2], 0.36, 0.03, 0.26, pick([[0.75, 0.3, 0.28], [0.6, 0.25, 0.15], [0.35, 0.55, 0.2], [0.9, 0.8, 0.6]]), ry); }
   { const q = V3(F, a + L / 2 + 0.35, d, 0); put(c, G.box, q[0], y0 + 0.25, q[2], 0.6, 0.5, 0.4, [0.85, 0.85, 0.88], ry); put(c, G.box, q[0], y0 + 0.52, q[2], 0.62, 0.05, 0.42, [0.15, 0.4, 0.75], ry); }
-  for (let i = 0; i < randi(2, 4); i++) { const q = V3(F, a - L / 2 - 0.4, d - 0.2 + (i % 2) * 0.1, 0); put(c, G.box, q[0], y0 + 0.15 + Math.floor(i / 2) * 0.3 + i % 2 * 0.3, q[2], 0.45, 0.28, 0.32, [0.12, 0.45, 0.2], ry + i * 0.1); }
+  for (let i = 0; i < randi(2, 4); i++) { const q = V3(F, a - L / 2 - 0.4, d - 0.25 + (i % 2) * 0.42, 0); put(c, G.box, q[0], y0 + 0.15 + Math.floor(i / 2) * 0.29, q[2], 0.45, 0.28, 0.32, [0.12, 0.45, 0.2], ry + (i % 2 ? 0.08 : -0.05)); }
   // red lantern pair at the tarp corners
   for (const s of [-1, 1]) { const p = V3(F, a + s * (L / 2 + 0.2), d + D / 2 + 1.3, y0 + 1.7); tube(c, [p[0], p[1] + 0.32, p[2]], [p[0], p[1] + 0.18, p[2]], 0.006, DARK, kg().tube4); put(nb, G.ball, p[0], p[1], p[2], 0.19, 0.17, 0.19, [0.6, 0.06, 0.03]); }
   seating(c, F, a, d + D / 2 + 1.1, y0, L);

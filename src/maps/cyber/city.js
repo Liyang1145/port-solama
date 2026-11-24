@@ -251,8 +251,10 @@ export function buildCity(scene, mats, T) {
   const blockAt = (x, z) => { const l = bgrid.get(Math.floor(x / BC) + ',' + Math.floor(z / BC)); if (l) for (const b of l) if (x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1) return b; return null; };
   const inCore = (x, z) => x >= L.islandX[0] && x <= L.beachX[0] && z >= L.islandZ[0] && z <= L.islandZ[1];
   const onBeach = (x, z) => z > BEACH_Z[0] - 115 && z < BEACH_Z[1] + 115 && x >= beachX(z) && x < beachX(z) + 300;
+  const onJetty = (x, z) => x >= L.beachX[0] - 2 && x <= L.beachX[1] + 46 && (Math.abs(z - (-L.islandZ[1] - 6)) <= 2.4 || Math.abs(z - (L.islandZ[1] + 6)) <= 2.4);
   const roadSurf = (x, z) => { const n = graph.index.near(x, z, false); if (!n) return -1; if (n.d < n.e.hw + 0.3) return 0; if (n.e.sw && n.d < n.e.hw + n.e.sw) return landAt(x, z) ? 0.15 : -1; return -1; };
   const isLand = (x, z) => {
+    if (onJetty(x, z)) return true;
     for (const p of PIERS) if (x >= p.x0 && x <= p.x1 && Math.abs(z - p.z) <= p.hw) return true;
     if (inCore(x, z)) return true;
     if (onBeach(x, z)) return beachH(x, z) > L.waterY - 0.6;
@@ -261,6 +263,7 @@ export function buildCity(scene, mats, T) {
     return !!landAt(x, z);
   };
   const groundH = (x, z) => {
+    if (onJetty(x, z)) return 0.95; // walkable concrete jetty deck out to the lighthouse / north head
     if (inCore(x, z)) return blockAt(x, z) ? 0.15 : 0;
     if (onBeach(x, z)) return Math.max(beachH(x, z), -1.6);
     for (const p of PIERS) if (x >= p.x0 && x <= p.x1 && Math.abs(z - p.z) <= p.hw) return 0.15; // v4.3 marina piers
@@ -913,7 +916,8 @@ function districtEdges(ctx, deco) {
       for (const y of [dy + 1.0, dy + 0.55]) box(m, x0 + 1, y, zj + e - 0.03, x1 - 0.2, y + 0.05, zj + e + 0.03);
     }
     lamps.push({ x: x1 - 1.2, z: zj + 1.2, y: dy, dir: [0, -sg], kind: 'bridge' });
-    col.add(x0, zj - 4.5, x1 + 4, zj + 4.5, 1.6, 'rail');
+    // side railing colliders only (keep the concrete jetty walkway open to walk out to the lighthouse)
+    for (const e of [-1.45, 1.45]) col.add(x0 + 1, zj + e - 0.15, x1, zj + e + 0.15, dy + 1.05, 'rail');
     // v4.4: the beach continues past the jetties (walk around via the promenade)
   }
 }

@@ -41,11 +41,11 @@ export function genParcels(graph) {
         let h = rnd(st.h[0], st.h[1]);
         if (dist.style === 'downtown') { const f = Math.exp(-(((p.x + 1880) / 330) ** 2 + ((p.z + 180) / 420) ** 2)); h = 35 + f * rnd(90, 210) + R() * 30; }
         p.h = h;
-        // validity: land under every corner, clear of other roads, not on the Deco core, no overlap
+        // validity: land under every corner, clear of other roads (including center & edge midpoints), not on the Deco core, no overlap
         const fx = Math.cos(p.ang), fz = Math.sin(p.ang); let ok = true;
-        for (const [a, b] of [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [a, b] of [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1], [0.5, 1], [-0.5, 1], [0.5, -1], [-0.5, -1], [1, 0.5], [1, -0.5], [-1, 0.5], [-1, -0.5]]) {
           const lx = a * d / 2, lz = b * w / 2; const x = p.x + fx * lx - fz * lz, z = p.z + fz * lx + fx * lz;
-          if (!landAt(x, z) || inCore(x, z) || (Math.abs(a) + Math.abs(b) > 0 && roadHit(x, z)) || districtAt(x, z)?.style === 'park') { ok = false; break; }
+          if (!landAt(x, z) || inCore(x, z) || roadHit(x, z) || districtAt(x, z)?.style === 'park') { ok = false; break; }
         }
         if (ok) { const cs = cells(p); if (cs.some((k) => occ.has(k))) ok = false; else { for (const k of cs) occ.add(k); out.push(p); } }
         s += ok ? w + rnd(0, 3) : 6;
@@ -57,7 +57,15 @@ export function genParcels(graph) {
     const [x0, z0, x1, z1] = polyBox(dd.poly); const step = dd.style === 'condo' ? 70 : 34;
     for (let x = x0 + 10; x < x1 - 10; x += step) for (let z = z0 + 10; z < z1 - 10; z += step) {
       if (!inPoly(x, z, dd.poly) || !landAt(x, z) || R() < 0.15) continue;
-      out.push({ x: x + rnd(-4, 4), z: z + rnd(-4, 4), w: rnd(16, 26), d: rnd(14, 24), ang: 0.12, style: dd.style, district: dd.id, far: true, h: dd.style === 'condo' ? rnd(40, 110) : rnd(6, 13), seed: (R() * 1e9) >>> 0 });
+      const px = x + rnd(-4, 4), pz = z + rnd(-4, 4), pw = rnd(16, 26), pd = rnd(14, 24), ang = 0.12;
+      const h = dd.style === 'condo' ? rnd(40, 110) : rnd(6, 13), seed = (R() * 1e9) >>> 0;
+      const c = Math.cos(ang), s = Math.sin(ang); let onLand = landAt(px, pz);
+      for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        if (!onLand) break;
+        const lx = a * pd / 2, lz = b * pw / 2;
+        if (!landAt(px + c * lx - s * lz, pz + s * lx + c * lz)) onLand = false;
+      }
+      if (onLand) out.push({ x: px, z: pz, w: pw, d: pd, ang, style: dd.style, district: dd.id, far: true, h, seed });
     }
   }
   return out;

@@ -431,7 +431,7 @@ export function decoUrnColliders(p, col) {
   const s = p.facing; const fx = s > 0 ? p.x1 : p.x0; let n = 0;
   for (const e of edgesOf(p.poly)) { if (!(e.ox * s > 0.9) || e.len < 3) continue;
     const zc = p.pylon ? p.pylon.z : (p.z0 + p.z1) / 2; const a = (zc - e.p[1]) * e.dz + (fx - e.p[0]) * e.dx;
-    if (a > 4 && a < e.len - 4) for (const sg of [-1, 1]) { const [ux, uz] = e.P(a + sg * 2.45, 0.55); const b = col.add(ux - 0.45, uz - 0.45, ux + 0.45, uz + 0.45, 1.6, 'urn'); b.out = [e.ox, e.oz]; n++; } }
+    if (a > 4 && a < e.len - 4) for (const sg of [-1, 1]) { const [ux, uz] = e.P(a + sg * 2.45, 0.36); const b = col.add(ux - 0.34, uz - 0.34, ux + 0.34, uz + 0.34, 1.6, 'urn'); b.out = [e.ox, e.oz]; n++; } }
   return n;
 }
 // a2: keep the beach umbrellas (with their loungers / towels) off the wheel's ticket kiosk, queue, deck and drive house.
@@ -463,8 +463,8 @@ function decoCloseDetail(W, p) {
           lb(bk, e, c0 - w / 2, c0 + w / 2, 0.1, 0.13, y0, y1, [0.66, 0.8, 0.82]);
           for (let k = 1; k < 5; k++) lb(bk, e, c0 - w / 2 + k * w / 5 - 0.015, c0 - w / 2 + k * w / 5 + 0.015, 0.13, 0.15, y0, y1, [0.86, 0.86, 0.83]);
           for (let y = y0 + 0.2; y < y1; y += 0.2) lb(bk, e, c0 - w / 2, c0 + w / 2, 0.13, 0.15, y - 0.015, y + 0.015, [0.86, 0.86, 0.83]);
-          const [ux, uz] = e.P(c0, 0.55); rput(bk, new THREE.CylinderGeometry(0.42, 0.26, 0.7, 10), ux, 0.5, uz, [0.82, 0.8, 0.75]);
-          rput(bk, g.box, ux, 0.89, uz, [0.78, 0.76, 0.71], 0, 0, 0, 0.9, 0.08, 0.9); rput(bk, g.ball, ux, 1.25, uz, [0.18, 0.36, 0.2], 0, 0, 0, 0.42, 0.38, 0.42); }
+          const [ux, uz] = e.P(c0, 0.36); rput(bk, new THREE.CylinderGeometry(0.32, 0.22, 0.7, 10), ux, 0.5, uz, [0.82, 0.8, 0.75]);
+          rput(bk, g.box, ux, 0.89, uz, [0.78, 0.76, 0.71], 0, 0, 0, 0.68, 0.08, 0.68); rput(bk, g.ball, ux, 1.25, uz, [0.18, 0.36, 0.2], 0, 0, 0, 0.34, 0.36, 0.34); }
         lb(bk, e, a + 1.95, a + 2.25, 0.1, 0.13, 1.5, 1.85, [0.66, 0.53, 0.28]);
       }
     } else if (Math.abs(e.ox * s) < 0.1 && e.len > 6) {

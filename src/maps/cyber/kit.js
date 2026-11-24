@@ -10,7 +10,7 @@ import { box, prismWalls, polyCap } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
 import { tubeCircuit, roundPath, haloQuad, reflQuad } from './neontube.js';
 
-const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _d = new THREE.Vector3();
+const _m = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _d = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0); const _X = new THREE.Vector3(), _Y = new THREE.Vector3(), _Z = new THREE.Vector3();
 const KG = {};
 export function kg() {
@@ -40,6 +40,8 @@ export const beam = (b, a, c, w, col, h, g) => seg(b, g || kg().box, a, c, w, h 
 export const tube = (b, a, c, r, col, g) => seg(b, g || kg().tube6, a, c, r, r, col);
 // axis-aligned unit geometry placed at centre with scale
 export function put(b, g, x, y, z, sx, sy, sz, col, ry = 0) { _q.setFromAxisAngle(UP, ry); _s.set(sx, sy, sz); _p.set(x, y, z); _m.compose(_p, _q, _s); b.geom(g, _m, {}, col); }
+// upright wheel cylinder (radius r, width w along local Z axle rotated by ry around Y)
+export function putWheel(b, x, y, z, r, w, col, ry = 0) { _m.makeRotationX(Math.PI / 2).premultiply(_m2.makeRotationY(ry)).scale(_s.set(r, w, r)).setPosition(x, y, z); b.geom(kg().cyl8, _m, {}, col); }
 // a sagging cable a→c (parabolic sag in metres), n segments, thin 4-sided tube
 export function cable(b, a, c, sag, r, col, n = 10) {
   let prev = a;

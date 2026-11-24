@@ -233,10 +233,11 @@ export function buildCity(scene, mats, T) {
   const blockAt = (x, z) => { const l = bgrid.get(Math.floor(x / BC) + ',' + Math.floor(z / BC)); if (l) for (const b of l) if (x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1) return b; return null; };
   const isLand = (x, z) => {
     { const h = region.groundH(x, z); if (h !== undefined) return h > L.waterY - 0.6; }
+    if (landmarkDeckH(x, z) !== undefined) return true; // wheel boarding deck + lighthouse jetty/bridge
     for (const p of PIERS) if (x >= p.x0 && x <= p.x1 && Math.abs(z - p.z) <= p.hw) return true;
     if (MR.onDeck(x, z)) return true; // marina_a: finger piers + fuel dock
     if (x >= L.islandX[0] && x <= L.beachX[0] && z >= L.islandZ[0] && z <= L.islandZ[1]) return true;
-    if (x >= L.beachX[0] && Math.abs(z) < L.islandZ[1] + 110 && beachH(x, z) > L.waterY - 0.6) return true;
+    if (x >= L.beachX[0] + beachOff(z) && x < 760 && Math.abs(z) < ISLE.tip + 60 && beachH(x, z) > L.waterY - 0.6) return true;
     return false;
   };
   const groundH = (x, z) => {

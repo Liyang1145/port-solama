@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { polyCap, prismWalls } from '../../geo.js';
 import { rng, rand, randi, pick } from '../../util.js';
-import { kg, beam, tube, put, cable, NEONC, RUST, DARK, STEEL } from './kit.js';
+import { kg, beam, tube, put, putWheel, cable, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
 import { STALLS } from './street2.js';
@@ -114,7 +114,7 @@ export function wheelieBin(W, F, a, d, y0) {
   const c = W.b('vcolD', F.P(a, d)[0], F.P(a, d)[1]); const G = kg(); const col = pick([[0.12, 0.3, 0.14], [0.15, 0.17, 0.2], [0.55, 0.38, 0.08], [0.15, 0.25, 0.45]]); const ang = Math.atan2(F.ox, F.oz) + rand(-0.3, 0.3);
   const p = V3(F, a, d, 0); put(c, G.box, p[0], y0 + 0.5, p[2], 0.62, 1.0, 0.72, col, ang);
   put(c, G.box, p[0], y0 + 1.04, p[2], 0.68, 0.06, 0.8, col.map((q) => q * 0.8), ang + rand(-0.05, 0.05));
-  for (const s of [-1, 1]) { const w = V3(F, a + s * 0.25, d - 0.3, 0); put(c, G.cyl8, w[0], y0 + 0.1, w[2], 0.1, 0.06, 0.1, DARK); }
+  for (const s of [-1, 1]) { const w = V3(F, a + s * 0.25, d - 0.3, 0); putWheel(c, w[0], y0 + 0.1, w[2], 0.1, 0.06, DARK, ang + Math.PI / 2); }
 }
 export function crates(W, F, a, d, y0) {
   const c = W.b('vcolD', F.P(a, d)[0], F.P(a, d)[1]); const G = kg(); const ang = Math.atan2(F.ox, F.oz);
@@ -148,7 +148,7 @@ export function foodStall(W, F, a, d, y0) {
   const P = (u, w, y) => V3(F, a + u, d + w, y);
   const cb = P(0, 0, y0 + 0.5); put(v, G.box, cb[0], cb[1], cb[2], L, 0.8, D, body, ang); // cart body (long side along the street)
   const ct = P(0, 0.05, y0 + 0.93); put(v, G.box, ct[0], ct[1], ct[2], L + 0.15, 0.06, D + 0.2, [0.7, 0.72, 0.74], ang); // steel top
-  for (const s of [-1, 1]) { const w = P(s * (L / 2 - 0.25), -D / 2 - 0.02, y0 + 0.2); put(c, G.cyl8, w[0], w[1], w[2], 0.2, 0.08, 0.2, DARK); }
+  for (const s of [-1, 1]) { const w = P(s * (L / 2 - 0.25), -D / 2 - 0.02, y0 + 0.2); putWheel(c, w[0], w[1], w[2], 0.2, 0.08, DARK, ang); }
   // canopy on 4 poles, sloped toward the kerb
   const yc = y0 + 2.3; for (const [u, w] of [[-L / 2, -D / 2], [L / 2, -D / 2], [-L / 2, D / 2 + 0.3], [L / 2, D / 2 + 0.3]]) beam(v, P(u, w, y0 + 0.9), P(u, w, yc + (w < 0 ? 0.15 : 0)), 0.04, STEEL);
   const cc = pick([[0.75, 0.15, 0.15], [0.9, 0.75, 0.2], [0.15, 0.4, 0.55], [0.85, 0.85, 0.82], [0.3, 0.55, 0.3]]);

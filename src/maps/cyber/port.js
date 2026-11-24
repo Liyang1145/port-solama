@@ -127,7 +127,7 @@ float pn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix
     float bl = smoothstep(0.62, 0.9, pn(q * 1.7 + sd * 21.0)) * fract(sd * 3.1);
     vec3 rust = vec3(0.30, 0.14, 0.07) * (0.7 + 0.6 * pn(q * 9.0));
     diffuseColor.rgb = mix(diffuseColor.rgb, rust, clamp(rm + bl * 0.7, 0.0, 0.85));
-    diffuseColor.rgb *= 1.0 - smoothstep(0.7, 0.0, vLP.y) * 0.25;                         // road grime at the foot
+    diffuseColor.rgb *= 1.0 - (1.0 - smoothstep(0.0, 0.7, vLP.y)) * 0.25;                         // road grime at the foot
     if (vFace > 2.5) diffuseColor.rgb *= 0.75 + 0.25 * pn(q * 2.0 + sd * 9.0); }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   { float along = vFace < 0.5 ? vLP.x : vLP.z; float fw = fwidth(along * 3.5);
@@ -251,6 +251,12 @@ const BLOCKS = []; for (let u = -256; u < 250; u += 74) BLOCKS.push(u);
 const LINE_A = { v0: 45, rows: 6 }, LINE_B = { v0: 64.5, rows: 4 };
 const ROWP = 2.44 + 0.36, BAYP = 12.19 + 0.55;
 const CRANE_COL = [{ st: [0.17, 0.18, 0.2], acc: [0.95, 0.62, 0.08], led: [0.1, 0.9, 1.0] }, { st: [0.66, 0.67, 0.66], acc: [0.85, 0.16, 0.12], led: [1.0, 0.2, 0.7] }];
+// deterministic u offset shared by quayBoxes() (base LOD), props() (near LOD), and colliders() so containers always align with their chassis
+const workLaneU = (c, lane) => c.u + ((((Math.sin(c.u * 12.9898 + lane * 78.233) * 43758.5453) % 1) + 1) % 1 - 0.5) * 6;
+const STRADDLES = [[-200, 42.6], [-60, 42.6], [70, 42.6], [160, 42.6], [230, 42.6]];
+const STACKERS = [[-184, 56, 0.4], [40, 70, -0.5], [188, 58, 2.6]];
+const FORKLIFTS = [[-110, 42, 0.2], [-35, 61, 1.6], [110, 42.5, -0.8]];
+const HATCHES = [[-141, 26.8], [-92, 26.8], [-40, 26.8]];
 
 export class PortQuay {
   constructor(scene, mats, city) {
@@ -270,6 +276,13 @@ export class PortQuay {
     for (const c of CRANES) for (const du of [-9, 9]) for (const v of RAIL_V) add(c.u + du - 0.9, v - 1.4, c.u + du + 0.9, v + 1.4, 46, 'crane');
     for (const bu of BLOCKS) for (const ln of [LINE_A, LINE_B]) add(bu, ln.v0, Math.min(QUAY.u1, bu + 5 * BAYP), ln.v0 + ln.rows * ROWP, 5.2, 'container');
     add(SHIP.u0, SHIP.vC - SHIP.B / 2, SHIP.u0 + SHIP.L, SHIP.vC + SHIP.B / 2, 30, 'ship');
+    // yard equipment & hatch cover colliders (aligned with near LOD props)
+    for (const c of CRANES) if (c.work) for (const lane of [12.5, 20.5]) { const u = workLaneU(c, lane); add(u - 6.2, lane - 1.4, u + 11.4, lane + 1.4, 4.1, 'portprop'); }
+    for (const [u, vv] of STRADDLES) for (const s of [-1, 1]) add(u - 5.4, vv + s * 2.0 - 0.6, u + 5.4, vv + s * 2.0 + 0.6, 14.5, 'portprop');
+    for (const [u, vv] of STACKERS) add(u - 4.2, vv - 2.4, u + 4.2, vv + 2.4, 5.0, 'portprop');
+    for (const [u, vv] of FORKLIFTS) add(u - 1.5, vv - 1.0, u + 1.5, vv + 1.0, 2.5, 'portprop');
+    for (let u = -150; u < 60; u += 16.4) add(u - 7.8, 38.5 - 1.4, u + 7.8, 38.5 + 1.4, 4.1, 'portprop');
+    for (const [u, vv] of HATCHES) add(u - 6.3, vv - 5.0, u + 6.3, vv + 5.0, 1.5, 'portprop');
   }
   // ------------------------------------------------------------- per frame ----
   sync() {
@@ -357,7 +370,7 @@ function shipBoxes(out) {
 }
 // boxes on terminal-tractor chassis under the cranes and on the rail flats
 function quayBoxes(out) {
-  for (const c of CRANES) if (c.work) for (const lane of [12.5, 20.5]) if (rng() < 0.8) box40(out, c.u + rand(-3, 3), 1.45, lane, { row: randi(0, NROW - 1) });
+  for (const c of CRANES) if (c.work) for (const lane of [12.5, 20.5]) if (rng() < 0.8) box40(out, workLaneU(c, lane), 1.45, lane, { row: randi(0, NROW - 1) });
   for (let u = -150; u < 60; u += 16.4) if (rng() < 0.75) { const two = rng() < 0.3; if (two) { box40(out, u - 3.07, 1.25, 38.5, { short: true }); box40(out, u + 3.07, 1.25, 38.5, { short: true }); } else box40(out, u, 1.25, 38.5, {}); }
 }
 const craneLift = (c) => ({ v: SHIP.vC + (((Math.abs(c.u) * 13) % 7) - 3) * 3.4, y: 29 + ((Math.abs(c.u) * 7) % 5) * 1.3 });
@@ -601,11 +614,11 @@ function pool(b, x, y, z, r, col) { b.quad(new THREE.Vector3(x - r, y, z + r), n
 // ===================================================================== props ====
 function props(W) {
   // terminal tractors + skeletal chassis under the working cranes (the boxes on them are instanced)
-  for (const c of CRANES) if (c.work) for (const lane of [12.5, 20.5]) { const u = c.u + rand(-3, 3); tractor(W, u + 8.6, lane); chassis(W, u, lane); }
+  for (const c of CRANES) if (c.work) for (const lane of [12.5, 20.5]) { const u = workLaneU(c, lane); tractor(W, u + 8.6, lane); chassis(W, u, lane); }
   // straddle carriers parked along the yard edge, reach stackers + forklifts at block ends, rail flats under the siding boxes
-  const sc = [[-200, 42.6], [-60, 42.6], [70, 42.6], [160, 42.6], [230, 42.6]]; for (const [u, vv] of sc) straddle(W, u, vv);
-  for (const [u, vv, r] of [[-184, 56, 0.4], [40, 70, -0.5], [188, 58, 2.6]]) reachStacker(W, u, vv, r);
-  for (const [u, vv, r] of [[-110, 42, 0.2], [-35, 61, 1.6], [110, 42.5, -0.8]]) forklift(W, u, vv, r);
+  for (const [u, vv] of STRADDLES) straddle(W, u, vv);
+  for (const [u, vv, r] of STACKERS) reachStacker(W, u, vv, r);
+  for (const [u, vv, r] of FORKLIFTS) forklift(W, u, vv, r);
   for (let u = -150; u < 60; u += 16.4) railFlat(W, u, 38.5);
   // block ID pylons (cyan light boxes with the painted block number, amber stack-height LEDs) at the lane end of every yard block
   BLOCKS.forEach((bu, bi) => { for (const [ln, la] of [[LINE_A, 0], [LINE_B, 1]]) { const u = bu - 2.2, vv = ln.v0 + 1.2; const v = W.b('vcol', u, vv), nb = W.b('neon', u, vv);
@@ -613,7 +626,7 @@ function props(W) {
     for (const s of [-1, 1]) { put(nb, kg().box, u + s * 0.26, 6.4, vv, 0.02, 1.35, 2.15, [0.04, 0.34, 0.4]); digits3(nb, u + s * 0.28, 6.4, vv, String((bi + 1) * 2 + la).padStart(2, '0'), 0.85, [0.75, 0.85, 0.85], s); }
     for (let k = 0; k < 5; k++) put(nb, kg().box, u, 1.6 + k * 0.5, vv + 0.14, 0.27, 0.18, 0.02, k < 2 + ((bi + la) % 3) ? [1, 0.5, 0.06] : [0.08, 0.05, 0.03]); } });
   // hatch covers landed on the quay, lashing-cone bins, a reefer power rack
-  for (const [u, vv] of [[-141, 26.8], [-92, 26.8], [-40, 26.8]]) { const v = W.b('vcol', u, vv); box(v, u - 6.3, 0, vv - 5, u + 6.3, 1.3, vv + 5, {}, [0.22, 0.32, 0.28]); for (let x = -6; x <= 6; x += 2) put(W.b('vcolD', u, vv), kg().box, u + x, 1.35, vv, 0.15, 0.1, 9.8, [0.17, 0.25, 0.22]); }
+  for (const [u, vv] of HATCHES) { const v = W.b('vcol', u, vv); box(v, u - 6.3, 0, vv - 5, u + 6.3, 1.3, vv + 5, {}, [0.22, 0.32, 0.28]); for (let x = -6; x <= 6; x += 2) put(W.b('vcolD', u, vv), kg().box, u + x, 1.35, vv, 0.15, 0.1, 9.8, [0.17, 0.25, 0.22]); }
   for (let i = 0; i < 8; i++) { const u = rand(-180, 30), vv = rand(27.5, 30.5); const d = W.b('vcolD', u, vv); box(d, u - 0.6, 0, vv - 0.6, u + 0.6, 0.9, vv + 0.6, {}, pick([[0.2, 0.4, 0.7], [0.75, 0.35, 0.1], [0.3, 0.3, 0.3]])); }
   for (const bu of [BLOCKS[1], BLOCKS[4]]) { const u = bu - 4, vv = LINE_B.v0 + 2; const v = W.b('vcol', u, vv), nb = W.b('neon', u, vv);
     beam(v, [u, 0, vv - 3], [u, 0, vv + 8], 0.9, [0.3, 0.32, 0.34], 0.2); for (let k = 0; k < 4; k++) { const z = vv - 2 + k * 2.8; beam(v, [u, 0, z], [u, 4.5, z], 0.25, [0.3, 0.32, 0.34]); put(nb, kg().box, u + 0.2, 1.8, z, 0.05, 0.25, 0.25, k % 2 ? [0.1, 1, 0.4] : [1, 0.3, 0.1]); }
@@ -661,12 +674,18 @@ function forklift(W, u, vv, r) {
   beam(v, P(-1.2, 0.8, 0), P(1.0, 0.8, 0), 1.2, c, 0.9); beam(v, P(-1.3, 1.1, 0), P(-0.7, 1.1, 0), 1.15, [0.2, 0.2, 0.2], 0.7);
   for (const b of [-0.5, 0.5]) { beam(v, P(-0.6, 1.2, b), P(-0.6, 2.2, b), 0.06, DARK); beam(v, P(0.5, 1.2, b), P(0.5, 2.2, b), 0.06, DARK); beam(v, P(1.2, 0.1, b * 0.6), P(1.2, 3.2, b * 0.6), 0.1, DARK); beam(d, P(1.3, 0.12, b * 0.4), P(2.4, 0.12, b * 0.4), 0.12, DARK, 0.05); }
   box(v, ...P(0, 2.2, 0).map((q, i) => q - [0.7, 0, 0.6][i]), ...P(0, 2.28, 0).map((q, i) => q + [0.7, 0, 0.6][i]), {}, [0.2, 0.2, 0.2]);
-  for (const a of [-0.8, 0.7]) for (const b of [-0.55, 0.55]) put(v, kg().cyl8, ...P(a, 0.3, b), 0.3, 0.25, 0.3, DARK);
+  for (const a of [-0.8, 0.7]) for (const b of [-0.55, 0.55]) { const m = new THREE.Matrix4().makeRotationX(Math.PI / 2).premultiply(new THREE.Matrix4().makeRotationY(-r)); m.scale(new THREE.Vector3(0.3, 0.22, 0.3)); const q = P(a, 0.3, b); m.setPosition(q[0], q[1], q[2]); v.geom(kg().cyl8, m, {}, DARK); }
 }
 function railFlat(W, u, vv) {
   const v = W.b('vcol', u, vv), d = W.b('vcolD', u, vv);
   box(v, u - 7.8, 0.75, vv - 1.3, u + 7.8, 1.25, vv + 1.3, {}, [0.32, 0.22, 0.16]);
-  for (const x of [-6, 6]) { for (const o of [-0.9, 0.9]) put(v, kg().cyl8, u + x + o, 0.5, vv, 0.42, 1.8, 0.42, DARK); box(d, u + x - 1.4, 0.35, vv - 1.1, u + x + 1.4, 0.75, vv + 1.1, {}, [0.15, 0.15, 0.15]); }
+  for (const x of [-6, 6]) {
+    for (const o of [-0.9, 0.9]) {
+      const ax = new THREE.Matrix4().makeRotationX(Math.PI / 2).scale(new THREE.Vector3(0.09, 1.75, 0.09)).setPosition(u + x + o, 0.42, vv); v.geom(kg().cyl8, ax, {}, DARK);
+      for (const s of [-0.74, 0.74]) { const wm = new THREE.Matrix4().makeRotationX(Math.PI / 2).scale(new THREE.Vector3(0.42, 0.18, 0.42)).setPosition(u + x + o, 0.42, vv + s); v.geom(kg().cyl8, wm, {}, DARK); }
+    }
+    box(d, u + x - 1.4, 0.35, vv - 1.1, u + x + 1.4, 0.75, vv + 1.1, {}, [0.15, 0.15, 0.15]);
+  }
   for (const s of [-1, 1]) put(d, kg().box, u + s * 8.0, 0.9, vv, 0.25, 0.25, 0.4, [0.6, 0.6, 0.6]);
 }
 function lightMasts(W) {
