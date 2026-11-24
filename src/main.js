@@ -253,7 +253,7 @@ async function load() {
       g.setAttribute('position', new THREE.Float32BufferAttribute(z9, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(z9, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(6).fill(0), 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(z9, 3));
       const m = new THREE.Mesh(g, mt); m.castShadow = m.receiveShadow = true; const kk = R.rtOn(A); try { renderer.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, camera, scene); n++; } catch (e) { } R.rtOff(A, kk); g.dispose(); }
     LT.warmStream = n; };
-  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); warmStream(); if (!CYBER) { LT.canvasFreed = releaseCanvases(scene, renderer, true); LT.canvasMB = canvasFreedMB(); } if (SNAP) renderFrame(0); else frame(1 / 60); if (!CYBER) LT.canvasFreed += releaseCanvases(scene, renderer); LT.warm = Math.round(performance.now() - t); };
+  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); warmStream(); if (SNAP) renderFrame(0); else frame(1 / 60); if (!CYBER) { LT.canvasFreed = releaseCanvases(scene, renderer); LT.canvasMB = canvasFreedMB(); } LT.warm = Math.round(performance.now() - t); };
   st.onclick = async () => { if (st.dataset.busy) return; st.dataset.busy = 1; game.start(); await warm(); document.getElementById('load').style.display = 'none'; };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
   if (PROF) {

@@ -101,15 +101,7 @@ export function makeDRS(apply) {
 // non-instanced meshes are released once uploaded (attribute.onUpload). position / index and every custom attribute (aK fades,
 // landmark position edits) stay, so bounding volumes, collision builders and the code that rewrites attributes are unaffected.
 const DROP = new Set(['normal', 'uv', 'uv1', 'uv2', 'color']); let dropped = 0; const reg = new WeakSet();
-// fix_pt7 #2 (?oldfree = old): the released array was only dropped, so its memory came back at the next GC - and the first frame's
-// long GPU sync (SwiftShader: ~2 min with the main thread blocked in finish / readPixels) runs with no GC at all: ~170 MB of released
-// arrays sat in RSS through the first-frame peak (JS backing store 523 MB at ready vs 352 MB after). An array that is the sole full
-// view of its ArrayBuffer is now detached with transfer(0), which frees the backing store at once (GLB slices / shared buffers keep
-// the old path).
-const FREENOW = !Q.has('oldfree') && typeof ArrayBuffer !== 'undefined' && typeof ArrayBuffer.prototype.transfer === 'function'; let freedNow = 0;
-function freeArr() { const a = this.array; dropped += a.byteLength; this.array = new a.constructor(0);
-  if (FREENOW && a.byteOffset === 0 && a.buffer && !a.buffer.detached && a.byteLength === a.buffer.byteLength && !(a.buffer instanceof (globalThis.SharedArrayBuffer || function () {}))) { try { freedNow += a.byteLength; a.buffer.transfer(0); } catch (e) { } } }
-export const freedNowMB = () => +(freedNow / 1048576).toFixed(1);
+function freeArr() { dropped += this.array.byteLength; this.array = new this.array.constructor(0); }
 // fix_pt6 #1 (?oldrelease = old): onUpload only fires on an upload that happens AFTER it is registered. The load-time precompile pass
 // (and a streamed chunk drawn before the next 60-frame sweep) uploads first, so those arrays were never freed (A spawn: ~110 MB of
 // normal / uv / color arrays still on the CPU at ready). Every attribute now marks itself when uploaded (prototype default callback);
@@ -133,16 +125,12 @@ export const releasedMB = () => +(dropped / 1048576).toFixed(1);
 // renderer process. Map A: once every texture drawn from a canvas is on the GPU (and was uploaded once), the canvas is shrunk to
 // 1x1 (frees its backing store). Skipped: textures marked userData.canvas (veg redraws), re-uploaded ones (version > 1).
 const CVDONE = new WeakSet(); let cvFreed = 0;
-// pre = true (warm-up, before the first frame): upload those textures now and let the GL queue run (finish) once the canvases are
-// shrunk, so the canvas memory is gone before the GPU thread starts the long first frame (frees queue behind it otherwise)
-export function releaseCanvases(scene, renderer, pre = false) {
+export function releaseCanvases(scene, renderer) {
   if (Q.has('oldcanvas')) return 0; const props = renderer.properties; const by = new Map(); const mats = new Set();
   const see = (t) => { if (!t || !t.isTexture || !t.isCanvasTexture) return; const c = t.image; if (!c || CVDONE.has(c) || !(c.width > 1)) return; let e = by.get(c); if (!e) by.set(c, e = new Set()); e.add(t); };
   scene.traverse((o) => { const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : []; for (const m of ms) { if (mats.has(m)) continue; mats.add(m); for (const k in m) { const v = m[k]; if (v && v.isTexture) see(v); } if (m.uniforms) for (const k in m.uniforms) { const v = m.uniforms[k] && m.uniforms[k].value; if (v && v.isTexture) see(v); } } });
-  if (pre) for (const ts of by.values()) for (const t of ts) if (!t.userData.canvas && t.version === 1) try { renderer.initTexture(t); } catch (e) { }
   let n = 0; for (const [c, ts] of by) { let ok = true; for (const t of ts) { const p = props.get(t); if (t.userData.canvas || t.version !== 1 || p.__version !== t.version || !p.__webglTexture) { ok = false; break; } } if (!ok) continue;
     cvFreed += c.width * c.height * 4; try { c.width = 1; c.height = 1; } catch (e) { continue; } CVDONE.add(c); n++; }
-  if (pre && n) renderer.getContext().finish();
   return n;
 }
 export const canvasFreedMB = () => +(cvFreed / 1048576).toFixed(1);
