@@ -5,16 +5,16 @@ const root = path.resolve(__dirname, '..'); const out = path.join(root, 'shots/a
 const srv = http.createServer((q, s) => { const p = path.join(path.resolve(root, process.env.DIST || 'dist'), decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': p.endsWith('.html') ? 'text/html' : p.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); s.end(d); }); });
 const V = (process.env.V || 'new=;old=olduanim').split(';').map((s) => s.split('=')).map(([k, ...v]) => [k, v.join('=')]);
 const W = +(process.env.VW || 400), H = +(process.env.VH || 300);
-const T0 = '{mx:0,mz:0}';
+const T0 = '{mx:0,mz:0,throttle:0,steer:0}';
 // tgt: JS expression for the character the camera frames (default the player); ang: camera angle from the character's heading
 const SCN = {
   crouch: { tp: [280.5, 36, Math.PI], cam: 3.0, ang: 1.4, seg: [['', '{mx:0,mz:0,crouch:false}', 10, 0], ['', '{mx:0,mz:0,crouch:true}', 36, 12], ['', '{mx:0,mz:1,crouch:true}', 60, 10]] },
   melee: { tp: [280.5, 36, Math.PI], cam: 3.0, ang: 1.25, seg: [['g.arsenal.equip("fist"); g.P.crouchOn = false;', T0, 20, 0], ...[0, 1, 2, 3].flatMap(() => [['', '{mx:0,mz:0,fire:"edge"}', 1, 0], ['', T0, 30, 6]])] },
   stagger: { tp: [280.5, 36, Math.PI], cam: 3.0, ang: 1.3, tgt: 'window.__N', seg: [[`const C = g.player.constructor; const n = window.__N = new C(g.scene, 'man', { proto: 'm2' }); n.pos.set(g.P.pos.x, g.P.pos.y, g.P.pos.z - 2.5); n.yaw = 0; n.ai = { mode: 'cower', t: -99 }; g.peds.list.push(n); g.tp(g.P.pos.x + 3, g.P.pos.z, Math.PI);`, T0, 30, 0],
     [`const n = window.__N; n._hitHead = false; n.health -= 25; g.hitReact(n, new (g.player.pos.constructor)(0, 0, -1), 0.3);`, T0, 36, 4]] },
-  jump: { tp: [280.5, 36, Math.PI], cam: 3.4, ang: 1.45, seg: [['', T0, 20, 0], ['', '{mx:0,mz:0,jump:true}', 1, 0], ['', T0, 56, 4]] },
-  carin: { tp: [280.5, 36, Math.PI], cam: 4.2, ang: 2.2, seg: [['const v = g.parked; const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw); g.tp(v.x + lx * 1.8 - Math.sin(v.yaw) * 0.6, v.z + lz * 1.8 - Math.cos(v.yaw) * 0.6, v.yaw + Math.PI / 2);', T0, 30, 0], ['g.toggleCar();', T0, 60, 5]] },
-  carout: { tp: [280.5, 36, Math.PI], cam: 4.2, ang: 2.2, seg: [['const v = g.parked; g.tp(v.x + Math.cos(v.yaw) * 1.8, v.z - Math.sin(v.yaw) * 1.8, v.yaw); g.toggleCar();', T0, 70, 0], ['g.toggleCar();', T0, 60, 5]] },
+  jump: { tp: [280.5, 36, Math.PI], cam: 3.4, ang: -1.5, seg: [['', T0, 20, 0], ['', '{mx:0,mz:0,jump:true}', 1, 0], ['', T0, 56, 4]] },
+  carin: { tp: [280.5, 36, Math.PI], cam: 4.2, ang: 2.2, carcam: true, seg: [['const v = g.parked; const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw); g.tp(v.x + lx * 1.8 - Math.sin(v.yaw) * 0.6, v.z + lz * 1.8 - Math.cos(v.yaw) * 0.6, v.yaw + Math.PI / 2);', T0, 30, 0], ['g.toggleCar({ walk: true });', T0, 100, 5]] },
+  carout: { tp: [280.5, 36, Math.PI], cam: 4.2, ang: 2.2, carcam: true, seg: [['const v = g.parked; g.tp(v.x + Math.cos(v.yaw) * 1.8, v.z - Math.sin(v.yaw) * 1.8, v.yaw); g.toggleCar();', T0, 70, 0], ['g.toggleCar();', T0, 60, 5]] },
   sprint: { tp: [280.5, 36, Math.PI], cam: 4.5, ang: 2.0, follow: true, seg: [['', '{mx:0,mz:1,sprint:true}', 80, 0], ['', '{mx:0,mz:1,sprint:true}', 24, 4]] },
 };
 const list = (process.env.SC || 'crouch,melee,stagger,jump').split(',');
@@ -36,7 +36,9 @@ srv.listen(0, async () => {
           if (every && (i + 1) % every === 0) {
             const info = await p.evaluate(`(() => { const G = __G, g = G.game, c = ${S.tgt || 'g.player'}, cam = G.camera; const y = ${S.follow ? 'c.yaw' : 'window.__CAMY'};
               const a = y + ${S.ang}; const d = ${S.cam}; const hp = c.root.position;
-              cam.position.set(hp.x + Math.sin(a) * d, hp.y + 1.0, hp.z + Math.cos(a) * d); cam.lookAt(hp.x, hp.y + 0.75, hp.z); cam.updateMatrixWorld(); const keep = g.updateCamera; g.updateCamera = () => {};
+              cam.position.set(hp.x + Math.sin(a) * d, hp.y + 1.0, hp.z + Math.cos(a) * d); cam.lookAt(hp.x, hp.y + 0.75, hp.z);
+              if (${!!0} || ${'"carcam"'} === ${JSON.stringify(S.carcam ? 'carcam' : '')}) { const v = g.parked; const sp = v.seatWorld('driver').pos; const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw), fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
+                cam.position.set(sp.x + lx * 3.0 + fx * 1.6, sp.y + 1.1, sp.z + lz * 3.0 + fz * 1.6); cam.lookAt(sp.x + lx * 0.6, sp.y + 0.35, sp.z + lz * 0.6); } cam.updateMatrixWorld(); const keep = g.updateCamera; g.updateCamera = () => {};
               G.sprobe.t = 99; G.render(); G.render(); g.updateCamera = keep;
               const gl = G.renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); window.__PX = px;
               return { w, h, sp: +c.speed.toFixed(2), cr: +(c.crW || 0).toFixed(2), ov: +(c.ovF || 0).toFixed(2), os: (c.os || []).map((e) => e.key + ':' + e.env.toFixed(2)).join(','), y: +(c.pos.y).toFixed(2), seat: !!c._seat }; })()`);

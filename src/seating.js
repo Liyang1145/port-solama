@@ -8,6 +8,18 @@ import { UA } from './ualanim.js'; // anim2 door sequence (?olddoor)
 const T_IN = 0.45, T_OUT = 0.4, T_IN2 = 1.3, T_OUT2 = 1.05, NPC_R = 60, NPC_MAX = 12, CABIN_NEAR = 40, CABIN_MID = 160;
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4();
 const ease = (t) => t * t * (3 - 2 * t);
+// anim2: three's PropertyMixer rewrites a bone only when its blended value changed, so mixer.update(0) does not undo last frame's
+// seat / door edits on bones whose clip value is constant (the relative spine lean / duck then accumulated: torso folded flat, body
+// flipped on the way out). Put back the clean (mixer) pose of the edited bones first, snapshot it after the mixer, restore at the end.
+const SEATB = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'RightUpLeg', 'RightLeg', 'RightFoot', 'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand'];
+function cleanPose(c) {
+  if (OLDSEATCLEAN) { c.mixer.update(0); return; }
+  const S = c._seatClean || (c._seatClean = SEATB.map((n) => c.model.getObjectByName(n)).filter(Boolean).map((b) => [b, new THREE.Quaternion(), false]));
+  for (const e of S) if (e[2]) e[0].quaternion.copy(e[1]);
+  c.mixer.update(0); for (const e of S) { e[1].copy(e[0].quaternion); e[2] = true; }
+}
+export function seatRestore(c) { const S = c._seatClean; if (!S) return; for (const e of S) if (e[2]) { e[0].quaternion.copy(e[1]); e[2] = false; } }
+const OLDSEATCLEAN = typeof location !== 'undefined' && /[?&](oldseatclean|olddoor|olduanim)\b/.test(location.search);
 
 export class Occupants {
   constructor(game) { this.g = game; this.pool = { civ: [], cop: [] }; this.npc = new Map(); }
@@ -36,7 +48,7 @@ export class Occupants {
     } else {
       if (!st) { (c._lastStand ||= new THREE.Vector3()).copy(c.root.position); return false; }
       if (st.w >= 1) st.door = UA.door && c === this.g.player; // exiting: the door sequence for the protagonist
-      st.w -= dt / (st.door ? T_OUT2 : T_OUT); if (st.w <= 0 || !st.car.root.parent) { c._seat = null; c.model.position.set(0, 0, 0); return false; }
+      st.w -= dt / (st.door ? T_OUT2 : T_OUT); if (st.w <= 0 || !st.car.root.parent) { c._seat = null; c.model.position.set(0, 0, 0); seatRestore(c); return false; }
       st.from.copy(standPos || c.pos);
     }
     const v = st.car; const S = this.frame(v, st.which);
@@ -48,14 +60,14 @@ export class Occupants {
     const door = S.hip.clone().addScaledVector(S.left, st.which === 'driver' ? 0.75 : -0.75); door.y = st.from.y;
     const a = st.from, t = w; // quadratic path from -> door -> seat (root pos before the hips correction)
     c.root.position.set((1 - t) * (1 - t) * a.x + 2 * t * (1 - t) * door.x + t * t * S.hip.x, (1 - t) * a.y + t * (S.hip.y - 0.9), (1 - t) * (1 - t) * a.z + 2 * t * (1 - t) * door.z + t * t * S.hip.z);
-    c.mixer.update(0); // re-evaluate the clip pose first (LOD-skipped / idle-profile mixers would otherwise accumulate the bend)
+    cleanPose(c); // re-evaluate the clip pose first (LOD-skipped / idle-profile mixers would otherwise accumulate the bend)
     poseSeated(c, S, w);
     // head clearance: taller characters recline further (then sink a little) until the top of the head clears the headliner
     const hb = c._headBone || (c._headBone = c.model.getObjectByName('Head') || null);
     if (hb && v.cabin && v.cabin.headY) { const host = v.cabin.group.parent;
       for (let k = 0; k < 3; k++) { const hl = host.worldToLocal(hb.getWorldPosition(_p)); const ex = hl.y + 0.18 - v.cabin.headY; if (ex <= 0.005) break;
         if (S.lean < 0.55) S.lean = Math.min(0.55, S.lean + ex / 0.6); else S.hip.addScaledVector(S.up, -Math.min(ex, 0.08));
-        c.mixer.update(0); poseSeated(c, S, w); } }
+        cleanPose(c); poseSeated(c, S, w); } }
     if (c.weaponMesh) c.weaponMesh.visible = false;
     return true;
   }
@@ -78,18 +90,18 @@ export class Occupants {
     c.root.quaternion.slerpQuaternions(qDoor, S.quat, ease(Math.min(1, Math.max(0, (u - 0.22) / 0.5))));
     const door = S.hip.clone().addScaledVector(S.left, side * 0.7); door.y = stand.y;
     const t = sit; c.root.position.set((1 - t) * (1 - t) * stand.x + 2 * t * (1 - t) * door.x + t * t * S.hip.x, (1 - t) * stand.y + t * (S.hip.y - 0.9), (1 - t) * (1 - t) * stand.z + 2 * t * (1 - t) * door.z + t * t * S.hip.z);
-    c.mixer.update(0); poseSeated(c, S, sit);
+    cleanPose(c); poseSeated(c, S, sit);
     const hb = c._headBone || (c._headBone = c.model.getObjectByName('Head') || null);
     if (hb && v.cabin && v.cabin.headY) { const h2 = v.cabin.group.parent;
       for (let k = 0; k < 3; k++) { const hl = h2.worldToLocal(hb.getWorldPosition(_p)); const ex = hl.y + 0.18 - v.cabin.headY; if (ex <= 0.005 || sit < 0.98) break;
-        if (S.lean < 0.55) S.lean = Math.min(0.55, S.lean + ex / 0.6); else S.hip.addScaledVector(S.up, -Math.min(ex, 0.08)); c.mixer.update(0); poseSeated(c, S, sit); } }
+        if (S.lean < 0.55) S.lean = Math.min(0.55, S.lean + ex / 0.6); else S.hip.addScaledVector(S.up, -Math.min(ex, 0.08)); cleanPose(c); poseSeated(c, S, sit); } }
     poseDuck(c, 0.55 * Math.sin(Math.min(1, Math.max(0, (u - 0.2) / 0.7)) * Math.PI)); // head down under the roof line on the way in / out
     c.root.updateMatrixWorld(true); poseReach(c, side > 0, handle, reach * (1 - sit * 0.7));
     if (c.weaponMesh) c.weaponMesh.visible = false;
     return true;
   }
   take(kind) { const p = this.pool[kind]; const c = p.length ? p.pop() : new Character(this.g.scene, kind === 'cop' ? 'cop' : (Math.random() < 0.5 ? 'man' : 'woman')); c.root.visible = true; c._seat = null; return c; }
-  give(c) { c.root.visible = false; c._seat = null; this.pool[c.isCop || c.kind === 'cop' ? 'cop' : 'civ'].push(c); }
+  give(c) { c.root.visible = false; c._seat = null; seatRestore(c); this.pool[c.isCop || c.kind === 'cop' ? 'cop' : 'civ'].push(c); }
   update(dt) {
     const g = this.g, cam = g.camera.position; const cars = g.traffic.cars;
     for (const v of cars) { const d = Math.hypot(v.x - cam.x, v.z - cam.z); v.setCabin && v.setCabin(v.driver === 'player' || d < CABIN_NEAR ? 2 : d < CABIN_MID ? 1 : 0); }

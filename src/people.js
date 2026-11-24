@@ -402,10 +402,14 @@ export class Character {
     }
     if (this.var) { this.varT -= dt; if (this.varT <= 0) { this.var = null; this.idleT = -rand(3, 10); } }
     // airborne / landing (player jump, falls) and swim
-    const air = !swim && (this.mvy > 2.0 || this.mvy < -3.0);
+    const air = !swim && (UA.jump2 && this.airborne !== undefined ? this.airborne : (this.mvy > 2.0 || this.mvy < -3.0)); // anim2: the player's physics state (whole flight, not just |vy| > 2-3 m/s)
     const airT = air ? 1 : 0; const wasAir = this.airW > 0.6;
     this.airW = lerp(this.airW, airT, 1 - Math.exp(-(air ? 14 : 18) * dt));
-    if (wasAir && !air && A.jland) { A.jland.reset().play(); A.jland.time = 0.15; this.landW = 1; }
+    if (air) this._fallV = Math.min(this._fallV || 0, this.mvy); // anim2
+    const landed = this._air0 && !air; this._air0 = air; // anim2: once per touchdown (airW stays > 0.6 for a frame after it)
+    if (wasAir && landed && UA.jump2 && hasUAL() && this.playUA('jland2', { from: 0.04, to: 0.9, rate: 1.15, fi: 0.03, fo: 0.3, w: clamp(-(this._fallV || 0) / 7, 0.35, 1) })) { this._fallV = 0; } // anim2 (?oldjump2): UAL landing, depth by impact speed
+    else if (wasAir && !air && A.jland) { A.jland.reset().play(); A.jland.time = 0.15; this.landW = 1; }
+    if (!air && !wasAir) this._fallV = 0;
     this.landW = Math.max(0, this.landW - dt * 2.4);
     // hit flinch when health drops without dying
     if (this.health < this._hp - 0.5 && !this.dead && UA.stagger && hasUAL()) this.stagger(this._hp - this.health); // anim2 (?oldstagger)

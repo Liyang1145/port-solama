@@ -77,7 +77,7 @@ export class Game {
       if (e.code === 'KeyI' || (e.code === 'ArrowUp' && this.P.onFoot)) this.world.togglePhone(true);
       if (e.code === 'KeyZ') this.world.switchChar();
       if (e.code === 'Period') { const n = this.world.station + 1; this.world.station = n >= 3 ? -1 : n; this.sfx.setStation(this.world.station); this.hud.msg(this.world.station < 0 ? '电台已关闭' : '电台：' + ['海浪 FM 93.1', '霓光 101.7', '午夜慢调 88.5'][this.world.station], 1.5); }
-      if (e.code === 'KeyF') this.toggleCar();
+      if (e.code === 'KeyF') this.toggleCar({ walk: true }); // anim2: the key walks to the door first (scripted toggleCar() enters at once)
       if (e.code === 'KeyR') this.arsenal.reload();
       if (e.code === 'KeyT') this.skipTime(1);
       if (e.code === 'KeyV') this.cam.mode = (this.cam.mode + 1) % 2;
@@ -123,7 +123,7 @@ export class Game {
     for (const v of this.traffic.cars) { const d = Math.hypot(v.x - this.P.pos.x, v.z - this.P.pos.z) - v.dims.W * 0.5; if (d < bd && !v.inWater) { bd = d; best = v; } }
     return best;
   }
-  toggleCar() {
+  toggleCar(opt) {
     if (this.deadT > 0) return;
     const P = this.P;
     if (P.car) { // exit on the left side
@@ -152,7 +152,7 @@ export class Game {
     // updatePolice also flipped their ai.mode 'dead' back to 'flee'). Refuse with a HUD line; smoke / fire / explosion stays GPT's #1.
     if (v.health <= 0 && !OLD_DEADCAR) { this.hud.msg('这辆车已经报废了', 2); return; }
     // anim2 (?olddoor): walk to the driver's door first (any movement key cancels); the seat sequence (seating.js) starts there
-    if (UA.door && !this._atDoor && Math.abs(v.speed || 0) < 1) { const d = this.doorSpot(v); if (Math.hypot(d.x - P.pos.x, d.z - P.pos.z) > 0.4) { P.enter = { v, t: 0 }; return; } }
+    if (UA.door && opt && opt.walk && !this._atDoor && Math.abs(v.speed || 0) < 1) { const d = this.doorSpot(v); if (Math.hypot(d.x - P.pos.x, d.z - P.pos.z) > 0.4) { P.enter = { v, t: 0 }; return; } }
     if (v.ai && v.ai.mode !== 'dead' && v.health > 0) { // carjack: pull the driver out
       const kind = v.type === 'police' ? 'cop' : pick(['woman', 'man']);
       const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw);
@@ -456,13 +456,13 @@ export class Game {
     if ((k.Space || (ov && ov.jump)) && P.grounded && !swim && !(P.jumpT > 0)) {
       if (ov) ov.jump = false;
       if (UA.jump2 && c.playUA('jstart', { from: 0, to: 0.42, fi: 0.04, fo: 0.16, w: 0.9 })) { P.jumpT = 0.07; P.crouchOn = false; } // anim2 (?oldjump2): 70 ms push-off from the UAL take-off crouch
-      else { P.vy = 4.6; P.grounded = false; }
+      else { P.vy = 4.6; P.grounded = false; P.jumping = true; }
     }
-    if (P.jumpT > 0) { P.jumpT -= dt; if (P.jumpT <= 0) { P.jumpT = 0; P.vy = 4.6; P.grounded = false; } }
+    if (P.jumpT > 0) { P.jumpT -= dt; if (P.jumpT <= 0) { P.jumpT = 0; P.vy = 4.6; P.grounded = false; P.jumping = true; } }
     P.vy -= 14 * dt; P.pos.y += P.vy * dt;
-    if (P.pos.y <= ground) { P.pos.y = ground; P.vy = 0; P.grounded = true; }
+    if (P.pos.y <= ground) { P.pos.y = ground; P.vy = 0; P.grounded = true; P.jumping = false; }
     this.playerSpeed = this.curSpeed * (len > 0.01 ? 1 : 0);
-    c.yaw = P.yaw; c.setLocomotion(this.playerSpeed, dt); c.crouch = crouch && !swim; // anim2
+    c.yaw = P.yaw; c.setLocomotion(this.playerSpeed, dt); c.crouch = crouch && !swim; c.airborne = !swim && !P.grounded && (P.jumping || P.pos.y > ground + 0.4); // anim2: a jump's whole flight / real falls (kerb drops are not 'air')
   }
   // anim2 (?oldmelee): fist presses chain jab -> cross -> hook -> kick (within 1.1 s of the last one), UAL clips (upper body while
   // moving / crouched); the kick is procedural (no CC0 kick clip in the UAL standard packs: src/actionpose.js 'kick')
