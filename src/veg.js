@@ -364,9 +364,10 @@ export function buildVegetation(scene, city, T) {
   const leafMat = prep(new THREE.MeshStandardMaterial({ map: T.leafcluster, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.8, vertexColors: true, color: new THREE.Color().setRGB(1.6, 1.65, 1.35) }), A ? 'leafA' : 'leaf', (s) => foliagePatch(s, 0.55, 1, A ? 1.4 : 1));
   const barkMat = prep(new THREE.MeshStandardMaterial({ map: T.bark_d, roughness: 0.95, color: 0x9a8f80 }), 'tbark', (s) => foliagePatch(s, 0.0));
   // v3.5 palms: species by location (beach/promenade -> coconut, streets -> royal / sabal mix, parks mixed); near/far LOD
-  const frondTex = pinnateTex(), fanT = fanTex();
+  // Map A uses buildPalmsA() for palms and only needs fanT (via fanMat.map) for flora.js saw palmetto
+  const fanT = fanTex();
   const mkFrondMat = (map) => prep(new THREE.MeshStandardMaterial({ map, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.7, vertexColors: true, color: new THREE.Color().setRGB(1.25, 1.22, 1.05) }), A ? 'frondA' : 'frond', (s) => foliagePatch(s, 0.35, 1, A ? 2.3 : 1));
-  const frondMat = mkFrondMat(frondTex), fanMat = mkFrondMat(fanT);
+  const frondMat = A ? null : mkFrondMat(pinnateTex()), fanMat = A ? { map: fanT } : mkFrondMat(fanT);
   const depthFor = (mat) => A ? swayDepth(mat, mat === leafMat ? 1.4 : 2.3, mat === leafMat ? 'leaf' : 'frond') : new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mat.map, alphaTest: 0.42, side: THREE.DoubleSide });
   // A map: trunks/crowns sway too (aSway > 0 near the top) -> their shadows follow (opaque depth, no alpha map)
   const trunkDepth = A ? swayDepth({ map: null, alphaTest: 0 }, 1, 'trunk') : null;

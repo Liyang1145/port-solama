@@ -20,7 +20,7 @@ export const OLDENV = typeof location !== 'undefined' && new URLSearchParams(loc
 const DBG = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('envdbg') || '') : ''; // test-only bisect switches
 export const envStats = { mats: 0, skipped: 0, ph: 0, cull: 0, blend: 0, vc: 0 };
 // patched families whose patch differs only in constants (now uniforms) share one program
-const FAM = { leaf: 'fol', tbark: 'fol', frond: 'fol', ptrunk: 'fol', pcrown: 'fol', jleaf: 'fol', jvine: 'fol', fern: 'fol', jpalm: 'fol', bigleaf: 'fol', litter: 'fol', grassb: 'wind', flower: 'wind' };
+const FAM = { leaf: 'fol', tbark: 'fol', frond: 'fol', ptrunk: 'fol', pcrown: 'fol', pcrownA: 'fol', jleaf: 'fol', jvine: 'fol', fern: 'fol', jpalm: 'fol', bigleaf: 'fol', litter: 'fol', grassb: 'wind', flower: 'wind' };
 // families whose members mix alphaTest and opaque: give the opaque ones alphaTest 0.001 (no discard, see ENV_AT)
 const ATFAM = { fol: 1 };
 const PENDING = new Set();
@@ -271,7 +271,9 @@ function gwrap(g, code) { return g ? `\n#if ${g}\n${code}\n#endif` : '\n' + code
 function buildUber(cls) {
   if (UBS[cls]) return UBS[cls]; const bit = cls === 'u' ? 1 : 2;
   const L = THREE.ShaderLib.physical; const VN = incs(L.vertexShader), FN = incs(L.fragmentShader); const PV = probe(VN), PF = probe(FN);
-  const B = { idx: new Map(), U0: {}, bad: {}, VD: {}, FD: {}, V: {}, F: {}, VR: {}, FR: {}, glob: { v: [], f: [] }, names: new Map(), samp: 0, attr: 0, vary: 0, sigs: [] };
+  const B = { idx: new Map(), U0: {}, bad: {}, VD: {}, FD: {}, V: {}, F: {}, VR: {}, FR: {}, glob: { v: [], f: [] }, names: new Map(), samp: 0, attr: 0, attrI: 0, attrM: 0, attrS: 0, vary: 0, varyI: 0, varyM: 0, varyS: 0, sigs: [] };
+  const branchOf = (g) => (g === 'defined( EU_INST )' ? 'I' : g === '!defined( EU_INST )' ? 'M' : 'S');
+  const findDecl = (D, n, j, s) => (D[n] ? D[n][j].find((x) => x.s === s) : null);
   for (const [fam, fn] of REPF) { if (!(CLS[fam] & bit)) continue;
     try {
       const t = { uniforms: {}, vertexShader: PV, fragmentShader: PF }; fn(t); const ev = readEdits2(VN, t.vertexShader), ef = readEdits2(FN, t.fragmentShader); if (!ev || !ef) throw new Error('probe');
@@ -281,17 +283,38 @@ function buildUber(cls) {
       const sig = JSON.stringify([ev, ef]); let idx = B.sigs.indexOf(sig);
       if (idx >= 0) { B.idx.set(fam, idx); Object.assign(B.U0, t.uniforms); continue; } // same code as an earlier member
       idx = B.sigs.length; if (/\binstance(Matrix|Color)\b/.test(sig) && !/USE_INSTANCING/.test(sig)) AUTOI.add(fam);
-      const gv = guardOf(fam, 'v'), gf = guardOf(fam, 'f');
-      // declarations: dedupe identical statements, refuse a name declared differently, count samplers / attributes / varyings
-      const add = { VD: [], FD: [] }; const nn = new Map(); let samp = 0, attr = 0, vary = 0;
+      const gv = guardOf(fam, 'v'), gf = guardOf(fam, 'f'); const br = branchOf(gv);
+      // declarations: guard by EU_INST branch (gv) so mutually exclusive instanced/mesh varyings & attributes do not double-count against CAPS.vary on 15-16 varying GPUs
+      const add = { VD: [], FD: [] }; const promote = []; const nn = new Map();
+      let samp = 0, aI = B.attrI, aM = B.attrM, aS = B.attrS, vI = B.varyI, vM = B.varyM, vS = B.varyS;
+      const countDecl = (tag, s, st) => {
+        const dc = declNames(st).length;
+        const da = /^attribute\s/.test(s) ? dc : 0;
+        let dv = 0;
+        if (tag === 'VD' && /^(flat\s+)?varying\s/.test(s)) { const m = /varying\s+(?:\w+\s+)?(float|vec2|vec3|vec4|mat3|mat4|int|ivec2)\s/.exec(s); dv = (m ? VSZ[m[1]] : 1) * dc; }
+        return [da, dv];
+      };
       for (const [E, D, tag] of [[ev, B.VD, 'VD'], [ef, B.FD, 'FD']]) for (const n in E) { if (!isDecl(n)) continue;
-        for (const j of [0, 1]) for (const st of splitTop(stripC(E[n][j]))) { const s = nrm(st); const have = (D[n] && D[n][j].some((x) => nrm(x) === s)) || add[tag].some((a) => a[0] === n && a[1] === j && nrm(a[2]) === s); if (have) continue;
+        for (const j of [0, 1]) for (const st of splitTop(stripC(E[n][j]))) { const s = nrm(st);
+          const ex = findDecl(D, n, j, s);
+          if (ex) {
+            if (ex.g && ex.g !== gv && !promote.includes(ex)) {
+              const [da, dv] = countDecl(tag, s, st);
+              if (branchOf(ex.g) === 'I') { aI -= da; vI -= dv; } else if (branchOf(ex.g) === 'M') { aM -= da; vM -= dv; }
+              aS += da; vS += dv; promote.push(ex);
+            }
+            continue;
+          }
+          if (add[tag].some((a) => a[0] === n && a[1] === j && a[3] === s)) continue;
           for (const nm of declNames(st)) { const o = B.names.get(nm) || nn.get(nm); if (o !== undefined && o !== s && !(nm.startsWith('f:') && false)) throw new Error('conflict ' + nm); nn.set(nm, s); }
           if (/^uniform\s/.test(s) && /\bsampler\w*\b/.test(s)) samp += declNames(st).length;
-          if (/^attribute\s/.test(s)) attr += declNames(st).length;
-          if (tag === 'VD' && /^(flat\s+)?varying\s/.test(s)) { const m = /varying\s+(?:\w+\s+)?(float|vec2|vec3|vec4|mat3|mat4|int|ivec2)\s/.exec(s); vary += (m ? VSZ[m[1]] : 1) * declNames(st).length; }
-          add[tag].push([n, j, st]); } }
-      if (B.samp + samp > CAPS.tex - 9 || B.attr + attr > CAPS.attr - 9 || Math.ceil(B.vary + vary) > CAPS.vary - 13) throw new Error('limits');
+          const [da, dv] = countDecl(tag, s, st);
+          const dg = /^uniform\s/.test(s) ? '' : gv; // uniforms cost 0 varyings/attributes and may be referenced by cloned materials (e.g. marina)
+          if (dg) { if (br === 'I') { aI += da; vI += dv; } else if (br === 'M') { aM += da; vM += dv; } else { aS += da; vS += dv; } }
+          else { aS += da; vS += dv; }
+          add[tag].push([n, j, st, s, dg]); } }
+      const totA = Math.max(aI, aM) + aS, totV = Math.max(vI, vM) + vS;
+      if (B.samp + samp > CAPS.tex - 9 || totA > CAPS.attr - 9 || Math.ceil(totV) > CAPS.vary - 13) throw new Error('limits');
       // bodies: hoist a member's top-level locals that another of its blocks uses (renamed _u<idx>), then wrap in its branch
       const st2 = []; for (const [E, stage] of [[ev, 'v'], [ef, 'f']]) { const units = []; for (const n in E) { if (isDecl(n)) continue; const e = E[n];
           if (e.rep !== undefined) units.push({ n, j: 'r', c: stripC(e.rep) }); else for (const j of [0, 1]) if (e[j].trim()) units.push({ n, j, c: stripC(e[j]) }); }
@@ -309,16 +332,19 @@ function buildUber(cls) {
         for (const nm of ren) for (const o of units) o.c = o.c.replace(new RegExp('\\b' + nm + '\\b', 'g'), nm + '_u' + idx);
         st2.push({ stage, units, glob }); }
       // commit
-      B.sigs.push(sig); B.idx.set(fam, idx); Object.assign(B.U0, t.uniforms); B.samp += samp; B.attr += attr; B.vary += vary; for (const [k, v] of nn) B.names.set(k, v);
-      for (const tag of ['VD', 'FD']) for (const [n, j, st] of add[tag]) { const D = B[tag][n] || (B[tag][n] = [[], []]); D[j].push(st); }
+      B.sigs.push(sig); B.idx.set(fam, idx); Object.assign(B.U0, t.uniforms); B.samp += samp; B.attrI = aI; B.attrM = aM; B.attrS = aS; B.attr = totA; B.varyI = vI; B.varyM = vM; B.varyS = vS; B.vary = totV;
+      for (const ex of promote) ex.g = '';
+      for (const [k, v] of nn) B.names.set(k, v);
+      for (const tag of ['VD', 'FD']) for (const [n, j, st, s, g] of add[tag]) { const D = B[tag][n] || (B[tag][n] = [[], []]); D[j].push({ st, s, g }); }
       for (const { stage, units, glob } of st2) { const H = stage === 'v' ? B.V : B.F, R = stage === 'v' ? B.VR : B.FR; const g = stage === 'v' ? gv : gf; if (glob.length) B.glob[stage].push(gwrap(g, glob.join('\n')));
         for (const u of units) { if (u.j === 'r') { const dv = REP_DECL[u.n]; let c = u.c; if (dv) { if (!c.includes(dv)) throw new Error('rep ' + u.n); c = c.split(dv).join(dv.split(' ')[1]); } (R[u.n] || (R[u.n] = [])).push(gwrap(g, `if ( uPK == ${idx}.0 ) {\n${c}\n} else`)); continue; }
           const cur = H[u.n] || (H[u.n] = ['', '']); cur[u.j] += gwrap(g, `if ( uPK == ${idx}.0 ) {\n${u.c}\n}`); } }
     } catch (e) { B.bad[fam] = e.message; console.warn('[envprog2] ' + fam + ' keeps its own program:', e.message); }
   }
+  const emitD = (arr) => arr.map((x) => (x.g ? `#if ${x.g}\n${x.st}\n#endif` : x.st)).join('\n');
   const mk = (H, R, D, gl) => { const E = {}; const keys = new Set([...Object.keys(H), ...Object.keys(R)]);
     for (const n of keys) { const h = H[n] || ['', '']; if (R[n]) { const dv = REP_DECL[n]; E[n] = { rep: h[0] + (dv ? '\n' + dv + ';' : '') + R[n].join('') + `\n{\n${dv ? THREE.ShaderChunk[n].split(dv).join(dv.split(' ')[1]) : `#include <${n}>`}\n}` + h[1] }; } else E[n] = [h[0] ? h[0] + '\n' : '', h[1]]; }
-    for (const n in D) { if (E[n]) throw new Error('hook clash ' + n); E[n] = [D[n][0].length ? D[n][0].join('\n') + '\n' : '', D[n][1].length ? '\n' + D[n][1].join('\n') : '']; }
+    for (const n in D) { if (E[n]) throw new Error('hook clash ' + n); E[n] = [D[n][0].length ? emitD(D[n][0]) + '\n' : '', D[n][1].length ? '\n' + emitD(D[n][1]) : '']; }
     const c = E.common || ['', '']; E.common = [c[0], '\nuniform float uPK;' + gl.join('') + c[1]]; return E; };
   try { B.ev = mk(B.V, B.VR, B.VD, B.glob.v); B.ef = mk(B.F, B.FR, B.FD, B.glob.f); B.ok = true; } catch (e) { console.warn('[envprog2] no merge:', e.message); B.ok = false; }
   (envStats.uber || (envStats.uber = {}))[cls] = { members: [...B.idx.keys()].join(' '), branches: B.sigs.length, bad: B.bad, samp: B.samp, attr: B.attr, vary: B.vary };

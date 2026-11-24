@@ -339,10 +339,11 @@ vec3 shopRoom(vec2 ro2, vec3 rd, float RW, float RH, float RD, float st, float s
 // styles: 0 curtain wall, 1 condo (balcony bands), 2 punched windows (stucco), 3 storefront, 4 blank wall/roof, 5 deco ribbon windows
 export function buildingMaterial(T) {
   const ts = texSet(T, 'plaster', 1);
-  const cs = texSet(T, 'concrete', 1);
+  // keep T.concrete_d's repeat (1/4, 1/4) set by simpleMats() for M.concrete instead of overwriting it back to (1, 1)
+  const cMap = T.concrete_d; if (cMap) { cMap.wrapS = cMap.wrapT = THREE.RepeatWrapping; cMap.colorSpace = THREE.SRGBColorSpace; }
   const mat = new THREE.MeshStandardMaterial({ map: ts.map, normalMap: ts.normalMap, roughnessMap: ts.roughnessMap, roughness: 1, metalness: 0, normalScale: new THREE.Vector2(0.6, 0.6) });
   ts.map.repeat.set(0.25, 0.25); ts.normalMap.repeat.set(0.25, 0.25); ts.roughnessMap.repeat.set(0.25, 0.25);
-  const uniforms = { tShopK: SHOPK.tex, uShopKB: SHOPK.box, tConc: { value: cs.map }, uNight: U.uNight, uTime: U.uTime, uDbg: { value: +(new URLSearchParams(location.search).get('dbg') || 0) } };
+  const uniforms = { tShopK: SHOPK.tex, uShopKB: SHOPK.box, tConc: { value: cMap }, uNight: U.uNight, uTime: U.uTime, uDbg: { value: +(new URLSearchParams(location.search).get('dbg') || 0) } };
   return prep(mat, 'building', (s) => {
     Object.assign(s.uniforms, uniforms);
     s.vertexShader = s.vertexShader

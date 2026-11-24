@@ -100,11 +100,11 @@ export function planMarina({ fab, DS, piers, col }) {
 // spine and 1 from 2.5 m out (the hinge), and only inside the three piers' x span. World-space buckets, so xz is world.
 function floatMat(M, piers) {
   if (M.vcolFloat || !M.vcol) return; const base = M.vcol; const m = base.clone(); const P = piers.map((p) => new THREE.Vector4(p.x0, p.x1, p.z, p.hw));
-  m.onBeforeCompile = (s, r) => { base.onBeforeCompile(s, r); s.uniforms.uTime = U.uTime; s.uniforms.uPier = { value: P };
+  m.onBeforeCompile = (s, r) => { base.onBeforeCompile(s, r); s.uniforms.uMarinaTime = U.uTime; s.uniforms.uPier = { value: P };
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>
-uniform float uTime; uniform vec4 uPier[${P.length}];` + SWELL + `
+uniform float uMarinaTime; uniform vec4 uPier[${P.length}];` + SWELL + `
 float fHinge(vec2 p){ float w = 0.0; for (int i = 0; i < ${P.length}; i++) { vec4 q = uPier[i]; if (p.x > q.x - 2.0 && p.x < q.y + 2.0) w = max(w, clamp((abs(p.y - q.z) - q.w) / 2.5, 0.0, 1.0)); } return w; }`)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.y += mSwell(transformed.xz, uTime) * fHinge(transformed.xz);'); };
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.y += mSwell(transformed.xz, uMarinaTime) * fHinge(transformed.xz);'); };
   m.customProgramCacheKey = () => 'vcolFloat'; M.vcolFloat = m;
 }
 // ---------------------------------------------------------------------------------------------------- pier detail ----

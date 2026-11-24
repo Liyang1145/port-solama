@@ -249,7 +249,7 @@ export function buildPost(renderer, scene, camera, opts = {}) {
       // painted huge black slabs over facades and streets (default ?ao on), and contact shadows / god rays hit them too.
       const m0 = Array.isArray(m) ? m[0] : m;
       if (!o.isMesh || m0.depthWrite === false || m0.colorWrite === false || m0.blending === THREE.AdditiveBlending || (m0.transparent && m0.opacity < 0.75 && !(m0.alphaTest > 0))) { hid.push(o); o.visible = false; return; }
-      if (Array.isArray(m) || !(m.alphaTest > 0) || !m.map) return;
+      if (Array.isArray(m) || o.isSkinnedMesh || !(m.alphaTest > 0.0015) || !m.map) return;
       const c = cutMat(m); if (m.map.matrixAutoUpdate) m.map.updateMatrix(); c.uniforms.uvT.value.copy(m.map.matrix); c.uniforms.map.value = m.map; swp.push(o, m); o.material = c; });
     try { ro(r, mat, tgt, cc, ca); } finally { for (let i = 0; i < swp.length; i += 2) swp[i].material = swp[i + 1]; swp.length = 0; for (const o of hid) o.visible = true; hid.length = 0; }
   };

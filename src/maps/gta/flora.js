@@ -330,13 +330,23 @@ float gRkWet = 0.0;`).replace('#include <color_fragment>', `#include <color_frag
     diffuseColor.rgb *= 0.72 + 0.5 * n;                                         // pitted limestone
     diffuseColor.rgb *= 1.0 - 0.45 * smoothstep(0.62, 0.8, rkn(vRW * 4.1 + 3.0)); // solution holes / dark pits
     float y = vRW.y + (rkn(vRW * 0.9) - 0.5) * 0.25;
-    float wet = smoothstep(-0.25, -0.75, y); float alg = smoothstep(-0.55, -0.95, y);
+    float wet = (1.0 - smoothstep(-0.75, -0.25, y)); float alg = (1.0 - smoothstep(-0.95, -0.55, y));
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.45, 0.42, 0.36), wet);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.20, 0.10) * (0.7 + 0.6 * n), alg * 0.85);   // algae / barnacle band
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.08, 1.06, 1.0), smoothstep(0.4, 1.4, y) * 0.5); // sun-bleached tops
     gRkWet = wet; }`).replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.28, gRkWet);');
   });
-  const sandMat = M.sand;
+  // dedicated instanced sand material for beach hummocks (keeps mesh-only M.sand in envprog uber without mid-frame ejection & evaluates world vSandW with instanceMatrix)
+  const sandMat = prep(new THREE.MeshStandardMaterial({ map: M.sand.map, normalMap: M.sand.normalMap, roughnessMap: M.sand.roughnessMap, color: M.sand.color.clone(), roughness: 1 }), 'sandMound', (s) => {
+    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSMW;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_INSTANCING\n  vSMW = (modelMatrix * instanceMatrix * vec4(position, 1.0)).xyz;\n#else\n  vSMW = (modelMatrix * vec4(position, 1.0)).xyz;\n#endif');
+    s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
+varying vec3 vSMW;
+float smh(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float smn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(smh(i), smh(i + vec2(1, 0)), f.x), mix(smh(i + vec2(0, 1)), smh(i + vec2(1, 1)), f.x), f.y); }`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+float smDn = smn(vSMW.xz * 0.03) * 0.6 + smn(vSMW.xz * 0.13) * 0.4; diffuseColor.rgb *= mix(0.95, 1.04, smDn);`);
+  });
 
   // ---------- 1. dune band on the upper beach --------------------------------------------------------------------
   // flora_a iter2: first pass read as stray pale strokes on the bright sand -> fuller clumps, wider blades, deeper green bases

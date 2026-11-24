@@ -276,6 +276,7 @@ export function buildStreet(scene, city) {
   const atlas = signAtlas();
   const signMat = prep(new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.45, metalness: 0.1, emissiveMap: atlas, emissive: 0xffffff, emissiveIntensity: 0.0 }), 'rsign');
   const signs = new THREE.Mesh(sg.build(), signMat); signs.castShadow = true; signs.receiveShadow = true; scene.add(signs);
+  for (const b of [g, w, sg, cov, dec]) { b.p.length = b.n.length = b.uv.length = b.c.length = b.idx.length = 0; for (const k in b.custom) b.custom[k].length = 0; }
   // v3.5 kerb ramps where the crosswalks (1.0–4.2 m from each intersection edge) meet the kerb: sloped concrete wedge with
   // flared sides and a yellow detectable-warning pad at the bottom
   {
@@ -305,8 +306,9 @@ export function buildStreet(scene, city) {
     if (rb.vc) { const m = new THREE.Mesh(rb.build(), prep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide }), 'vcolds')); m.receiveShadow = true; scene.add(m); }
     city.kerbRamps = nR;
   }
-  return { poles, signs: nSigns, shelters: shelters.length, signMat, update(night) { signMat.emissiveIntensity = 0.03 + night * 0.12; } };
+  return { poles, signs: nSigns, shelters: shelters.length, signMat, update: makeStreetUpdate(signMat) };
 }
+function makeStreetUpdate(signMat) { return (night) => { signMat.emissiveIntensity = 0.03 + night * 0.12; }; }
 
 // ---------------- shop sign boards above every awning (dense, unique storefront signage — GTA6_REFERENCE §6)
 export function buildShopSigns(scene, city) {

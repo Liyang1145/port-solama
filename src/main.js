@@ -99,8 +99,8 @@ async function load() {
   addStreetTrees(city);
   if (!CYBER) city.propFix = fixCityProps(city); // a_canaledge: lamps / palms / trees / shrubs standing in the water moved to land or dropped (after placement, RNG untouched)
   if (!CYBER) city.region.attach(scene, M); // r5.0: far LOD of the mainland buildings now; detailed chunks stream in renderFrame
+  if (CYBER) nature = buildNature(scene, city, T, city.wild); // must run before buildVegetation so wild palms & prairie shrubs are included
   const veg = buildVegetation(scene, city, T);
-  if (CYBER) nature = buildNature(scene, city, T, city.wild);
   mark('trees+region+veg+nature');
   const props = buildProps(scene, city, T);
   buildFurniture(scene, city, G);
