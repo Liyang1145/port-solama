@@ -43,14 +43,21 @@ export class HUD {
     if (CYBER) return this.buildMapCyber();
     // light "GPS" plate: pale blocks, white roads, light-teal water (GTA6_REFERENCE §1 minimap). r5.0: the whole bay —
     // mainland district, causeway, pearl island and the natural island ends — drawn from the same mapgeo data as the world.
-    const X0 = -1520, X1 = 760, Z0 = -1520, Z1 = 1520, S = 0.62;
+    const X0 = -2500, X1 = 760, Z0 = -2600, Z1 = 2600, S = 0.46;
     this.map = { X0, Z0, S };
     const c = document.createElement('canvas'); c.width = Math.round((X1 - X0) * S); c.height = Math.round((Z1 - Z0) * S); const g = c.getContext('2d');
     const P = (x, z) => [(x - X0) * S, (z - Z0) * S];
     g.fillStyle = '#9fcfda'; g.fillRect(0, 0, c.width, c.height);
     const rect = (x0, z0, x1, z1, col) => { const [a, b] = P(x0, z0); g.fillStyle = col; g.fillRect(a, b, (x1 - x0) * S, (z1 - z0) * S); };
     const poly = (pts, col) => { g.fillStyle = col; g.beginPath(); pts.forEach((p, i) => { const [a, b] = P(p[0], p[1]); if (i) g.lineTo(a, b); else g.moveTo(a, b); }); g.closePath(); g.fill(); };
-    const ml = [[-1520, -1520]]; for (let z = -1520; z <= 1520; z += 10) ml.push([shoreX(z), z]); ml.push([-1520, 1520]); poly(ml, '#d9dde2');
+    const ml = [[X0, Z0]]; for (let z = Z0; z <= Z1; z += 10) ml.push([shoreX(z), z]); ml.push([X0, Z1]); poly(ml, '#d9dde2');
+    // mainland finger canals (cut into the bay shore polygon so waterfront neighborhoods & bridges show on the GPS map)
+    const fab = this.city.fabric;
+    if (fab && fab.canals) for (const q of fab.canals) {
+      const nx = -q.d[1] * q.hw, nz = q.d[0] * q.hw;
+      const bx = q.B[0] + q.d[0] * 120, bz = q.B[1] + q.d[1] * 120;
+      poly([[q.A[0] + nx, q.A[1] + nz], [bx + nx, bz + nz], [bx - nx, bz - nz], [q.A[0] - nx, q.A[1] - nz]], '#9fcfda');
+    }
     for (const sg of [1, -1]) { poly(islandEndPoly(sg), '#cfe0c4'); const b = []; for (let a = 372; a <= 1480; a += 10) b.push([335 + beachOff(sg * a), sg * a]); for (let a = 1480; a >= 372; a -= 10) b.push([470 + beachOff(sg * a), sg * a]); poly(b, '#eee2c4'); }
     poly(pearlPoly(), '#cfe0c4');
     rect(LAYOUT.islandX[0], LAYOUT.islandZ[0], LAYOUT.beachX[0], LAYOUT.islandZ[1], '#d9dde2');
@@ -60,6 +67,21 @@ export class HUD {
     if (this.city.footprints) for (const f of this.city.footprints) rect(f.x0, f.z0, f.x1, f.z1, '#b7bcc4');
     const R = this.city.region && this.city.region.data;
     if (R) for (const L of R.lots) if (!L.empty) poly(L.corners, L.zone === 'mansion' ? '#e6e6e0' : '#b7bcc4');
+    // mainland fabric arterial road lattice + downtown blocks
+    if (fab && fab.N) {
+      g.strokeStyle = '#ffffff'; g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 14 * S;
+      const line = (A, B) => { const [x0, y0] = P(A[0], A[1]), [x1, y1] = P(B[0], B[1]); g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
+      const N = fab.N;
+      for (let i = 0; i < N.length; i++) for (let j = 0; j < N[i].length; j++) {
+        if (i + 1 < N.length && !(i === 6 && j === 6)) line(N[i][j], N[i + 1][j]);
+        if (j + 1 < N[i].length && !(i === 7 && (j === 5 || j === 6))) line(N[i][j], N[i][j + 1]);
+      }
+      if (fab.dtLines) for (const d of fab.dtLines) {
+        const z0 = d.zs[0], z1 = d.zs[d.zs.length - 1], x0 = d.xs[0], x1 = d.xs[d.xs.length - 1];
+        for (const x of d.xs) line([x, z0], [x, z1]);
+        for (const z of d.zs) line([x0, z], [x1, z]);
+      }
+    }
     for (const s of this.city.segs) { if (s.axis === 'z') rect(s.c - 6, s.a0 - 1, s.c + 6, s.a1 + 1, '#ffffff'); else rect(s.a0 - 1, s.c - 6, s.a1 + 1, s.c + 6, '#ffffff'); }
     for (const i of this.city.inters) rect(i.x - 7, i.z - 7, i.x + 7, i.z + 7, '#ffffff');
     if (R) { g.strokeStyle = '#ffffff'; g.lineCap = 'round'; g.lineJoin = 'round';

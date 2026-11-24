@@ -295,16 +295,29 @@ export function grassClump(seed, tall) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(c, 3)); g.setAttribute('aH', new THREE.Float32BufferAttribute(h, 1)); g.setIndex(idx); g.computeBoundingSphere(); return g;
 }
-// wildflower patch: stems + small petal crosses (vertex colours carry the bloom colour; instance colour tints it)
+// wildflower patch: slender stems + delicate 5-petal star blooms (vertex colours carry petals/center; instance colour tints)
 function flowerClump(seed) {
   const r = mulberry(seed); const p = [], n = [], c = [], h = [], idx = [];
-  for (let f = 0; f < 7; f++) {
-    const x = (r() - 0.5) * 0.8, z = (r() - 0.5) * 0.8, H = 0.35 + r() * 0.45; const base = p.length / 3;
-    p.push(x - 0.008, 0, z, x + 0.008, 0, z, x, H, z); n.push(0, 1, 0, 0, 1, 0, 0, 1, 0); c.push(0.2, 0.35, 0.1, 0.2, 0.35, 0.1, 0.25, 0.4, 0.12); h.push(0, 0, 1); idx.push(base, base + 1, base + 2);
-    const s = 0.05 + r() * 0.04; const b2 = p.length / 3;
-    for (const [dx, dz] of [[-s, 0], [s, 0], [0, -s], [0, s]]) { p.push(x + dx, H + 0.01, z + dz); n.push(0, 1, 0); c.push(1, 1, 1); h.push(1); }
-    p.push(x, H + 0.03, z); n.push(0, 1, 0); c.push(1, 0.85, 0.3); h.push(1);
-    idx.push(b2, b2 + 2, b2 + 4, b2 + 2, b2 + 1, b2 + 4, b2 + 1, b2 + 3, b2 + 4, b2 + 3, b2, b2 + 4);
+  for (let f = 0; f < 8; f++) {
+    const x = (r() - 0.5) * 0.85, z = (r() - 0.5) * 0.85, H = 0.34 + r() * 0.42; const base = p.length / 3;
+    const tilt = r() * Math.PI * 2, lean = 0.03 + r() * 0.05;
+    const tx = x + Math.cos(tilt) * lean, tz = z + Math.sin(tilt) * lean;
+    p.push(x - 0.006, 0, z, x + 0.006, 0, z, tx, H, tz); n.push(0, 1, 0, 0, 1, 0, 0, 1, 0);
+    c.push(0.20, 0.36, 0.10, 0.20, 0.36, 0.10, 0.28, 0.44, 0.14); h.push(0, 0, 1); idx.push(base, base + 1, base + 2);
+    const s = 0.032 + r() * 0.022; const np = 5; const a0 = r() * Math.PI * 2;
+    const ctr = p.length / 3;
+    p.push(tx, H + 0.005, tz); n.push(0, 1, 0); c.push(1.0, 0.82, 0.22); h.push(1);
+    for (let k = 0; k < np; k++) {
+      const aL = a0 + (k - 0.28) / np * Math.PI * 2;
+      const aM = a0 + k / np * Math.PI * 2;
+      const aR = a0 + (k + 0.28) / np * Math.PI * 2;
+      const pb = p.length / 3;
+      const ri = s * 0.36, ro = s;
+      p.push(tx + Math.cos(aL) * ri, H + 0.009, tz + Math.sin(aL) * ri); n.push(0, 1, 0); c.push(0.95, 0.95, 0.95); h.push(1);
+      p.push(tx + Math.cos(aM) * ro, H + 0.015, tz + Math.sin(aM) * ro); n.push(0, 1, 0); c.push(1.0, 1.0, 1.0); h.push(1);
+      p.push(tx + Math.cos(aR) * ri, H + 0.009, tz + Math.sin(aR) * ri); n.push(0, 1, 0); c.push(0.95, 0.95, 0.95); h.push(1);
+      idx.push(ctr, pb, pb + 1, ctr, pb + 1, pb + 2);
+    }
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(c, 3)); g.setAttribute('aH', new THREE.Float32BufferAttribute(h, 1)); g.setIndex(idx); return g;
@@ -556,7 +569,7 @@ export function buildNature(scene, city, T, field) {
   const grassG = [grassClump(7, true), grassClump(13, true), grassClump(23, false)];
   const MAXG = 9000, MAXF = 2600, MAXN = 3200; // r6.1 ferns 1400 -> 3200
   const grassIM = grassG.map((g) => { const im = new THREE.InstancedMesh(g, grassMat, MAXG); im.count = 0; im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXG * 3).fill(1), 3); im.frustumCulled = false; im.receiveShadow = true; scene.add(im); out.meshes.push(im); return im; });
-  const flowerIM = new THREE.InstancedMesh(flowerClump(5), flowerMat, MAXF); flowerIM.count = 0; flowerIM.frustumCulled = false; flowerIM.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXF * 3), 3); scene.add(flowerIM); out.meshes.push(flowerIM);
+  const flowerIM = new THREE.InstancedMesh(flowerClump(5), flowerMat, MAXF); flowerIM.count = 0; flowerIM.frustumCulled = false; flowerIM.receiveShadow = true; flowerIM.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXF * 3), 3); scene.add(flowerIM); out.meshes.push(flowerIM);
   const fernG = [fernGeometry(3), fernGeometry(9)];
   // r6.1 forest floor layers: broad-leaf plants (two sizes), leaf litter patches
   const bigLeafMat = prep(new THREE.MeshStandardMaterial({ map: broadLeafTex(), alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.55, vertexColors: true, color: new THREE.Color().setRGB(1.0, 1.05, 0.95) }), 'bigleaf', (s) => foliagePatch(s, 0.3));
@@ -566,7 +579,7 @@ export function buildNature(scene, city, T, field) {
   const bigIM = bigG.map((g) => { const im = new THREE.InstancedMesh(g, bigLeafMat, MAXB); im.count = 0; im.frustumCulled = false; im.receiveShadow = true; im.castShadow = true; scene.add(im); out.meshes.push(im); return im; });
   const litterIM = new THREE.InstancedMesh(litterGeometry(3), litterMat, MAXL); litterIM.count = 0; litterIM.frustumCulled = false; litterIM.receiveShadow = true; scene.add(litterIM); out.meshes.push(litterIM);
   const fernIM = fernG.map((g) => { const im = new THREE.InstancedMesh(g, fernMat, MAXN); im.count = 0; im.frustumCulled = false; im.receiveShadow = true; im.castShadow = false; scene.add(im); out.meshes.push(im); return im; });
-  const BLOOM = [[1.0, 0.86, 0.2], [0.98, 0.96, 0.92], [0.62, 0.42, 0.95], [0.98, 0.45, 0.2], [0.95, 0.3, 0.45], [0.35, 0.55, 1.0]];
+  const BLOOM = [[0.96, 0.78, 0.14], [0.92, 0.88, 0.72], [0.58, 0.36, 0.92], [0.95, 0.42, 0.16], [0.92, 0.28, 0.44], [0.34, 0.52, 0.96]];
   const GC = 12; let lx = 1e9, lz = 1e9; const col3 = new THREE.Color();
   const scatter = (cx, cz) => {
     const RG = 78, RN = 30; let ng = [0, 0, 0], nf = 0, nn = [0, 0], nb = [0, 0, 0], nl = 0;
@@ -582,7 +595,7 @@ export function buildNature(scene, city, T, field) {
           { const dry = smooth(0.3, 0.75, vn(x / 70, z / 70) * 0.7 + vn(x / 14, z / 14) * 0.3); col3.setRGB(lerp(0.62, 1.05, dry), lerp(0.95, 1.0, dry), lerp(0.55, 0.9, dry)); grassIM[kind].setColorAt(ng[kind]++, col3); } }
         if (d < 64) { const fv = vn(mx / 45 + 3, mz / 45); if (fv > 0.5) { const nfl = Math.round((fv - 0.5) * 40 * (1 - fk));
           for (let i = 0; i < nfl && nf < MAXF; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.at(F.RD, x, z) < 4 || F.waterAt(x, z)) continue; q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(0.8 + r() * 0.6); pv.set(x, F.H(x, z) - 0.02, z); m4.compose(pv, q, sc); flowerIM.setMatrixAt(nf, m4);
-            const bc = BLOOM[Math.floor(vn(x / 25, z / 25 + 9) * BLOOM.length * 1.6 + r() * 1.2) % BLOOM.length]; col3.setRGB(bc[0], bc[1], bc[2]); flowerIM.setColorAt(nf++, col3); } } }
+            const bc = BLOOM[Math.floor(vn(x / 18, z / 18 + 9) * BLOOM.length * 2.2 + r() * 2.6) % BLOOM.length]; col3.setRGB(bc[0], bc[1], bc[2]); flowerIM.setColorAt(nf++, col3); } } }
       }
       if (fk > 0.35 && d < 70) { // r6.1 broad-leaf understory + leaf litter
         const nB = Math.round(9 * fk * (d < RN ? 1 : 0.55));

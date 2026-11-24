@@ -816,7 +816,7 @@ function districtEdges(ctx, deco) {
     box(v, x1 - 3, -1.5, zj - 2.4, x1 + 0.5, dy + 0.05, zj + 2.4, {}, [0.72, 0.71, 0.68]); // round-head platform
     // a_jetty: walkway deck — shore steps, edge railings (the only colliders), end rail, bollards; railings are built there too
     jettyWalk(ctx, x0, x1, zj, dy, ctx.beachH);
-    lamps.push({ x: x1 - 1.2, z: zj + sg * 1.2, y: dy, dir: [0, -sg], kind: 'bridge' }); // a_jetty: on the outer side, clear of the bridge opening
+    lamps.push({ x: x1 - 2.2, z: zj + sg * 1.92, y: dy, dir: sg < 0 ? [-1, 0] : [0, -sg], kind: 'bridge' }); // on outer round-head ledge clear of railings; south jetty arm aims west away from lighthouse
     // walls the sand off past the jetty so the beach ends at the rocks
     // (r5.0: the sand wall past the jetty is gone — the beach continues to the island tips)
   }

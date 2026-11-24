@@ -228,7 +228,7 @@ export class Env {
     this.hemi = new THREE.HemisphereLight(0x8899aa, 0x332822, 0); scene.add(this.hemi);
     this.hour = -1; this.lastEnvHour = -99; this.look = {};
     // r6.1 natural-light tunables (window.__G.env.tune; lab plans tweak them live)
-    this.tune = CYBER ? { albedo: 0.2, bounce: 1.0, groundTint: [0.86, 0.88, 0.92], nightGround: new THREE.Color(0.085, 0.055, 0.10), hazeSky: 0.4, hazeAmt: 0.75, shaft: 1.0 }
+    this.tune = CYBER ? { albedo: 0.2, bounce: 1.0, groundTint: [0.86, 0.88, 0.92], nightGround: new THREE.Color(0.15, 0.10, 0.19), hazeSky: 0.4, hazeAmt: 0.75, shaft: 1.0 }
       : { albedo: 0.26, bounce: 1.0, groundTint: [1.0, 0.86, 0.68], nightGround: new THREE.Color(0.11, 0.075, 0.045), hazeSky: 0.45, hazeAmt: 0.72, shaft: 1.0 };
   }
   sample(h) {
@@ -308,6 +308,7 @@ export class Env {
     this.csm.lightDirection.copy(ld).negate();
     for (const l of this.csm.lights) { l.intensity = li; l.color.copy(lc); }
     this.sunFar.intensity = 0;
+    if (CYBER) { this.hemi.color.setHex(0x526b94); this.hemi.groundColor.setHex(0x522a4e); this.hemi.intensity = 0.16 * night; } // lift crushed ACES night shadow floor without washing out neon contrast
     this.exposure = L.exp * (CYBER ? 1 : lerp(1.25, 1.1, night)); // r6.1 PBR-Neutral needs ~25% more exposure than ACES for the same mid-grey
     this.envIntensity = L.envI;
     if (force || Math.abs(h - this.lastEnvHour) > 0.08) this.updateEnv();
