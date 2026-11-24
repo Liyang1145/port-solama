@@ -34,7 +34,12 @@ export class Missions {
   setGoal(x, z, name) { this.target = { x, z, name }; this.goalMk.position.set(x, this.G.city.groundH(x, z), z); this.goalMk.visible = true; }
   clearGoal() { this.target = null; this.goalMk.visible = false; }
   start(id) {
-    const G = this.G; if (this.active || G.mission.state !== 'idle' && G.mission.state !== 'cool') return false;
+    const G = this.G;
+    if (this.active) return false;
+    if (G.mission.state !== 'idle' && G.mission.state !== 'cool') {
+      if (!this._valetWarnT || this._valetWarnT <= 0) { G.hud.msg('请先完成或离开当前代客泊车任务', 2.5); this._valetWarnT = 3; }
+      return false;
+    }
     const s = MISSION_STARTS.find((m) => m.id === id); if (!s) return false;
     this.active = s; this.t = 0; this.stage = 'go'; this.data = {}; this.startMk.forEach((b) => (b.visible = false));
     G.hud.msg('任务开始：' + s.name, 3); G.sfx.alert?.();
@@ -42,11 +47,13 @@ export class Missions {
     return true;
   }
   end(ok, why, pay = 0) {
-    const G = this.G; const s = this.active;
+    const G = this.G; const s = this.active; if (!s) return;
     if (ok) { G.P.money += pay; G.hud.cash(pay); this.done[s.id] = (this.done[s.id] || 0) + 1; this.result(true, '任务完成', `${s.name} · 报酬 $${pay.toLocaleString('en-US')}`); }
-    else this.result(false, '任务失败', why);
+    else { if (G.deadT <= 0) this.result(false, '任务失败', why); else this.card.style.opacity = 0; }
     this.log.push({ id: s.id, ok, why: why || '', pay, t: Math.round(this.t) });
-    for (const c of this.data.npcs || []) { if (!c.dead) c.hostile = false; }
+    for (const c of this.data.npcs || []) {
+      if (!c.dead) { c.hostile = false; if (!ok) { const gi = G.gang.indexOf(c); if (gi >= 0) G.gang.splice(gi, 1); c.dispose(); } }
+    }
     this.active = null; this.stage = ''; this.clearGoal(); this.obj(''); this.cool = 8; G.save?.();
   }
   // ---------------------------------------------------------------- 夜班收银: rob the 24h store, then lose the cops
@@ -57,6 +64,7 @@ export class Missions {
     if (this.stage === 'hold') {
       const armed = !G.arsenal.cur.melee; const aiming = G.mouse.aim || (G.override && G.override.aim);
       const clerk = G.world.clerkAt(st);
+      if (clerk && clerk.dead) return this.end(false, '店员已倒下，无法继续抢劫');
       if (!armed) { this.obj('掏出枪（数字键 3–6 或按住 Q 选枪）对准店员'); return; }
       if (d > 9) { this.obj('回到收银台前'); return; }
       this.obj(`按住右键瞄准店员 · 装钱进度 ${Math.round((this.data.hold || 0) / 3 * 100)}%`);
@@ -73,8 +81,8 @@ export class Missions {
   }
   upd_cold(dt) {
     const G = this.G, P = G.P; const v = this.data.van;
-    if (!v || v.health < 30) return this.end(false, '货车被撞坏了，冷链断了');
-    if (this.stage === 'get') { this.goalMk.position.set(v.x, 0.15, v.z); this.obj('坐进 <b style="color:#7cc4ff">冷藏厢式车</b>（按 F）');
+    if (!v || !G.traffic.cars.includes(v) || v.health < 30) return this.end(false, '货车被撞坏了，冷链断了');
+    if (this.stage === 'get') { this.goalMk.position.set(v.x, G.city.groundH(v.x, v.z) + 0.15, v.z); this.obj('坐进 <b style="color:#7cc4ff">冷藏厢式车</b>（按 F）');
       if (P.car === v) { const r = pick(POI.restaurants); this.data.dest = r; this.data.left = Math.hypot(r.x - v.x, r.z - v.z) / 9 + 35; this.setGoal(r.x, r.z, r.name); this.stage = 'drive'; G.hud.msg('把冷藏海鲜送到「' + r.name + '」，别磕碰', 3); } return; }
     if (this.stage === 'drive') {
       this.data.left -= dt; const r = this.data.dest; const d = Math.hypot(r.x - v.x, r.z - v.z);
@@ -91,8 +99,8 @@ export class Missions {
     this.setGoal(v.x, v.z, '欠债人'); this.stage = 'find';
   }
   upd_debt(dt) {
-    const G = this.G, P = G.P; const v = this.data.car; if (!v) return this.end(false, '目标消失了');
-    const d = Math.hypot(P.pos.x - v.x, P.pos.z - v.z); this.goalMk.position.set(v.x, 0.15, v.z); if (this.target) { this.target.x = v.x; this.target.z = v.z; }
+    const G = this.G, P = G.P; const v = this.data.car; if (!v || !G.traffic.cars.includes(v)) return this.end(false, '目标消失了');
+    const d = Math.hypot(P.pos.x - v.x, P.pos.z - v.z); this.goalMk.position.set(v.x, G.city.groundH(v.x, v.z) + 0.15, v.z); if (this.target) { this.target.x = v.x; this.target.z = v.z; }
     if (this.stage === 'find') { this.obj(`找到 <b style="color:#ff6a6a">欠债人</b>的跑车 · ${Math.round(d)} 米`); if (d < 45) { this.stage = 'chase'; G.hud.msg('他发现你了！把他的车撞停或打坏', 3); } return; }
     if (this.stage === 'chase') {
       this.data.t = (this.data.t || 0) + dt;
@@ -111,15 +119,17 @@ export class Missions {
     const d = Math.hypot(P.pos.x - POI.shipyard.x, P.pos.z - POI.shipyard.z);
     if (this.stage === 'go') { this.obj(`去 <b style="color:#ffd24d">${POI.shipyard.name}</b> · ${Math.round(d)} 米`);
       if (d < 40) { this.clearGoal(); this.data.npcs = []; const spots = (y && y.cover.length ? y.cover : [{ x: POI.shipyard.x, z: POI.shipyard.z }]);
-        for (let i = 0; i < 6; i++) { const s = spots[i % spots.length]; const c = new Character(G.scene, 'man'); const px = s.x + rand(-4, 4), pz = s.z + (i % 2 ? 2.4 : -2.4);
-          c.pos.set(px, G.city.groundH(px, pz), pz); c.hostile = true; c.health = 70; c.ai = { mode: 'gang', fireT: rand(1.5, 3), home: { x: px, z: pz } }; G.gang.push(c); this.data.npcs.push(c); }
+        for (let i = 0; i < 6; i++) { const s = spots[i % spots.length]; const c = new Character(G.scene, 'man'); const rc = G.city.col.resolve(s.x + rand(-4, 4), s.z + (i % 2 ? 2.4 : -2.4), 0.4, 0.5); const px = rc.x, pz = rc.z;
+          c.pos.set(px, G.city.groundH(px, pz), pz); c.hostile = true; c.health = 70; c.ai = { mode: 'gang', fireT: rand(0.8, 1.6), home: { x: px, z: pz } }; G.gang.push(c); this.data.npcs.push(c); }
         this.stage = 'fight'; G.hud.msg('对面的人抄家伙了！', 2.5); G.crime(1, '帮派火并'); }
       return; }
     if (this.stage === 'fight') { const left = this.data.npcs.filter((c) => !c.dead).length; this.obj(`击倒敌对帮派成员 · 剩余 <b style="color:#ff6a6a">${left}</b> 人`);
-      if (left === 0) this.end(true, '', 1600); if (d > 150) this.end(false, '你离开了交火区'); }
+      if (left === 0) return this.end(true, '', 1600);
+      if (d > 150) return this.end(false, '你离开了交火区'); }
   }
   update(dt) {
     const G = this.G, P = G.P;
+    if (this._valetWarnT > 0) this._valetWarnT -= dt;
     this.cardT -= dt; if (this.cardT <= 0) this.card.style.opacity = 0;
     if (this.active) {
       this.t += dt;

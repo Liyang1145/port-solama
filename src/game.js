@@ -45,7 +45,7 @@ export class Game {
     this.sirenLights = [new THREE.PointLight(0xff2020, 0, 22, 2), new THREE.PointLight(0x2040ff, 0, 22, 2)]; for (const l of this.sirenLights) this.scene.add(l);
     this.headlight = new THREE.SpotLight(0xfff0dd, 0, 60, 0.55, 0.5, 1.4); this.headlight.castShadow = false; this.scene.add(this.headlight); this.scene.add(this.headlight.target);
     this.tracerMat = new THREE.LineBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.9 });
-    this.extras = []; this.gang = []; this.slowmo = 1; this.waypoint = null;
+    this.extras = []; this.gang = []; this.slowmo = 1; this.waypoint = null; this.paused = false;
     this.arsenal = new Arsenal(this);
     this.bindInput();
     this.mission = new Valet(this);
@@ -54,17 +54,47 @@ export class Game {
     this.police = new PoliceOps(this);
   }
   // ------------------------------------------------------------------ setup / input ----
+  clearInputs() {
+    this.keys = {};
+    this.mouse.down = false; this.mouse.aim = false; this.mouse.edge = false;
+    if (this.arsenal && this.arsenal.wheelOpen) this.arsenal.openWheel(false);
+    this.slowmo = 1;
+    if (this.hud) this.hud.peek = false;
+  }
+  togglePause(on = !this.paused) {
+    if (!this.started) return;
+    this.paused = !!on;
+    if (this.paused) { this.clearInputs(); if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock?.(); }
+    this.sfx.setPaused?.(this.paused);
+    const p = document.getElementById('pause'); if (p) p.style.display = this.paused ? 'flex' : 'none';
+  }
   bindInput() {
     const c = this.renderer.domElement;
+    const po = document.getElementById('pause');
+    if (po) po.addEventListener('click', () => { this.togglePause(false); if (c.requestPointerLock) { try { Promise.resolve(c.requestPointerLock()).catch(() => {}); } catch (e) {} } this.sfx.resume(); });
+    addEventListener('blur', () => this.clearInputs());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.clearInputs(); });
+    document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== c) this.clearInputs(); });
     addEventListener('keydown', (e) => {
-      if (this.world.phoneOpen) { if (/Arrow|Enter|Backspace/.test(e.code)) { this.world.phoneKey(e.code); e.preventDefault(); return; } if (e.code === 'Escape' || e.code === 'KeyI') { this.world.togglePhone(false); return; } }
-      if (this.world.menu) { const m = /^Digit(\d)$/.exec(e.code); if (m) { this.world.choose(+m[1] - 1); return; } if (e.code === 'Escape' || e.code === 'KeyE') { this.world.closeMenu(); return; } }
+      if (this.world.phoneOpen) {
+        if (/Arrow|Enter|Backspace/.test(e.code)) { this.world.phoneKey(e.code); e.preventDefault(); }
+        else if (e.code === 'Escape' || e.code === 'KeyI') this.world.togglePhone(false);
+        return;
+      }
+      if (this.world.menu) {
+        const m = /^Digit(\d)$/.exec(e.code);
+        if (m) this.world.choose(+m[1] - 1);
+        else if (e.code === 'Escape' || e.code === 'KeyE') this.world.closeMenu();
+        return;
+      }
+      if (e.code === 'Escape') { if (!e.repeat && this.started) this.togglePause(); return; }
+      if (this.paused) return;
       if (e.repeat) return;
       this.keys[e.code] = true;
       { const m = /^Digit([1-6])$/.exec(e.code); if (m) this.arsenal.equip(['fist', 'bat', 'pistol', 'smg', 'shotgun', 'rifle'][+m[1] - 1]); }
-      if (e.code === 'KeyQ') { this.arsenal.openWheel(true); this.wheelM = [0, 0]; }
+      if (e.code === 'KeyQ' && this.P.onFoot && this.deadT <= 0) { this.arsenal.openWheel(true); this.wheelM = [0, 0]; }
       if (e.code === 'KeyC') this.arsenal.toggleCover();
-      if (e.code === 'KeyE' && this.P.onFoot) this.world.interact();
+      if (e.code === 'KeyE') { if (this.world.interact()) this.keys[e.code] = false; }
       if (e.code === 'KeyI' || (e.code === 'ArrowUp' && this.P.onFoot)) this.world.togglePhone(true);
       if (e.code === 'KeyZ') this.world.switchChar();
       if (e.code === 'Period') { const n = this.world.station + 1; this.world.station = n >= 3 ? -1 : n; this.sfx.setStation(this.world.station); this.hud.msg(this.world.station < 0 ? '电台已关闭' : '电台：' + ['海浪 FM 93.1', '霓光 101.7', '午夜慢调 88.5'][this.world.station], 1.5); }
@@ -78,7 +108,7 @@ export class Game {
     });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; if (e.code === 'KeyQ' && this.arsenal.wheelOpen) this.arsenal.openWheel(false); });
     addEventListener('wheel', (e) => { if (document.pointerLockElement === c && this.P.onFoot) this.arsenal.cycle(e.deltaY > 0 ? 1 : -1); });
-    c.addEventListener('click', () => { if (document.pointerLockElement !== c) c.requestPointerLock?.(); this.sfx.resume(); });
+    c.addEventListener('click', () => { if (document.pointerLockElement !== c && c.requestPointerLock) { try { Promise.resolve(c.requestPointerLock()).catch(() => {}); } catch (e) {} } this.sfx.resume(); });
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== c) return;
       if (this.arsenal.wheelOpen) { this.wheelM[0] += e.movementX; this.wheelM[1] += e.movementY; this.arsenal.wheelAim(this.wheelM[0], this.wheelM[1]); return; }
@@ -95,7 +125,7 @@ export class Game {
     const v = new Vehicle(this.scene, 'sport'); v.place(284.5, 22, Math.PI); v.ai = null; this.traffic.cars.push(v); this.parked = v;
     for (let i = 0; i < 18; i++) this.traffic.spawnCar(pick(['sedan', 'sedan', 'suv', 'pickup', 'van', 'taxi', 'sport2', 'sport']), this.P.pos, 20, 230);
     for (let i = 0; i < 84; i++) this.peds.spawn(this.P.pos, 6, 110); // v4.4 denser crowd (character LOD keeps far peds cheap)
-    this.hud.msg('欢迎来到索拉纳港 · 走近车辆按 F 上车', 5);
+    this.hud.msg((CYBER ? '欢迎来到霓港' : '欢迎来到索拉纳港') + ' · 走近车辆按 F 上车', 5, true);
     const help = document.getElementById('help'); if (snap) help.style.display = 'none'; else setTimeout(() => { help.style.transition = 'opacity 1s'; help.style.opacity = 0; }, 20000);
     this.started = true;
     this._init = { armor: this.P.armor, money: this.P.money, bank: this.P.bank, load: JSON.stringify(this.P.load) };
@@ -112,16 +142,23 @@ export class Game {
   toggleCar() {
     if (this.deadT > 0) return;
     const P = this.P;
-    if (P.car) { // exit on the left side
+    if (P.car) { // exit on the left side, fall back to right side (both resolved against colliders at car height)
       const v = P.car; const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw);
       let x = v.x + lx * (v.dims.W / 2 + 0.6), z = v.z + lz * (v.dims.W / 2 + 0.6);
-      if (this.city.col.resolve(x, z, 0.35, 0.5).hit) { x = v.x - lx * (v.dims.W / 2 + 0.6); z = v.z - lz * (v.dims.W / 2 + 0.6); }
+      const ey = v.y + 0.5;
+      if (this.city.col.resolve(x, z, 0.35, ey).hit) {
+        x = v.x - lx * (v.dims.W / 2 + 0.6); z = v.z - lz * (v.dims.W / 2 + 0.6);
+        const rr = this.city.col.resolve(x, z, 0.35, ey); x = rr.x; z = rr.z;
+      }
       v.driver = null; v.input.throttle = 0; v.input.steer = 0; v.input.handbrake = true;
       P.car = null; P.onFoot = true; this.player.root.visible = true; this.tp(x, z, v.yaw); this.cam.yaw = v.yaw + Math.PI;
       this.headlight.intensity = 0; if (v.type === 'police') v.siren = false;
       return;
     }
     const v = this.nearestCar(); if (!v) return;
+    if (v.health <= 0) { this.hud.msg('这辆车已经报废了', 1.8); return; }
+    if (this.arsenal.wheelOpen) this.arsenal.openWheel(false);
+    P.cover = null;
     if (v.ai && v.ai.mode !== 'dead' && v.health > 0) { // carjack: pull the driver out
       const kind = v.type === 'police' ? 'cop' : pick(['woman', 'man']);
       const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw);
@@ -148,11 +185,22 @@ export class Game {
     const P = this.P; const tb = this.city.col.raycast(o.x, o.y, o.z, o.x + d.x * maxD, o.y + d.y * maxD, o.z + d.z * maxD); let hitT = tb * maxD; let what = null;
     const testChar = (c) => { if (c.dead || c === this.player) return; const cp = c.pos.clone(); cp.y += 1.0; const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) return; const q = o.clone().addScaledVector(d, t); const lat = Math.hypot(q.x - cp.x, q.z - cp.z); if (lat < 0.42 && q.y > c.pos.y && q.y < c.pos.y + 1.85) { hitT = t; what = { c, head: q.y > c.pos.y + 1.5 }; } };
     for (const c of this.peds.list) testChar(c); for (const c of this.cops) testChar(c); for (const c of this.gang) testChar(c); for (const c of this.extras) testChar(c);
-    for (const pr of this.world.profiles) if (pr.char !== this.player && !pr.car) testChar(pr.char);
-    for (const v of this.traffic.cars) { if (v === P.car) continue; const cp = new THREE.Vector3(v.x, v.y + 0.8, v.z); const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) continue; const q = o.clone().addScaledVector(d, t); if (q.distanceTo(cp) < v.dims.W * 0.6) { hitT = t; what = { v }; } }
+    // three-sphere hull along vehicle length so hood and trunk are hit as reliably as the cabin
+    for (const v of this.traffic.cars) {
+      if (v === P.car) continue;
+      const vr = v.dims.W * 0.55; const half = Math.max(0, v.dims.L * 0.5 - vr);
+      const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
+      for (const k of [-1, 0, 1]) {
+        const cx = v.x + fx * half * k, cy = v.y + 0.8, cz = v.z + fz * half * k;
+        const t = (cx - o.x) * d.x + (cy - o.y) * d.y + (cz - o.z) * d.z;
+        if (t < 0 || t > hitT) continue;
+        const qx = o.x + d.x * t - cx, qy = o.y + d.y * t - cy, qz = o.z + d.z * t - cz;
+        if (qx * qx + qy * qy + qz * qz < vr * vr) { hitT = t; what = { v }; }
+      }
+    }
     return { t: hitT, what };
   }
-  hitReact(c, d, push = 0.15) { if (c.dead) return; const r = this.city.col.resolve(c.pos.x + d.x * push, c.pos.z + d.z * push, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; c.yaw += (rng() - 0.5) * 0.6; c.hitT = 0.3; if (c.ai && c.ai.mode === 'gang') c.ai.fireT = Math.max(c.ai.fireT, 0.4); }
+  hitReact(c, d, push = 0.15) { if (c.dead) return; const r = this.city.col.resolve(c.pos.x + d.x * push, c.pos.z + d.z * push, 0.35, c.pos.y + 0.5); c.pos.x = r.x; c.pos.z = r.z; c.yaw += (rng() - 0.5) * 0.6; c.hitT = 0.3; if (c.ai && c.ai.mode === 'gang') c.ai.fireT = Math.max(c.ai.fireT, 0.4); }
   killChar(c, d, melee = false) {
     const fwd = Math.sin(c.yaw) * d.x + Math.cos(c.yaw) * d.z; c.kill(fwd > 0 ? -1 : 1);
     if (c.thief || c.hostile) { if (c.hostile) this.dropCash(c.pos); return; }
@@ -166,6 +214,7 @@ export class Game {
   policeNear(r) { const p = this.P.pos; return this.cops.some((c) => !c.dead && c.pos.distanceTo(p) < r) || this.policeCars.some((v) => Math.hypot(v.x - p.x, v.z - p.z) < r); }
   crime(level, why) {
     if (this.deadT > 0) return;
+    if (this.P.car) this.lastCrimeInCar = true;
     const nl = clamp(Math.max(this.wanted, level), 0, 6);
     if (nl > this.wanted) { this.wanted = nl; this.hud.msg('通缉等级上升 · ' + why, 2); this.sfx.alert(); }
     this.lostT = 0; this.lastSeen = this.P.pos.clone();
@@ -173,9 +222,10 @@ export class Game {
   // ------------------------------------------------------------------ police ----
   updatePolice(dt) {
     const P = this.P; const want = [0, 2, 3, 4, 5, 6, 6][this.wanted] || 0; // r6.2: 6 stars (HUD has six) indexed past the old table -> undefined -> no police at all
+    // remove wrecked cruisers from active pursuit roster so replacements can dispatch (G1)
+    for (const v of [...this.policeCars]) { if (v.health <= 0 || !this.traffic.cars.includes(v)) this.policeCars.splice(this.policeCars.indexOf(v), 1); }
     // dispatch
     if (this.policeCars.length < want && rng() < dt * 0.8) {
-      const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
       const v = this.traffic.spawnCar('police', this.lostT > 1.5 && this.lastSeen ? this.lastSeen : P.pos, 70, 170, null); // v4.3: reinforcements go to the last sighting
       if (v) { v.siren = true; v.ai.mode = 'chase'; v.ai.chaseSpeed = 22 + this.wanted * 3; v.crew = 2; this.policeCars.push(v); }
     }
@@ -183,51 +233,70 @@ export class Game {
     let seen = false;
     // v4.3 search: once police lose sight they go to the last sighting, not to where you really are
     const searching = this.lostT > 1.5 && this.lastSeen;
-    const px = P.car ? P.car.x : P.pos.x, pz = P.car ? P.car.z : P.pos.z;
+    const px = P.car ? P.car.x : P.pos.x, py = P.car ? P.car.y : P.pos.y, pz = P.car ? P.car.z : P.pos.z;
     for (const v of this.policeCars) {
       if (!v.ai) continue;
       const tx = searching ? this.lastSeen.x + Math.sin(this.lostT * 0.3 + v.x) * 20 : px, tz = searching ? this.lastSeen.z + Math.cos(this.lostT * 0.3 + v.z) * 20 : pz; const d = Math.hypot(tx - v.x, tz - v.z);
-      if (this.wanted === 0) { v.siren = false; v.ai.mode = 'lane'; v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - tx, 0, v.z * 2 - tz); continue; }
+      if (this.wanted === 0) {
+        v.siren = false;
+        if (v.ai.mode !== 'lane') {
+          if (this.traffic.attach && this.traffic.attach(v)) continue;
+          v.ai.mode = 'flee'; v.ai.target = (v.ai.target || new THREE.Vector3()).set(v.x * 2 - tx, 0, v.z * 2 - tz);
+        }
+        continue;
+      }
       // route: follow the road grid towards the player (aim at the nearest road point beyond 40 m), direct pursuit when close
       v.ai.target = d < 45 ? new THREE.Vector3(tx, 0, tz) : this.roadWaypoint(v, tx, tz);
       v.ai.chaseSpeed = d < 30 ? (P.car ? 26 : 9) : 22 + this.wanted * 3;
-      if (Math.hypot(px - v.x, pz - v.z) < 90 && this.los(v.x, 1.2, v.z, px, 1.2, pz)) seen = true;
-      if (!P.car && !searching && d < 16 && v.crew > 0 && Math.abs(v.speed) < 3) { // deploy
+      const pd = Math.hypot(px - v.x, pz - v.z);
+      const carVis = pd < 90 && (this.los(v.x, v.y + 1.55, v.z, px, py + 1.55, pz) || (pd < 25 && this.los(v.x, v.y + 1.9, v.z, px, py + 1.7, pz)));
+      if (carVis) seen = true;
+      if (!P.car && (!searching || carVis) && pd < 18 && v.crew > 0 && Math.abs(v.speed) < 3) { // deploy
         for (let i = 0; i < v.crew; i++) {
           const c = new Character(this.scene, 'cop'); const side = i ? 1 : -1; const lx = Math.cos(v.yaw) * side, lz = -Math.sin(v.yaw) * side;
-          c.pos.set(v.x + lx * 2, this.city.groundH(v.x, v.z), v.z + lz * 2); c.isCop = true; c.ai = { mode: 'cop', fireT: rand(0.8, 2) }; c.health = 100; this.cops.push(c);
+          const r = this.city.col.resolve(v.x + lx * 2, v.z + lz * 2, 0.35, v.y + 0.5);
+          c.pos.set(r.x, this.city.groundH(r.x, r.z), r.z); c.isCop = true; c.ai = { mode: 'cop', fireT: rand(0.9, 1.8) }; c.health = 100; this.cops.push(c);
         }
         v.crew = 0; v.input.throttle = 0; v.ai.chaseSpeed = 0;
       }
-      if (!v.crew && !P.car) { v.ai.chaseSpeed = 0; v.input.handbrake = true; }
-      // shoot at the player's car from moving cruisers
-      if (P.car && d < 28 && seen && rng() < dt * 0.6 * this.wanted) this.damagePlayer(rand(3, 7));
+      if (!v.crew) { v.ai.chaseSpeed = 0; v.input.handbrake = true; }
+      // shoot at the player's car only from live, crewed cruisers with direct line of sight (per-cruiser cooldown avoids 5-car instant melt)
+      v._fireT = (v._fireT || 0) - dt;
+      if (P.car && this.deadT <= 0 && v.crew > 0 && v.health > 0 && pd < 30 && carVis && v._fireT <= 0) {
+        v._fireT = rand(1.1, 1.9) / (0.7 + this.wanted * 0.15);
+        this.sfx.shot(0.45);
+        if (rng() < 0.45) this.damagePlayer(rand(3, 6));
+      }
     }
     // officers on foot
+    let nearBust = false;
     for (const c of this.cops) {
       if (c.dead) { c.update(dt); continue; }
       const rd = Math.hypot(px - c.pos.x, pz - c.pos.z);
-      const vis = rd < 60 && this.los(c.pos.x, 1.6, c.pos.z, px, 1.2, pz);
-      const tx = !vis && searching ? this.lastSeen.x : px, tz = !vis && searching ? this.lastSeen.z : pz; const dx = tx - c.pos.x, dz = tz - c.pos.z; const d = Math.hypot(dx, dz);
+      const vis = rd < 60 && (this.los(c.pos.x, c.pos.y + 1.6, c.pos.z, px, py + 1.55, pz) || (rd < 20 && this.los(c.pos.x, c.pos.y + 1.8, c.pos.z, px, py + 1.75, pz)));
+      const tx = this.wanted === 0 ? c.pos.x * 2 - px : (!vis && searching ? this.lastSeen.x : px);
+      const tz = this.wanted === 0 ? c.pos.z * 2 - pz : (!vis && searching ? this.lastSeen.z : pz);
+      const dx = tx - c.pos.x, dz = tz - c.pos.z; const d = Math.hypot(dx, dz);
       if (vis) seen = true;
       c.yaw += angWrap(Math.atan2(dx, dz) - c.yaw) * (1 - Math.exp(-8 * dt));
       let sp = 0;
       if (this.wanted === 0) { sp = 1.3; }
       else if (d > 9 || !vis) sp = d > 25 ? 5.5 : 3.6;
-      if (sp) { const nx = c.pos.x + Math.sin(c.yaw) * sp * dt, nz = c.pos.z + Math.cos(c.yaw) * sp * dt; const r = this.city.col.resolve(nx, nz, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; }
+      if (sp) { const nx = c.pos.x + Math.sin(c.yaw) * sp * dt, nz = c.pos.z + Math.cos(c.yaw) * sp * dt; const r = this.city.col.resolve(nx, nz, 0.35, c.pos.y + 0.5); c.pos.x = r.x; c.pos.z = r.z; }
       c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt));
       c.setLocomotion(sp, dt); c.update(dt);
       c.ai.fireT -= dt;
-      if (this.wanted > 0 && vis && d < 40 && c.ai.fireT <= 0) {
-        c.ai.fireT = rand(0.7, 1.5) / (0.6 + this.wanted * 0.2); this.sfx.shot(0.5);
+      if (this.wanted > 0 && this.deadT <= 0 && vis && d < 40 && c.ai.fireT <= 0) {
+        c.ai.fireT = rand(1.0, 1.9) / (0.65 + this.wanted * 0.15); this.sfx.shot(0.5);
         const from = c.pos.clone().add(new THREE.Vector3(Math.sin(c.yaw) * 0.5, 1.45, Math.cos(c.yaw) * 0.5));
-        const hit = rng() < clamp(0.45 - d * 0.008, 0.08, 0.45) * (P.car ? 0.5 : 1) * (P.cover ? 0.35 : 1);
-        const to = new THREE.Vector3(tx + (hit ? 0 : rand(-2, 2)), 1.1 + (hit ? 0 : rand(-0.6, 1)), tz + (hit ? 0 : rand(-2, 2)));
-        this.addTracer(from, to); if (hit) this.damagePlayer(rand(5, 11));
+        const hit = rng() < clamp(0.4 - d * 0.008, 0.07, 0.4) * (P.car ? 0.5 : 1) * (P.cover ? 0.35 : 1);
+        const to = new THREE.Vector3(tx + (hit ? 0 : rand(-2, 2)), py + 1.1 + (hit ? 0 : rand(-0.6, 1)), tz + (hit ? 0 : rand(-2, 2)));
+        this.addTracer(from, to); if (hit) this.damagePlayer(rand(4, 8));
       }
-      // arrest
-      if (!P.car && this.wanted <= 2 && rd < 1.8 && this.playerSpeed < 0.8) { this.bustT = (this.bustT || 0) + dt; if (this.bustT > 1.6) this.busted(); } 
+      if (this.wanted > 0 && this.wanted <= 2 && this.deadT <= 0 && !P.car && rd < 1.8 && this.playerSpeed < 0.8) nearBust = true;
     }
+    if (nearBust) { this.bustT = (this.bustT || 0) + dt; if (this.bustT > 1.6) this.busted(); }
+    else this.bustT = Math.max(0, (this.bustT || 0) - dt * 2);
     if (this.wanted > 0 && this.police.update(dt, seen)) seen = true; // helicopter spotlight
     else if (this.wanted === 0) this.police.update(dt, false);
     if (this.wanted > 0) {
@@ -236,7 +305,11 @@ export class Game {
         // hiding still out of sight cools down faster; you must also be outside the red search circle (95 m) unless you wait it out
         const still = (this.playerSpeed || 0) < 0.5; this.lostT += dt * (still ? 1.5 : 1);
         const need = 9 + this.wanted * 3; const out = !this.lastSeen || Math.hypot(P.pos.x - this.lastSeen.x, P.pos.z - this.lastSeen.z) > 95;
-        if ((this.lostT > need && out) || this.lostT > need * 1.8) { this.hud.msg('你甩掉了警察', 2.5); this.wanted = 0; this.lostT = 0; this.police.log.push('lost'); }
+        if ((this.lostT > need && out) || this.lostT > need * 1.8) {
+          this.hud.msg('你甩掉了警察', 2.5); this.wanted = 0; this.lostT = 0; this.bustT = 0;
+          this.evidenceOutfitCleared = false; this.lastWeaponCrime = false; this.lastCrimeInCar = false;
+          this.police.log.push('lost');
+        }
       }
     }
     this.wantedFlash = this.wanted > 0 && this.lostT > 1.5;
@@ -272,17 +345,24 @@ export class Game {
     if (P.health <= 0) this.wasted();
   }
   wasted() {
-    this.P.health = 0; this.deadT = 4; this.hud.big('阵亡', '#e8384f'); this.player.kill(1); this.sfx.alert();
+    if (this.deadT > 0) return;
+    this.P.health = 0; this.deadT = 4; this.bustT = 0; this.hud.msgT = 0; this.hud.$('msg').style.opacity = 0; this.hud.big('阵亡', '#e8384f'); this.player.kill(1); this.sfx.alert();
   }
-  busted() { this.deadT = 3.5; this.busting = true; this.hud.big('被捕', '#ffffff'); this.bustT = 0; }
+  busted() {
+    if (this.deadT > 0) return;
+    this.deadT = 3.5; this.busting = true; this.hud.msgT = 0; this.hud.$('msg').style.opacity = 0; this.hud.big('被捕', '#ffffff'); this.bustT = 0;
+  }
   respawn() {
     const P = this.P; const busted = this.busting; this.busting = false;
+    this.clearInputs(); this.arsenal.reloadT = 0;
     if (P.car) { P.car.driver = null; P.car = null; }
     P.onFoot = true; this.player.root.visible = true; this.player.revive();
-    P.health = 100; P.armor = busted ? P.armor : 0; P.money = Math.max(0, P.money - (busted ? Math.floor(P.money * 0.08) : 500)); if (busted) { for (const id of ['smg', 'shotgun', 'rifle']) delete P.load.owned[id]; if (!P.load.owned[P.load.cur]) P.load.cur = 'pistol'; }
-    this.wanted = 0; this.lostT = 0; P.cover = null; const pa = P.load.owned.pistol; if (pa) pa.reserve = Math.max(pa.reserve, 48);
+    P.health = 100; P.armor = busted ? P.armor : 0; const fee = busted ? Math.floor(P.money * 0.08) : Math.min(P.money, 500); P.money = Math.max(0, P.money - fee);
+    if (busted) { for (const id of ['smg', 'shotgun', 'rifle']) delete P.load.owned[id]; if (!P.load.owned[P.load.cur]) P.load.cur = 'pistol'; }
+    this.wanted = 0; this.lostT = 0; this.bustT = 0; this.evidenceOutfitCleared = false; this.lastWeaponCrime = false; this.lastCrimeInCar = false;
+    P.cover = null; const pa = P.load.owned.pistol; if (pa) pa.reserve = Math.max(pa.reserve, 48);
     const s = busted ? PRECINCT : HOSPITAL; this.tp(s.x, s.z, s.yaw);
-    this.hud.big('', '#fff'); this.hud.msg(busted ? '你被保释出狱 · 罚款已扣除' : '你在医院醒来 · 医药费 $500', 3.5);
+    this.hud.big('', '#fff'); this.hud.msg(busted ? `你被保释出狱 · 罚款 $${fee}` : `你在医院醒来 · 医药费 $${fee}`, 3.5);
   }
   // ------------------------------------------------------------------ main update ----
   update(dt) {
@@ -302,7 +382,10 @@ export class Game {
       // only simulate cars near the player at full rate
       v.update(dt, this.city, wet);
       if (v.wantsHorn) { v.wantsHorn = false; if (Math.hypot(v.x - P.pos.x, v.z - P.pos.z) < 30) this.sfx.horn(0.35); }
-      if (v.health <= 0 && v.ai && v.ai.mode !== 'dead') { v.ai.mode = 'dead'; v.siren = false; }
+      if (v.health <= 0 && !v._wrecked) {
+        v._wrecked = true; v.siren = false; if (v.ai) v.ai.mode = 'dead';
+        if (v === P.car) { this.sfx.crash(2); this.hud.msg('车辆已报废！按 F 下车', 4); }
+      }
     }
     this.carCollisions(dt);
     this.peds.update(dt, this);
@@ -314,7 +397,7 @@ export class Game {
     this.updatePolice(dt);
     // player
     if (P.onFoot) this.updateOnFoot(dt);
-    else { const v = P.car; P.pos.set(v.x, v.y, v.z); this.playerSpeed = Math.abs(v.speed); if (v.inWater && v.y < -2) { this.toggleCar(); this.tp(v.x, v.z); this.damagePlayer(30); } }
+    else { const v = P.car; P.pos.set(v.x, v.y, v.z); this.playerSpeed = Math.abs(v.speed); if (v.inWater && v.y < -2) { this.toggleCar(); this.tp(v.x, v.z); this.damagePlayer(30); this.hud.msg('车辆落水！游回岸边', 2.5); } }
     // r5.0: weapon in hand + upper-body aim layer (player, police, gang)
     { const ov = this.override; const aimP = P.onFoot && !!(this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire)));
       const cw = this.arsenal.cur; this.player.setWeapon(P.onFoot && cw && cw.id !== 'fist' ? cw.id : null);
@@ -341,7 +424,7 @@ export class Game {
     // lights at night: car head/tail glow, player headlight
     const night = U.uNight.value;
     this.setCarLights(night);
-    if (P.car && night > 0.2) { const v = P.car; const f = v.forward(); this.headlight.position.set(v.x + f.x * 2.3, v.y + 0.8, v.z + f.z * 2.3); this.headlight.target.position.set(v.x + f.x * 20, 0, v.z + f.z * 20); this.headlight.intensity = 400 * night; this.headlight.target.updateMatrixWorld(); }
+    if (P.car && night > 0.2) { const v = P.car; const f = v.forward(); this.headlight.position.set(v.x + f.x * 2.3, v.y + 0.8, v.z + f.z * 2.3); this.headlight.target.position.set(v.x + f.x * 20, v.y, v.z + f.z * 20); this.headlight.intensity = 400 * night; this.headlight.target.updateMatrixWorld(); }
     else this.headlight.intensity = 0;
     { const act = this.policeCars.filter((v) => v.siren).sort((a, b) => Math.hypot(a.x - P.pos.x, a.z - P.pos.z) - Math.hypot(b.x - P.pos.x, b.z - P.pos.z)); const ph = Math.floor(performance.now() / 160) % 2;
       this.sirenLights.forEach((l, i) => { const v = act[i]; if (!v) { l.intensity = 0; return; } l.position.set(v.x, v.y + 2.0, v.z); l.intensity = 40 * (0.3 + U.uNight.value); l.color.setHex((ph + i) % 2 ? 0xff2020 : 0x2040ff); }); }
@@ -375,15 +458,17 @@ export class Game {
     if (P.stamina === undefined) P.stamina = 100;
     if (P.tired && P.stamina > 25) P.tired = false; if (P.stamina <= 0.5) P.tired = true; if (P.tired) sprint = false;
     P.stamina = clamp(P.stamina + ((sprint && Math.hypot(mx, mz) > 0.01) ? -12 : 16) * dt, 0, 100);
-    if (P.cover) { if (Math.hypot(mx, mz) > 0.01 && Math.hypot(P.pos.x - P.cover.x, P.pos.z - P.cover.z) > 0.8) P.cover = null; else if (Math.hypot(mx, mz) > 0.01) { mx *= 0.35; mz *= 0.35; sprint = false; } }
+    if (P.cover) { if (Math.hypot(mx, mz) > 0.01 && Math.hypot(P.pos.x - P.cover.x, P.pos.z - P.cover.z) > 0.8) P.cover = null; else if (Math.hypot(mx, mz) > 0.01) { sprint = false; } }
     let sp = 0;
     const gh = this.city.groundH(P.pos.x, P.pos.z);
     const swim = gh < -1.25;
-    if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0; P.yaw += angWrap(Math.atan2(dx, dz) - P.yaw) * (1 - Math.exp(-12 * dt)); }
-    P.sprint = sprint && len > 0.01 && !swim;
-    if (this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire))) P.yaw = yawC; // face aim direction
+    const aiming = !!(this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire)));
+    if (len > 0.01) { dx /= len; dz /= len; sp = (swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0) * (P.cover ? 0.35 : 1); if (!aiming) P.yaw += angWrap(Math.atan2(dx, dz) - P.yaw) * (1 - Math.exp(-12 * dt)); }
+    P.sprint = sprint && len > 0.01 && !swim && !aiming;
+    if (aiming) P.yaw = yawC; // face aim direction while allowing W/A/S/D strafe & backpedal
     this.curSpeed = damp(this.curSpeed || 0, sp, 10, dt);
-    const nx = P.pos.x + Math.sin(P.yaw) * this.curSpeed * dt * (len > 0.01 ? 1 : 0), nz = P.pos.z + Math.cos(P.yaw) * this.curSpeed * dt * (len > 0.01 ? 1 : 0);
+    const mvx = aiming ? dx : Math.sin(P.yaw), mvz = aiming ? dz : Math.cos(P.yaw);
+    const nx = P.pos.x + mvx * this.curSpeed * dt * (len > 0.01 ? 1 : 0), nz = P.pos.z + mvz * this.curSpeed * dt * (len > 0.01 ? 1 : 0);
     const r = this.city.col.resolve(nx, nz, 0.35, P.pos.y + 0.5);
     // vehicles block the player
     let px = r.x, pz = r.z;
@@ -416,20 +501,26 @@ export class Game {
       if (rv < 0) { const jimp = -rv * 1.25; a.vx -= best.nx * jimp * wa; a.vz -= best.nz * jimp * wa; b.vx += best.nx * jimp * wb; b.vz += best.nz * jimp * wb;
         if (-rv > 5) { a.health -= -rv * 1.5; b.health -= -rv * 1.5; if ((a.driver === 'player' || b.driver === 'player')) { this.sfx.crash(Math.min(1, -rv / 20)); const other = a.driver === 'player' ? b : a; if (other.type === 'police') this.crime(Math.max(this.wanted, 1), '撞击警车'); } } }
     }
-    // cars vs pedestrians / cops
+    // cars vs pedestrians / cops / hostile gang
     for (const v of cars) {
       const sp = Math.abs(v.speed); if (sp < 3.5) continue; const f = v.forward();
-      for (const c of [...this.peds.list, ...this.cops]) {
+      for (const c of [...this.peds.list, ...this.cops, ...this.gang]) {
         if (c.dead) continue; const ddx = c.pos.x - v.x, ddz = c.pos.z - v.z; const al = ddx * f.x + ddz * f.z, lt = ddx * f.z - ddz * f.x;
-        if (Math.abs(al) < v.dims.L / 2 + 0.3 && Math.abs(lt) < v.dims.W / 2 + 0.3) { c.kill(al > 0 ? -1 : 1); c.pos.x += f.x * 1.5; c.pos.z += f.z * 1.5; if (v.driver === 'player') { if (c.isCop) this.crime(Math.max(this.wanted + 1, 3), '撞倒警察'); else if (this.policeNear(60) || rng() < 0.5) this.crime(Math.max(this.wanted, 1), '肇事'); this.dropCash(c.pos); } else this.peds.panic(c.pos, 20); }
+        if (Math.abs(al) < v.dims.L / 2 + 0.3 && Math.abs(lt) < v.dims.W / 2 + 0.3) {
+          c.kill(al > 0 ? -1 : 1);
+          const rk = this.city.col.resolve(c.pos.x + f.x * 1.5, c.pos.z + f.z * 1.5, 0.35, c.pos.y + 0.5); c.pos.x = rk.x; c.pos.z = rk.z;
+          if (v.driver === 'player') { if (c.hostile) this.dropCash(c.pos); else if (c.isCop) this.crime(Math.max(this.wanted + 1, 3), '撞倒警察'); else { if (this.policeNear(60) || rng() < 0.5) this.crime(Math.max(this.wanted, 1), '肇事'); this.dropCash(c.pos); } }
+          else this.peds.panic(c.pos, 20);
+        }
       }
     }
   }
   manage() {
     const P = this.P; const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
-    // traffic
+    // traffic (protect active valet / mission vehicles from 330 m despawn)
+    const keep = new Set([P.car, this.parked, this.mission?.car, this.missions?.data?.van, this.missions?.data?.car]);
     const civ = this.traffic.cars.filter((v) => !v.parked && (v.type !== 'police' || !this.policeCars.includes(v)));
-    for (const v of civ) { const d = Math.hypot(v.x - P.pos.x, v.z - P.pos.z); if (d > 330 && v !== P.car && v !== this.parked) this.traffic.removeCar(v); }
+    for (const v of civ) { const d = Math.hypot(v.x - P.pos.x, v.z - P.pos.z); if (d > 330 && !keep.has(v)) this.traffic.removeCar(v); }
     if (civ.length < 27) this.traffic.spawnCar(pick(['sedan', 'sedan', 'suv', 'pickup', 'van', 'taxi', 'sport2', 'sedan']), P.pos, 110, 260, fwd);
     // parked cars (Tideline curb lane)
     for (const s of this.city.parking || []) {
@@ -492,25 +583,25 @@ export class Game {
   }
   // v4.3 hostile gang members (码头火并): hold near their cover spot, strafe, fire when they can see you
   updateGang(dt) {
-    const P = this.P; const px = P.car ? P.car.x : P.pos.x, pz = P.car ? P.car.z : P.pos.z;
+    const P = this.P; const px = P.car ? P.car.x : P.pos.x, py = P.car ? P.car.y : P.pos.y, pz = P.car ? P.car.z : P.pos.z;
     for (const c of [...this.gang]) {
       if (c.dead) { c.update(dt); if (c.pos.distanceTo(P.pos) > 160) { this.gang.splice(this.gang.indexOf(c), 1); c.dispose(); } continue; }
       if (!c.hostile) { c.setLocomotion(0, dt); c.update(dt); continue; }
       const dx = px - c.pos.x, dz = pz - c.pos.z; const d = Math.hypot(dx, dz);
-      const vis = d < 50 && this.los(c.pos.x, 1.5, c.pos.z, px, 1.2, pz);
+      const vis = d < 50 && this.los(c.pos.x, c.pos.y + 1.5, c.pos.z, px, py + 1.2, pz);
       c.yaw += angWrap(Math.atan2(dx, dz) - c.yaw) * (1 - Math.exp(-6 * dt));
       // strafe around the home cover spot
       const h = c.ai.home; c.ai.st = (c.ai.st || rand(0, 6)) + dt; const tx = h.x + Math.sin(c.ai.st * 0.7) * 2.2, tz = h.z + Math.cos(c.ai.st * 0.5) * 1.5;
       const mvx = tx - c.pos.x, mvz = tz - c.pos.z; const md = Math.hypot(mvx, mvz); let sp = 0;
-      if (md > 0.3) { sp = Math.min(3, md * 2); const r = this.city.col.resolve(c.pos.x + mvx / md * sp * dt, c.pos.z + mvz / md * sp * dt, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; }
+      if (md > 0.3) { sp = Math.min(3, md * 2); const r = this.city.col.resolve(c.pos.x + mvx / md * sp * dt, c.pos.z + mvz / md * sp * dt, 0.35, c.pos.y + 0.5); c.pos.x = r.x; c.pos.z = r.z; }
       c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt));
       c.setLocomotion(sp, dt); c.update(dt);
       c.ai.fireT -= dt;
       if (vis && d < 45 && c.ai.fireT <= 0 && this.deadT <= 0) {
-        c.ai.fireT = rand(0.9, 1.8); this.sfx.shot(0.45);
+        c.ai.fireT = rand(1.3, 2.2); this.sfx.shot(0.45);
         const from = c.pos.clone().add(new THREE.Vector3(Math.sin(c.yaw) * 0.5, 1.45, Math.cos(c.yaw) * 0.5));
-        const hit = rng() < clamp(0.4 - d * 0.008, 0.06, 0.4) * (P.cover ? 0.35 : 1) * (P.car ? 0.5 : 1);
-        this.addTracer(from, new THREE.Vector3(px + (hit ? 0 : rand(-2, 2)), 1.1 + (hit ? 0 : rand(-0.6, 1)), pz + (hit ? 0 : rand(-2, 2)))); if (hit) this.damagePlayer(rand(4, 9));
+        const hit = rng() < clamp(0.36 - d * 0.007, 0.06, 0.36) * (P.cover ? 0.35 : 1) * (P.car ? 0.5 : 1);
+        this.addTracer(from, new THREE.Vector3(px + (hit ? 0 : rand(-2, 2)), py + 1.1 + (hit ? 0 : rand(-0.6, 1)), pz + (hit ? 0 : rand(-2, 2)))); if (hit) this.damagePlayer(rand(3, 7));
       }
     }
   }
@@ -522,15 +613,43 @@ export class Game {
     } catch (e) { }
   }
   loadSave() {
-    try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (!s) return false;
-      s.pr.forEach((d, i) => { const p = this.world.profiles[i]; if (!p) return; Object.assign(p.P, { money: d.money, bank: d.bank, load: d.load, assets: d.assets || [], outfit: d.outfit }); });
-      this.missions.done = s.done || {}; if (s.valet) this.mission.jobs = s.valet; if (!this.P.load.owned[this.P.load.cur]) this.P.load.cur = 'fist'; this.hud.msg('已读取存档', 2); return true; } catch (e) { return false; }
+    try {
+      const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+      if (!s || !Array.isArray(s.pr)) return false;
+      const valid = s.pr.map((d, i) => {
+        const p = this.world.profiles[i]; if (!p || !d || typeof d !== 'object') return null;
+        const money = Number.isFinite(d.money) ? Math.max(0, d.money) : p.P.money;
+        const bank = Number.isFinite(d.bank) ? Math.max(0, d.bank) : p.P.bank;
+        let load = p.P.load;
+        if (d.load && typeof d.load === 'object' && d.load.owned && typeof d.load.owned === 'object') {
+          const owned = {};
+          for (const [id, am] of Object.entries(d.load.owned)) {
+            if (!WBY[id] || !am || typeof am !== 'object') continue;
+            owned[id] = { clip: Number.isFinite(am.clip) ? Math.max(0, am.clip) : (WBY[id].clip || 0), reserve: Number.isFinite(am.reserve) ? Math.max(0, am.reserve) : 0 };
+          }
+          if (!owned.fist) owned.fist = { clip: 0, reserve: 0 };
+          const cur = (typeof d.load.cur === 'string' && owned[d.load.cur] && WBY[d.load.cur]) ? d.load.cur : (owned.pistol ? 'pistol' : 'fist');
+          load = { cur, owned };
+        }
+        const assets = Array.isArray(d.assets) ? d.assets.filter((a) => a && typeof a.name === 'string') : [];
+        return { p, money, bank, load, assets, outfit: typeof d.outfit === 'string' ? d.outfit : null };
+      });
+      for (const v of valid) {
+        if (!v) continue;
+        Object.assign(v.p.P, { money: v.money, bank: v.bank, load: v.load, assets: v.assets, outfit: v.outfit });
+        if (v.outfit && this.world.applyOutfit) this.world.applyOutfit(v.p.char, v.outfit);
+      }
+      this.missions.done = (s.done && typeof s.done === 'object') ? s.done : {};
+      if (Number.isFinite(s.valet)) this.mission.jobs = s.valet;
+      this.hud.msg('已读取存档', 2); return true;
+    } catch (e) { return false; }
   }
   // ---- test helpers
   // r6.2 per-test reset (shot.cjs calls __G.reset() before every plan step unless the step sets keep:true): back to the start
   // state so one regression step can no longer leak a mission / wanted level / car / loadout into the next one.
   testReset() {
     if (!this._init) return;
+    if (this.paused) this.togglePause(false);
     const W = this.world; if (W.menu) W.closeMenu(); if (W.phoneOpen) W.togglePhone(false);
     if (this.arsenal.wheelOpen) this.arsenal.openWheel(false); this.slowmo = 1;
     if (W.cur) { W.switchChar(); } // back to the first protagonist
@@ -541,6 +660,7 @@ export class Game {
     const V = this.mission; if (V.state !== 'idle') { V.state = 'idle'; V.cool = 0; V.target = null; V.dropMk.visible = false; V.carMk.visible = false; V.standMk.visible = true; V.obj(''); }
     if (V.car && V.car !== this.parked && this.traffic.cars.includes(V.car)) this.traffic.removeCar(V.car); V.car = null;
     this.wanted = 0; this.lostT = 0; this.lastSeen = null; this.wantedFlash = false; this.crimeCooldown = 0;
+    this.evidenceOutfitCleared = false; this.lastWeaponCrime = false; this.lastCrimeInCar = false;
     for (const v of [...this.policeCars]) if (this.traffic.cars.includes(v)) this.traffic.removeCar(v); this.policeCars.length = 0;
     for (const b of this.police.blocks) for (const c of b.cars) if (this.traffic.cars.includes(c)) this.traffic.removeCar(c); this.police.blocks.length = 0; this.police.removeHeli(); this.police.escT = 0; this.police.blockT = 10;
     for (const c of [...this.cops, ...this.gang]) c.dispose(); this.cops.length = 0; this.gang.length = 0;
@@ -549,7 +669,7 @@ export class Game {
     const P = this.P, I = this._init; this.player.revive(); this.player.root.visible = true;
     Object.assign(P, { health: 100, armor: I.armor, money: I.money, bank: I.bank, stamina: 100, tired: false, cover: null, vy: 0, grounded: true, sprint: false, assets: [], outfit: null, load: JSON.parse(I.load) });
     this.arsenal.reloadT = 0; this.arsenal.fireT = 0; this.arsenal.recoil = 0; P.reloadT = 0; this.waypoint = null; this.cam.mode = 0; this.cam.pitch = -0.12;
-    if (this.parked && this.traffic.cars.includes(this.parked)) { this.parked.health = 100; this.parked.driver = null; this.parked.place(284.5, 22, Math.PI); this.parked.ai = null; }
+    if (this.parked && this.traffic.cars.includes(this.parked)) { this.parked.health = 100; this.parked._wrecked = false; this.parked.driver = null; this.parked.place(284.5, 22, Math.PI); this.parked.ai = null; }
     this.tp(280.5, 36, Math.PI); this.curSpeed = 0; this.playerSpeed = 0;
   }
   carNearPlayer(type = 'sedan', dist = 5) {

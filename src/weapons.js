@@ -47,7 +47,7 @@ export class Arsenal {
   ammo() { return this.L.owned[this.L.cur] || { clip: 0, reserve: 0 }; }
   equip(id) {
     if (!this.L.owned[id]) return false;
-    if (this.L.cur !== id) { this.L.cur = id; this.reloadT = 0; this.fireT = 0.25; this.G.hud.msg('装备：' + WBY[id].name, 1.2); }
+    if (this.L.cur !== id) { this.L.cur = id; this.reloadT = 0; this.fireT = 0.25; if (this.G.pose) this.G.pose.swing = null; this.G.hud.msg('装备：' + WBY[id].name, 1.2); }
     return true;
   }
   cycle(dir) { const ids = WEAPONS.map((w) => w.id).filter((id) => this.L.owned[id]); const i = ids.indexOf(this.L.cur); this.equip(ids[(i + dir + ids.length) % ids.length]); }
@@ -73,7 +73,13 @@ export class Arsenal {
   }
   update(dt) {
     this.fireT -= dt; this.recoil *= Math.exp(-dt * 10);
-    if (this.reloadT > 0) { this.reloadT -= dt; if (this.reloadT <= 0) { const w = this.cur, a = this.ammo(); const n = Math.min(w.clip - a.clip, a.reserve); a.clip += n; a.reserve -= n; } }
+    if (this.reloadT > 0) {
+      this.reloadT -= dt;
+      if (this.reloadT <= 0) {
+        const w = this.cur, a = this.ammo();
+        if (w && !w.melee && w.clip) { const n = Math.min(w.clip - a.clip, a.reserve); a.clip += n; a.reserve -= n; }
+      }
+    }
     this.hitT -= dt; this.hm.style.opacity = this.hitT > 0 ? 1 : 0; this.hm.style.color = this.hitHead ? '#ff4040' : '#fff';
     if (this.wheelOpen) this.drawWheel();
   }
@@ -86,7 +92,14 @@ export class Arsenal {
     const a = this.ammo(); if (a.clip <= 0) { this.reload(); return false; }
     a.clip--; this.fireT = w.rate; this.shots++;
     G.sfx.shot(w.id === 'shotgun' ? 1.3 : w.id === 'smg' ? 0.7 : 1);
-    const { o, d } = G.aimRay(); const ds = o.distanceTo(G.player.pos); o.addScaledVector(d, Math.max(0, ds - 0.5));
+    const { o, d } = G.aimRay();
+    const eyeY = G.player.pos.y + 1.45;
+    const ds = Math.hypot(o.x - G.player.pos.x, o.y - eyeY, o.z - G.player.pos.z);
+    const shift = Math.max(0, ds - 0.8);
+    if (shift > 0) {
+      const tb = G.city.col.raycast(o.x, o.y, o.z, o.x + d.x * shift, o.y + d.y * shift, o.z + d.z * shift);
+      if (tb >= 0.999) o.addScaledVector(d, shift);
+    }
     const bloom = w.spread * (G.mouse.aim || (G.override && G.override.aim) ? 0.55 : 1) * (P.sprint ? 2 : 1) * (1 + this.recoil * 20);
     let anyHit = false;
     for (let k = 0; k < w.pellets; k++) {
@@ -110,11 +123,14 @@ export class Arsenal {
     if (h.what.v) { const v = h.what.v; v.health -= w.dmg * 0.3; this.hitT = 0.1; this.hitHead = false; if (v.ai && v.ai.mode === 'lane') { v.ai.mode = 'flee'; v.ai.target = new THREE.Vector3(v.x * 2 - G.P.pos.x, 0, v.z * 2 - G.P.pos.z); } }
   }
   swing(w) {
-    const G = this.G, P = G.P; this.fireT = w.rate; G.sfx.burst?.(0.08, 900, 0.25); this.swingReq = w.id === 'bat' ? 'bat' : 'fist'; // r6.2: visible swing (game.js -> actionpose)
+    const G = this.G, P = G.P; this.fireT = w.rate; this.shots++; G.sfx.burst?.(0.08, 900, 0.25); this.swingReq = w.id === 'bat' ? 'bat' : 'fist'; // r6.2: visible swing (game.js -> actionpose)
     const fx = Math.sin(P.yaw), fz = Math.cos(P.yaw); let hit = null, best = 9;
-    for (const c of [...G.peds.list, ...G.cops, ...G.hostiles()]) {
-      if (c.dead || c === G.player) continue; const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z; const d = Math.hypot(dx, dz);
+    for (const c of [...G.peds.list, ...G.cops, ...G.hostiles(), ...G.extras]) {
+      if (c.dead || c === G.player) continue;
+      if (Math.abs(c.pos.y - P.pos.y) > 1.5) continue;
+      const dx = c.pos.x - P.pos.x, dz = c.pos.z - P.pos.z; const d = Math.hypot(dx, dz);
       if (d > w.range + 0.4 || d < 0.05) continue; const ang = Math.acos(clamp((dx * fx + dz * fz) / d, -1, 1)); if (ang > w.arc) continue;
+      if (d > 0.6 && !G.los(P.pos.x, P.pos.y + 1.2, P.pos.z, c.pos.x, c.pos.y + 1.2, c.pos.z)) continue;
       if (d < best) { best = d; hit = c; }
     }
     if (!hit) return true;

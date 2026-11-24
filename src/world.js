@@ -3,11 +3,13 @@
 // car dealer / radio), purse-snatcher street event, two playable protagonists with their own cash, guns and wanted level,
 // localStorage autosave. All names original.
 import * as THREE from 'three';
-import { Vehicle } from './vehicles.js';
+import { Vehicle, setVehiclePaint } from './vehicles.js';
 import { Character } from './people.js';
 import { POI, MISSION_STARTS } from './mapdata.js';
 import { WEAPONS, WBY, newLoadout } from './weapons.js';
 import { pick, rand, rng, clamp } from './util.js';
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const CARS_FOR_SALE = [{ type: 'sedan', name: '海鸥 四门轿车', price: 9000 }, { type: 'suv', name: '珊瑚 SUV', price: 16000 }, { type: 'pickup', name: '码头 皮卡', price: 14000 }, { type: 'sport2', name: '疾风 跑车', price: 48000 }];
 const OUTFITS = [{ name: '亚麻衬衫', price: 180, tint: [0.0, 0.3, 1.25] }, { name: '花衬衫', price: 140, tint: [0.35, 1.3, 1.0] }, { name: '运动背心', price: 90, tint: [-0.3, 1.1, 0.8] }, { name: '深色夹克', price: 320, tint: [0.0, 0.2, 0.55] }];
@@ -40,7 +42,14 @@ export class World {
     this.rings = [];
     const ring = (p, col, kind) => { const r = marker(S, col); r.position.set(p.x, G.city.groundH(p.x, p.z) + 0.03, p.z); this.rings.push({ p, kind, r }); };
     ring(POI.gunshop, 0xff5a46, 'gun'); ring(POI.clothes, 0xd483ff, 'clothes'); ring(POI.modshop, 0x5aa8ff, 'mod');
-    for (const a of POI.atms) { ring(a, 0x4fe08a, 'atm'); const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.6, 0.6), new THREE.MeshStandardMaterial({ color: 0x2b3440, roughness: 0.4, metalness: 0.5 })); const fr = [61.5, 158.5, 181.5, 275].reduce((q, f) => (Math.abs(f - a.x) < Math.abs(q - a.x) ? f : q)); box.position.set(fr + Math.sign(a.x - fr) * 0.35, 0.95, a.z); S.add(box); }
+    for (const a of POI.atms) {
+      ring(a, 0x4fe08a, 'atm');
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.6, 0.6), new THREE.MeshStandardMaterial({ color: 0x2b3440, roughness: 0.4, metalness: 0.5 }));
+      const gy = G.city.groundH(a.x, a.z);
+      if (a.x > 0) { const fr = [61.5, 158.5, 181.5, 275].reduce((q, f) => (Math.abs(f - a.x) < Math.abs(q - a.x) ? f : q)); box.position.set(fr + Math.sign(a.x - fr) * 0.35, gy + 0.8, a.z); }
+      else box.position.set(a.x - 0.65, gy + 0.8, a.z);
+      S.add(box);
+    }
     // store clerks (stand in the doorway)
     this.clerks = POI.stores.map((st) => this.spawnClerk(st));
     // phone + menu DOM
@@ -69,6 +78,8 @@ export class World {
   }
   switchChar() {
     const G = this.G; if (G.deadT > 0 || this.profiles.length < 2) return false;
+    if (G.arsenal) { G.arsenal.reloadT = 0; if (G.arsenal.wheelOpen) G.arsenal.openWheel(false); }
+    if (G.pose) G.pose.swing = null;
     const a = this.profiles[this.cur]; a.wanted = G.wanted;
     if (G.P.car) { const v = G.P.car; v.driver = null; v.input.throttle = 0; v.input.handbrake = true; a.car = v; a.char.root.visible = false; } else a.car = null;
     a.P.cover = null;
@@ -96,10 +107,10 @@ export class World {
     if (G.wanted > 0) { G.hud.msg('老板：「被通缉的人不接待。」', 2); return; }
     const items = [];
     for (const w of WEAPONS) { if (w.id === 'fist') continue; const own = P.load.owned[w.id];
-      if (!own) items.push({ label: `${w.name} · $${w.price}`, act: () => { if (!this.pay(w.price)) return false; G.arsenal.give(w.id, w.clip ? w.clip * 3 : 0); G.arsenal.equip(w.id); G.hud.msg('买下 ' + w.name, 2); this.log.push('buy:' + w.id); G.save(); } });
-      else if (w.clip) { const n = w.clip * 2, cost = n * w.ammoPrice; items.push({ label: `${w.name} 弹药 ×${n} · $${cost}`, off: own.reserve >= w.reserveMax, why: '弹药已满', act: () => { if (!this.pay(cost)) return false; G.arsenal.give(w.id, n); this.log.push('ammo:' + w.id); } }); }
+      if (!own) items.push({ label: `${w.name} · $${w.price}`, act: () => { if (P.load.owned[w.id]) return false; if (!this.pay(w.price)) return false; G.arsenal.give(w.id, w.clip ? w.clip * 3 : 0); G.arsenal.equip(w.id); G.hud.msg('买下 ' + w.name, 2); this.log.push('buy:' + w.id); G.save(); this.gunMenu(); } });
+      else if (w.clip) { const n = w.clip * 2, cost = n * w.ammoPrice; items.push({ label: `${w.name} 弹药 ×${n} · $${cost}`, off: own.reserve >= w.reserveMax, why: '弹药已满', act: () => { if (own.reserve >= w.reserveMax) return false; if (!this.pay(cost)) return false; G.arsenal.give(w.id, n); this.log.push('ammo:' + w.id); this.gunMenu(); } }); }
     }
-    items.push({ label: `防弹衣 · $250`, off: P.armor >= 100, why: '护甲已满', act: () => { if (!this.pay(250)) return false; P.armor = 100; this.log.push('armor'); } });
+    items.push({ label: `防弹衣 · $250`, off: P.armor >= 100, why: '护甲已满', act: () => { if (P.armor >= 100) return false; if (!this.pay(250)) return false; P.armor = 100; this.log.push('armor'); this.gunMenu(); } });
     this.openMenu(POI.gunshop.name, items);
   }
   clothesMenu() {
@@ -107,26 +118,38 @@ export class World {
     this.openMenu(POI.clothes.name, OUTFITS.map((o) => ({ label: `${o.name} · $${o.price}`, act: () => { if (!this.pay(o.price)) return false; P.outfit = o.name; this.tintPlayer(o.tint); G.evidenceOutfitCleared = true;
       if (G.wanted > 0 && G.wantedFlash) { G.wanted = Math.max(0, G.wanted - 1); G.hud.msg('换了身衣服 · 警察认不出你了（通缉 −1）', 2.5); } else G.hud.msg('换上 ' + o.name, 2); this.log.push('outfit:' + o.name); } })));
   }
-  tintPlayer(t) { this.G.player.model.traverse((o) => { if (!o.isMesh || /^(Skin|Eyes|Eyebrows|Eyelashes|Teeth|Tongue|Hair|Beard)/.test(o.material.name) || o.material.transparent) return; if (!/shirt|top|jacket|cloth|tshirt|body/i.test(o.material.name + o.name)) return; o.material = o.material.clone(); o.material.color.offsetHSL(t[0] * 0.3, (t[1] - 1) * 0.3, (t[2] - 1) * 0.3); }); }
+  applyOutfit(char, name) { const o = OUTFITS.find((q) => q.name === name); if (o) this.tintPlayer(o.tint, char); }
+  tintPlayer(t, char = this.G.player) {
+    char.model.traverse((o) => {
+      if (!o.isMesh || /^(Skin|Eyes|Eyebrows|Eyelashes|Teeth|Tongue|Hair|Beard)/.test(o.material.name) || o.material.transparent) return;
+      if (!/shirt|top|jacket|cloth|tshirt|body/i.test(o.material.name + o.name)) return;
+      if (!o.userData._baseCol) { o.material = o.material.clone(); o.userData._baseCol = o.material.color.clone(); }
+      o.material.color.copy(o.userData._baseCol).offsetHSL(t[0] * 0.3, (t[1] - 1) * 0.3, (t[2] - 1) * 0.3);
+    });
+  }
   modMenu() {
     const G = this.G, P = G.P; const v = P.car;
     if (!v) { G.hud.msg('开车进来才能修车/喷漆', 2); return; }
+    const cost = Math.max(0, Math.round((100 - v.health) * 8));
     this.openMenu(POI.modshop.name, [
-      { label: `修理 · $${Math.round((100 - v.health) * 8)}`, off: v.health >= 99, why: '车况良好', act: () => { if (!this.pay(Math.round((100 - v.health) * 8))) return false; v.health = 100; this.log.push('repair'); } },
-      { label: '喷漆换色 · $300（警察失去车辆线索）', act: () => { if (!this.pay(300)) return false; v.root.traverse((o) => { if (o.isMesh && /paint|body/i.test(o.material.name)) { o.material = o.material.clone(); o.material.color.setHSL(rng(), 0.55, 0.45); } }); G.lastCrimeInCar = false; if (G.wanted > 0) G.wanted = Math.max(0, G.wanted - 1); G.hud.msg('喷好漆了', 2); this.log.push('respray'); } },
+      { label: `修理 · $${cost}`, off: v.health >= 99, why: '车况良好', act: () => { if (v.health >= 99) return false; if (!this.pay(Math.max(0, Math.round((100 - v.health) * 8)))) return false; v.health = 100; v._wrecked = false; G.hud.msg('车辆已修好', 2); this.log.push('repair'); this.modMenu(); } },
+      { label: '喷漆换色 · $300（警察失去车辆线索）', act: () => { if (!this.pay(300)) return false; setVehiclePaint(v, new THREE.Color().setHSL(rng(), 0.62, 0.45).getHex()); G.lastCrimeInCar = false; if (G.wanted > 0) G.wanted = Math.max(0, G.wanted - 1); G.hud.msg('喷好漆了', 2); this.log.push('respray'); this.modMenu(); } },
     ]);
   }
   atmMenu() {
     const G = this.G, P = G.P;
     this.openMenu('ATM · 银行余额 $' + P.bank.toLocaleString('en-US'), [
-      { label: `存入全部现金（$${P.money.toLocaleString('en-US')}）`, off: P.money <= 0, act: () => { P.bank += P.money; P.money = 0; this.menu.title = 'ATM · 银行余额 $' + P.bank.toLocaleString('en-US'); this.log.push('deposit'); G.save(); } },
-      { label: '取出 $1,000', off: P.bank < 1000, why: '余额不足', act: () => { P.bank -= 1000; P.money += 1000; this.menu.title = 'ATM · 银行余额 $' + P.bank.toLocaleString('en-US'); this.log.push('withdraw'); G.save(); } },
+      { label: `存入全部现金（$${P.money.toLocaleString('en-US')}）`, off: P.money <= 0, why: '没有现金可存', act: () => { if (P.money <= 0) return false; P.bank += P.money; P.money = 0; this.log.push('deposit'); G.save(); this.atmMenu(); } },
+      { label: '取出 $1,000', off: P.bank < 1000, why: '余额不足', act: () => { if (P.bank < 1000) return false; P.bank -= 1000; P.money += 1000; this.log.push('withdraw'); G.save(); this.atmMenu(); } },
     ]);
   }
   interact() {
     const G = this.G, P = G.P; if (this.menu) { this.closeMenu(); return true; }
-    for (const r of this.rings) { if (Math.hypot(P.pos.x - r.p.x, P.pos.z - r.p.z) > (r.kind === 'mod' ? 5 : 1.8)) continue;
-      if (r.kind === 'gun') this.gunMenu(); else if (r.kind === 'clothes') this.clothesMenu(); else if (r.kind === 'mod') this.modMenu(); else this.atmMenu(); return true; }
+    for (const r of this.rings) {
+      if (!P.onFoot && r.kind !== 'mod') continue;
+      if (Math.hypot(P.pos.x - r.p.x, P.pos.z - r.p.z) > (r.kind === 'mod' ? 5 : 1.8)) continue;
+      if (r.kind === 'gun') this.gunMenu(); else if (r.kind === 'clothes') this.clothesMenu(); else if (r.kind === 'mod') this.modMenu(); else this.atmMenu(); return true;
+    }
     return false;
   }
   // ------------------------------------------------------------------ store robbery (free roam) ----
@@ -154,7 +177,7 @@ export class World {
     if (this.thief) {
       const c = this.thief, d = c.pos.distanceTo(P.pos); this.thiefT += dt;
       if (c.dead || c.health < 60) { if (!c.dead) c.kill(1); const r = 250; P.money += r; G.hud.cash(r); G.hud.msg('拿回了钱包 · 失主的谢礼 $' + r, 3); this.log.push('event:thief:ok'); this.thief = null; return; }
-      if (d > 140 || this.thiefT > 75) { G.hud.msg('抢包贼跑掉了', 2); this.log.push('event:thief:lost'); this.thief = null; c.dispose?.(); return; }
+      if (d > 140 || this.thiefT > 75) { G.hud.msg('抢包贼跑掉了', 2); this.log.push('event:thief:lost'); this.thief = null; G.peds.remove(c); return; }
       return;
     }
     if (G.wanted > 0 || G.missions.active || !P.onFoot) return;
@@ -195,14 +218,15 @@ export class World {
   drawPhone() {
     if (!this.phoneOpen) return; const h = window.__G ? window.__G.hour : 12; const t = `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`;
     const titles = { home: (this.profiles[this.cur] || {}).name + ' 的手机', jobs: '任务', contacts: '联系人', bank: '银行', assets: '资产', cars: '车行 · 送车上门', radio: '电台' };
-    this.phoneEl.innerHTML = `<div style="position:absolute;top:12px;left:0;right:0;text-align:center;font-size:12px;opacity:.7">${t}</div><div style="font:800 18px 'Noto Sans CJK SC',sans-serif;margin-bottom:10px">${titles[this.phonePage]}</div>` +
-      this.phoneItems().map((it, i) => `<div style="padding:7px 10px;margin:3px 0;border-radius:10px;background:${i === this.phoneSel ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.07)'};color:${i === this.phoneSel ? '#111' : '#fff'}">${it[0]}</div>`).join('') +
+    this.phoneEl.innerHTML = `<div style="position:absolute;top:12px;left:0;right:0;text-align:center;font-size:12px;opacity:.7">${t}</div><div style="font:800 18px 'Noto Sans CJK SC',sans-serif;margin-bottom:10px">${esc(titles[this.phonePage])}</div>` +
+      this.phoneItems().map((it, i) => `<div style="padding:7px 10px;margin:3px 0;border-radius:10px;background:${i === this.phoneSel ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.07)'};color:${i === this.phoneSel ? '#111' : '#fff'}">${esc(it[0])}</div>`).join('') +
       '<div style="position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:11px;opacity:.55">↑↓ 选择 · Enter 确定 · ← 返回</div>';
   }
   callMechanic() {
     const G = this.G, P = G.P; const own = P.assets.filter((a) => a.type); const type = own.length ? own[own.length - 1].type : 'sedan';
-    const yaw = P.yaw; const x = P.pos.x + Math.sin(yaw + 1.2) * 7, z = P.pos.z + Math.cos(yaw + 1.2) * 7;
-    const v = new Vehicle(G.scene, type); v.place(x, z, yaw); v.ai = null; v.parked = true; G.traffic.cars.push(v); this.lastDelivered = v;
+    if (this.lastDelivered && this.lastDelivered !== P.car && G.traffic.cars.includes(this.lastDelivered)) G.traffic.removeCar(this.lastDelivered);
+    const yaw = P.yaw; const r = G.city.col.resolve(P.pos.x + Math.sin(yaw + 1.2) * 7, P.pos.z + Math.cos(yaw + 1.2) * 7, 1.5, P.pos.y + 0.5);
+    const v = new Vehicle(G.scene, type); v.y = Math.max(0, G.city.groundH(r.x, r.z)); v.place(r.x, r.z, yaw); v.ai = null; v.parked = true; G.traffic.cars.push(v); this.lastDelivered = v;
     G.hud.msg('老秦：「车给你停在旁边了。」', 2.5); this.togglePhone(false); this.log.push('mechanic:' + type); return v;
   }
   callLawyer() {
@@ -220,7 +244,15 @@ export class World {
     // context prompts near counters
     const G = this.G, P = G.P;
     if (!this.menu && !this.phoneOpen && G.deadT <= 0) {
-      for (const r of this.rings) { const d = Math.hypot(P.pos.x - r.p.x, P.pos.z - r.p.z); if (d < (r.kind === 'mod' ? 5 : 1.8)) { const names = { gun: POI.gunshop.name, clothes: POI.clothes.name, mod: POI.modshop.name, atm: 'ATM' }; if (this.promptK !== r) { this.promptK = r; G.hud.msg(`按 E 使用 ${names[r.kind]}`, 2); } break; } }
+      let hit = null;
+      for (const r of this.rings) {
+        if (!P.onFoot && r.kind !== 'mod') continue;
+        const d = Math.hypot(P.pos.x - r.p.x, P.pos.z - r.p.z);
+        if (d < (r.kind === 'mod' ? 5 : 1.8)) { hit = r; break; }
+      }
+      if (hit) {
+        if (this.promptK !== hit) { this.promptK = hit; const names = { gun: POI.gunshop.name, clothes: POI.clothes.name, mod: POI.modshop.name, atm: 'ATM' }; G.hud.msg(`按 E 使用 ${names[hit.kind]}`, 2); }
+      } else this.promptK = null;
     }
     if (this.menu) { for (const r of this.rings) { if (Math.hypot(P.pos.x - r.p.x, P.pos.z - r.p.z) < 6) return; } this.closeMenu(); }
   }

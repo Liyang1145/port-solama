@@ -170,6 +170,7 @@ async function load() {
 
   const clock = new THREE.Timer(); clock.connect?.(document);
   function frame(dt, noRender = false) {
+    if (game.paused) { if (!noRender) renderFrame(0); return; }
     post.storePrev();
     U.uTime.value += dt; sprobe.t += dt;
     if (!SNAP || W.timeFlow) { hour += dt * game.timeScale / 3600; if (hour >= 24) hour -= 24; }

@@ -5,10 +5,11 @@
 import * as THREE from 'three';
 import { Vehicle } from './vehicles.js';
 import { U } from './env.js';
-import { pick, rand } from './util.js';
+import { CYBER } from './mapsel.js';
+import { pick, rand, rng } from './util.js';
 
 const STAND = { x: 281.0, z: 10.0 };
-const CURB = { x: 285.0, z: 5.0, yaw: Math.PI };
+const CURB = { x: 285.0, z: 8.0, yaw: Math.PI };
 const GUEST_CARS = ['sedan', 'sport2', 'suv', 'sedan', 'sport2', 'taxi'];
 const GUESTS = ['滨海酒店的住客', '一位赶着去晚宴的客人', '度假的退休夫妇', '穿亚麻西装的商人', '刚下飞机的游客'];
 
@@ -46,11 +47,14 @@ export class Valet {
     // lots on the inner avenues (x=50 / x=170), kerb lane, away from intersections
     const segs = this.G.city.segs.filter((s) => s.axis === 'z' && (s.c === 50 || s.c === 170) && !s.bridge && s.a1 - s.a0 > 60);
     const s = pick(segs); const a = s.a0 + (s.a1 - s.a0) * rand(0.35, 0.65);
-    return { x: s.c + 4.6 * (Math.random() < 0.5 ? -1 : 1), z: a, name: (s.c === 50 ? '湾畔' : '棕榈') + '停车场 ' + (Math.abs(Math.round(a / 10)) % 9 + 1) + ' 号位' };
+    const lot = CYBER ? (s.c === 50 ? '霓影' : '电路') : (s.c === 50 ? '湾畔' : '棕榈');
+    return { x: s.c + 4.6 * (rng() < 0.5 ? -1 : 1), z: a, name: lot + '停车场 ' + (Math.abs(Math.round(a / 10)) % 9 + 1) + ' 号位' };
   }
   start() {
     const G = this.G;
+    if (this._prevCar && this._prevCar !== G.P.car && G.traffic.cars.includes(this._prevCar)) G.traffic.removeCar(this._prevCar);
     this.car = new Vehicle(G.scene, pick(GUEST_CARS)); this.car.place(CURB.x, CURB.z, CURB.yaw); this.car.ai = null; G.traffic.cars.push(this.car);
+    this._prevCar = this.car;
     this.guest = pick(GUESTS); this.state = 'pickup'; this.t = 0; this.standMk.visible = false; this.carMk.visible = true;
     G.hud.msg('代客泊车：' + this.guest + '把车钥匙交给了你', 4); G.sfx.alert?.();
   }
@@ -66,15 +70,18 @@ export class Valet {
   }
   update(dt) {
     const G = this.G, P = G.P;
-    if (this.state === 'cool') { this.cool -= dt; if (this.cool <= 0) { this.state = 'idle'; this.standMk.visible = true; this.car = null; } return; }
+    if (this.state === 'cool') { this.cool -= dt; if (this.cool <= 0) { this.state = 'idle'; this.standMk.visible = !(G.missions && G.missions.active); this.car = null; } return; }
     if (this.state === 'idle') {
+      const busy = !!(G.missions && G.missions.active);
+      this.standMk.visible = !busy;
+      if (busy) { this.obj(''); return; }
       if (P.onFoot && G.deadT <= 0 && G.wanted === 0 && Math.hypot(P.pos.x - STAND.x, P.pos.z - STAND.z) < 2.2) this.start();
       else if (P.onFoot && Math.hypot(P.pos.x - STAND.x, P.pos.z - STAND.z) < 25) this.obj('<span style="color:#ffc34d">代客泊车台</span> · 走过去接单');
       else this.obj('');
       return;
     }
     const c = this.car;
-    if (!c || c.health < 35) return this.finish(false, '客人的车被撞坏了');
+    if (!c || !G.traffic.cars.includes(c) || c.health < 35) return this.finish(false, '客人的车被撞坏了');
     if (G.wanted >= 2) return this.finish(false, '警察盯上了你，客人报了警');
     if (G.deadT > 0) return this.finish(false, '你倒下了');
     if (this.state === 'pickup') {

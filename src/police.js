@@ -17,7 +17,7 @@ function heliMesh() {
   const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.4, 5.5, 8), dark); boom.rotation.x = Math.PI / 2; boom.position.set(0, 0.25, -4.4); g.add(boom);
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.4, 0.9), dark); fin.position.set(0, 0.85, -7.0); g.add(fin);
   for (const s of [-1, 1]) { const sk = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 3.4), dark); sk.position.set(s * 1.0, -1.45, 0.2); g.add(sk); }
-  const rotor = new THREE.Group(); for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 11), dark); b.rotation.y = i * Math.PI / 4 * 2 / 2 + i * Math.PI / 4; rotor.add(b); } rotor.position.y = 1.35; g.add(rotor); g.userData.rotor = rotor;
+  const rotor = new THREE.Group(); for (let i = 0; i < 2; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 11), dark); b.rotation.y = i * Math.PI / 2; rotor.add(b); } rotor.position.y = 1.35; g.add(rotor); g.userData.rotor = rotor;
   const tr = new THREE.Group(); const tb = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.8, 0.2), dark); tr.add(tb); tr.position.set(0.18, 0.85, -7.0); g.add(tr); g.userData.tail = tr;
   // spotlight cone (additive, visible at night)
   const cm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uNight: U.uNight },
@@ -37,7 +37,13 @@ export class PoliceOps {
     this.heli = { m, x: P.pos.x - 220, z: P.pos.z + 60, y: 48, yaw: 0, spot: new THREE.Vector3(P.pos.x, 0, P.pos.z) };
     G.hud.msg('警用直升机出动', 2); this.log.push('heli');
   }
-  removeHeli() { if (!this.heli) return; this.G.scene.remove(this.heli.m); this.G.scene.remove(this.heli.m.userData.cone); this.heli = null; this.spot.intensity = 0; }
+  removeHeli() {
+    if (!this.heli) return;
+    const disposeObj = (root) => { const mats = new Set(); root.traverse((o) => { if (o.isMesh) { o.geometry?.dispose(); if (o.material) mats.add(o.material); } }); for (const m of mats) m.dispose?.(); };
+    this.G.scene.remove(this.heli.m); this.G.scene.remove(this.heli.m.userData.cone);
+    disposeObj(this.heli.m); disposeObj(this.heli.m.userData.cone);
+    this.heli = null; this.spot.intensity = 0;
+  }
   updateHeli(dt) {
     const G = this.G, P = G.P, h = this.heli; if (!h) return false;
     const tx = (G.lostT > 1.5 && G.lastSeen ? G.lastSeen.x : P.pos.x), tz = (G.lostT > 1.5 && G.lastSeen ? G.lastSeen.z : P.pos.z);
@@ -48,10 +54,14 @@ export class PoliceOps {
     // spotlight sweeps toward the target (search: it wanders around the last sighting)
     const wob = G.lostT > 1.5 ? 14 : 2; const sx = tx + Math.sin(U.uTime.value * 0.7) * wob, sz = tz + Math.cos(U.uTime.value * 0.53) * wob;
     h.spot.x += (sx - h.spot.x) * (1 - Math.exp(-1.6 * dt)); h.spot.z += (sz - h.spot.z) * (1 - Math.exp(-1.6 * dt));
-    const cone = h.m.userData.cone; const from = new THREE.Vector3(h.x, h.y - 1.4, h.z); const to = new THREE.Vector3(h.spot.x, 0, h.spot.z); const L = from.distanceTo(to);
-    cone.scale.set(1, L, 1); cone.position.copy(from).lerp(to, 0.5); cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), to.clone().sub(from).normalize());
+    const cone = h.m.userData.cone;
+    const from = (this._hFrom || (this._hFrom = new THREE.Vector3())).set(h.x, h.y - 1.4, h.z);
+    const to = (this._hTo || (this._hTo = new THREE.Vector3())).set(h.spot.x, G.city.groundH(h.spot.x, h.spot.z), h.spot.z);
+    const dir = (this._hDir || (this._hDir = new THREE.Vector3())).subVectors(to, from);
+    const L = dir.length() || 1;
+    cone.scale.set(1, L, 1); cone.position.copy(from).lerp(to, 0.5); cone.quaternion.setFromUnitVectors(this._hDown || (this._hDown = new THREE.Vector3(0, -1, 0)), dir.multiplyScalar(1 / L));
     this.spot.position.copy(from); this.spot.target.position.copy(to); this.spot.target.updateMatrixWorld(); this.spot.intensity = 5200 * (0.1 + U.uNight.value); // v4.3: ~3 lux on the ground from 48 m (was a blown-out white disc)
-    const lit = Math.hypot(P.pos.x - h.spot.x, P.pos.z - h.spot.z) < 7.5;
+    const lit = Math.hypot(P.pos.x - h.spot.x, P.pos.z - h.spot.z) < 7.5 && G.los(from.x, from.y, from.z, P.pos.x, P.pos.y + 1.5, P.pos.z);
     return lit;
   }
   // road block: nearest intersection ahead of the player (60–160 m), two cruisers across it + 2 officers
@@ -75,7 +85,11 @@ export class PoliceOps {
     this.blockT -= dt;
     if (G.wanted >= 3 && this.blockT <= 0 && this.blocks.length < 2) { this.blockT = 45; this.placeBlock(); }
     for (const b of [...this.blocks]) { b.t += dt; const d = Math.hypot(b.x - P.pos.x, b.z - P.pos.z);
-      if ((G.wanted === 0 && d > 80) || d > 260 || b.t > 240) { for (const c of b.cars) if (c !== P.car) G.traffic.removeCar(c); this.blocks.splice(this.blocks.indexOf(b), 1); } }
+      if ((G.wanted === 0 && d > 80) || d > 260 || b.t > 240) {
+        for (const c of b.cars) if (c !== P.car && Math.hypot(c.x - b.x, c.z - b.z) < 25) G.traffic.removeCar(c);
+        for (const o of b.cops) if (o.pos.distanceTo(P.pos) > 70) { const ci = G.cops.indexOf(o); if (ci >= 0) { G.cops.splice(ci, 1); o.dispose(); } }
+        this.blocks.splice(this.blocks.indexOf(b), 1);
+      } }
     // E4 helicopter
     if (G.wanted >= 4 && !this.heli) this.spawnHeli();
     if (this.heli && G.wanted === 0) { this.heli.y += dt * 8; if (this.heli.y > 140) this.removeHeli(); }
