@@ -98,6 +98,10 @@ export class Game {
     const v = new Vehicle(this.scene, 'sport'); v.place(284.5, 22, Math.PI); v.ai = null; this.traffic.cars.push(v); this.parked = v;
     for (let i = 0; i < 18; i++) this.traffic.spawnCar(pick(['sedan', 'sedan', 'suv', 'pickup', 'van', 'taxi', 'sport2', 'sport']), this.P.pos, 20, 230);
     for (let i = 0; i < 84; i++) this.peds.spawn(this.P.pos, 6, 110); // v4.4 denser crowd (character LOD keeps far peds cheap)
+    // fix_pt7 #1 (?oldstartfill = old): the parked-car ring around the spawn was filled by the first gameplay frames (3 Vehicles per
+    // manage call every 0.05 s: model clone + first cabin bakes + GC = logic frames of 145-154 ms at frames 0 and 8 on map B, the
+    // "stuck at the start" hitch); fill it here, behind the loading screen (warm() then compiles their programs too)
+    if (!/[?&]oldstartfill\b/.test(typeof location !== 'undefined' ? location.search : '')) this.manage(true);
     this.hud.msg('欢迎来到索拉纳港 · 走近车辆按 F 上车', 5);
     const help = document.getElementById('help'); if (snap) help.style.display = 'none'; else setTimeout(() => { help.style.transition = 'opacity 1s'; help.style.opacity = 0; }, 20000);
     this.started = true;
@@ -453,7 +457,7 @@ export class Game {
       }
     }
   }
-  manage() {
+  manage(full = false) {
     const P = this.P; const fwd = new THREE.Vector3(); this.camera.getWorldDirection(fwd);
     // traffic
     const civ = this.traffic.cars.filter((v) => !v.parked && (v.type !== 'police' || !this.policeCars.includes(v)));
@@ -468,7 +472,7 @@ export class Game {
     // fix_pt2 (?oldmanage2 = old: a jump filled every slot in one call -> first frame after load / respawn / teleport g:manage ~177 ms,
     // map B): a jump now fills the nearest 3 slots per call and re-runs manage every 0.05 s until the ring is full (~0.3 s, all >= 25 m away)
     const OM2 = this._om2 ?? (this._om2 = typeof location !== 'undefined' && /[?&]oldmanage2\b/.test(location.search));
-    const burst = !OM2 && (jump || this._mgBacklog); let parkNew = OLDMANAGE || (jump && OM2) ? 1e9 : burst ? 3 : 1; let nearFirst = null;
+    const burst = !OM2 && !full && (jump || this._mgBacklog); let parkNew = OLDMANAGE || full || (jump && OM2) ? 1e9 : burst ? 3 : 1; let nearFirst = null; if (full) this._mgBacklog = false;
     if (burst) { nearFirst = new Set(); const C = []; for (const s of this.city.parking || []) { if (s.car || !s.fill) continue; const d = Math.hypot(s.x - P.pos.x, s.z - P.pos.z); if (d < 115 && d > 25) C.push([d, s]); }
       C.sort((a, b) => a[0] - b[0]); for (let i = 0; i < Math.min(3, C.length); i++) nearFirst.add(C[i][1]); this._mgBacklog = C.length > 3; if (this._mgBacklog) this.spawnT = 0.05; }
     for (const s of this.city.parking || []) {

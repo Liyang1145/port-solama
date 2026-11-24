@@ -16,11 +16,35 @@ import { PY_OFF, yardContainers } from './portyard.js'; // r6.4 b_portyard
 import { farCrown, setCrownParcel } from './crown.js';
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
+const OLDSTREAM = typeof location !== 'undefined' && /[?&]oldstream\b/.test(location.search), SLICE = 6; // fix_pt7 #1
+const NEAR_OPTS = { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } };
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
 const GLASS = [[0.10, 0.20, 0.24], [0.16, 0.24, 0.30], [0.22, 0.26, 0.28], [0.20, 0.17, 0.13], [0.08, 0.16, 0.20], [0.26, 0.32, 0.36]];
 const ATTRS = { building: { aWin: 4, aCol: 3, aGlass: 3, aUp: 3 }, road: { aRd: 4 } };
 const nullCol = { add() {} };
 
+// fix_pt7 #1: World.append of every parcel bucket (transformed by its matrix) into one bucket per key, done once into typed arrays;
+// same vertex order / arithmetic (Vector3.applyMatrix4 / applyMatrix3 + normalize) and the same colour / custom-attribute padding
+const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _nm = new THREE.Matrix3();
+function mergeParts(mat, list) {
+  const sizes = ATTRS[mat] || {}; let vc = 0, ic = 0, cl = 0; const cu = {}; for (const k in sizes) cu[k] = 0;
+  for (const [o] of list) { if (o.c.length) cl += o.c.length; else if (cl) cl += o.vc * 3; for (const k in sizes) { const src = o.custom[k]; cu[k] += src && src.length ? src.length : o.vc * sizes[k]; } vc += o.vc; ic += o.idx.length; }
+  const P = new Float32Array(vc * 3), N = new Float32Array(vc * 3), UV = new Float32Array(vc * 2), C = cl ? new Float32Array(cl) : null; const CU = {}, co = {}; for (const k in sizes) { CU[k] = new Float32Array(cu[k]); co[k] = 0; }
+  const I = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic); let base = 0, ii = 0, ci = 0;
+  for (const [o, m] of list) { _nm.getNormalMatrix(m); const op = o.p, on = o.n, ou = o.uv;
+    for (let i = 0; i < o.vc; i++) { const j = (base + i) * 3; _v.set(op[i * 3], op[i * 3 + 1], op[i * 3 + 2]).applyMatrix4(m); P[j] = _v.x; P[j + 1] = _v.y; P[j + 2] = _v.z;
+      _n.set(on[i * 3], on[i * 3 + 1], on[i * 3 + 2]).applyMatrix3(_nm).normalize(); N[j] = _n.x; N[j + 1] = _n.y; N[j + 2] = _n.z; UV[(base + i) * 2] = ou[i * 2]; UV[(base + i) * 2 + 1] = ou[i * 2 + 1]; }
+    if (o.c.length) { C.set(o.c, ci); ci += o.c.length; } else if (ci) { C.fill(1, ci, ci + o.vc * 3); ci += o.vc * 3; }
+    for (const k in sizes) { const src = o.custom[k]; if (src && src.length) { CU[k].set(src, co[k]); co[k] += src.length; } else co[k] += o.vc * sizes[k]; }
+    const oi = o.idx; for (let q = 0; q < oi.length; q++) I[ii++] = base + oi[q];
+    base += o.vc; }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+  if (C) g.setAttribute('color', new THREE.BufferAttribute(C, 3));
+  for (const k in sizes) g.setAttribute(k, new THREE.BufferAttribute(CU[k], sizes[k]));
+  g.setIndex(new THREE.BufferAttribute(I, 1)); g.computeBoundingSphere(); g.computeBoundingBox();
+  return g;
+}
 function mkWorld() { const w = new World(1e7); w.attrs = ATTRS; return w; }
 // transform matrix: local +x (the facade facing the street) -> world facing vector (cos ang, sin ang)
 function parcelMatrix(p) { const th = Math.atan2(-Math.sin(p.ang), Math.cos(p.ang)); return new THREE.Matrix4().makeRotationY(th).setPosition(p.x, 0, p.z); }
@@ -148,7 +172,7 @@ function impostor(W, p) {
 
 export class Stream {
   constructor(scene, mats, parcels) {
-    this.scene = scene; this.mats = mats; this.chunks = new Map(); this.stats = { loaded: 0, builds: 0, ms: 0 };
+    this.scene = scene; this.mats = mats; this.chunks = new Map(); this.stats = { loaded: 0, builds: 0, ms: 0, parcelMax: 0 };
     this.group = new THREE.Group(); this.group.name = 'stream'; scene.add(this.group);
     for (const p of parcels) { const k = Math.floor(p.x / CH) + ',' + Math.floor(p.z / CH); let c = this.chunks.get(k); if (!c) this.chunks.set(k, c = { key: k, cx: (Math.floor(p.x / CH) + 0.5) * CH, cz: (Math.floor(p.z / CH) + 0.5) * CH, parcels: [], far: [], near: null }); c.parcels.push(p); }
     // far impostors, one merged set of meshes per chunk
@@ -159,37 +183,60 @@ export class Stream {
     }
     this.farTris = tris;
   }
+  // fix_pt7 #1 (?oldstream = old): a near chunk (all its parcels' generators + the merged meshes) was built in one call: 1.4-2.3 s
+  // logic frame on map B whenever driving / teleporting brought a new chunk inside LOAD (tools/pf7.cjs tp: max 2336 ms, inside it
+  // buildNear 2120 ms, ~1/3 GC). Now a job: parcels one at a time and then the meshes (one per key, hidden until complete), at most
+  // SLICE ms per frame; the far boxes stay until the chunk is complete. sync() (snap / tools) still finishes everything at once.
+  parcel(W, c, p) {
+    const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
+    const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
+    SVC_CTX.p = p; SVC_CTX.log = []; // b_alleyface2: service faces on the lot's back / slot sides (city.js svcEdgesLot)
+    setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); CLUT_CTX.m = null; // b_tower3: crown sizes/content from the seed
+    { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
+      p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
+    if (W instanceof Map) { for (const b of lw.buckets.values()) { if (!b.vc) continue; const k = b.mat + '|' + Math.floor(p.x / 1e7) + '|' + Math.floor(p.z / 1e7); let e = W.get(k); if (!e) W.set(k, e = { mat: b.mat, list: [] }); e.list.push([b, m]); } }
+    else for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
+    if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
+  }
   buildNear(c) {
     const t0 = performance.now();
     const W = mkWorld();
-    for (const p of c.parcels) {
-      if (p.far) continue;
-      const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
-      const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
-      SVC_CTX.p = p; SVC_CTX.log = []; // b_alleyface2: service faces on the lot's back / slot sides (city.js svcEdgesLot)
-      setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); CLUT_CTX.m = null; // b_tower3: crown sizes/content from the seed
-      { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
-        p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
-      for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
-      if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
-    }
-    c.near = W.build(this.group, this.mats, { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } });
+    for (const p of c.parcels) { if (p.far) continue; this.parcel(W, c, p); }
+    c.near = W.build(this.group, this.mats, NEAR_OPTS);
     for (const m of c.far) m.visible = c.parcels.some((p) => p.far); // keep far-only parcels' boxes (none in near chunks normally)
     this.stats.builds++; this.stats.ms = performance.now() - t0;
   }
+  // the job keeps each parcel's own buckets (+ its matrix) per output key and merges them once, into preallocated typed arrays
+  // (World.append grew one chunk-wide JS array per attribute with push: re-allocation + GC of multi-MB arrays, the GC half of the cost)
+  startJob(c) { this.job = { c, parts: new Map(), list: c.parcels.filter((p) => !p.far), i: 0, keys: null, k: 0, meshes: [], ms: 0, t0: performance.now(), slices: 0 }; }
+  stepJob(ms) {
+    const J = this.job; const t0 = performance.now(); J.slices++;
+    while (J.i < J.list.length) { const ta = performance.now(); this.parcel(J.parts, J.c, J.list[J.i++]); const d = performance.now() - ta; if (d > this.stats.parcelMax) this.stats.parcelMax = d; if (performance.now() - t0 > ms) { J.ms += performance.now() - t0; return false; } }
+    if (!J.keys) J.keys = [...J.parts];
+    while (J.k < J.keys.length) { const [key, e] = J.keys[J.k++]; const o = NEAR_OPTS[e.mat] || {};
+      const m = new THREE.Mesh(mergeParts(e.mat, e.list), this.mats[e.mat]); m.castShadow = o.cast !== false; m.receiveShadow = o.receive !== false; m.name = key; m.visible = false; this.group.add(m); J.meshes.push(m); e.list = null;
+      if (J.k < J.keys.length && performance.now() - t0 > ms) { J.ms += performance.now() - t0; return false; } }
+    const c = J.c; c.near = J.meshes; for (const m of c.near) m.visible = true; J.ms += performance.now() - t0;
+    for (const m of c.far) m.visible = c.parcels.some((p) => p.far);
+    this.stats.builds++; this.stats.ms = J.ms; this.stats.jobSlices = J.slices; this.stats.jobWall = performance.now() - J.t0; this.job = null; return true;
+  }
   dropNear(c) { for (const m of c.near) { this.group.remove(m); m.geometry.dispose(); } c.near = null; for (const m of c.far) m.visible = true; }
-  // call every frame: builds at most `budget` near chunks (nearest first), frees far ones
+  // call every frame: builds at most `budget` near chunks (nearest first), frees far ones (budget >= 999: everything now)
   update(pos, budget = 1) {
+    const job = this.job; if (job && (budget >= 999 || OLDSTREAM)) { while (!this.stepJob(1e9)); } // finish a started job (its parcels already reached onParcel)
     const want = [];
     for (const c of this.chunks.values()) {
+      if (this.job && c === this.job.c) continue;
       const d = Math.hypot(c.cx - pos.x, c.cz - pos.z);
       if (c.near && d > UNLOAD) this.dropNear(c);
       else if (!c.near && d < LOAD && c.parcels.some((p) => !p.far)) want.push([d, c]);
     }
     want.sort((a, b) => a[0] - b[0]);
-    for (let i = 0; i < Math.min(budget, want.length); i++) this.buildNear(want[i][1]);
+    if (OLDSTREAM) { for (let i = 0; i < Math.min(budget, want.length); i++) this.buildNear(want[i][1]); }
+    else if (budget >= 999) { for (let i = 0; i < Math.min(budget, want.length); i++) { this.startJob(want[i][1]); while (!this.stepJob(1e9)); } }
+    else { if (!this.job && want.length) this.startJob(want.shift()[1]); if (this.job) this.stepJob(SLICE); }
     this.stats.loaded = [...this.chunks.values()].filter((c) => c.near).length;
-    return want.length - Math.min(budget, want.length);
+    return want.length + (this.job ? 1 : 0) - (budget >= 999 || OLDSTREAM ? Math.min(budget, want.length) : 0);
   }
   sync(pos) { this.update(pos, 999); return this.stats; }
   tris() { let n = 0; for (const c of this.chunks.values()) if (c.near) for (const m of c.near) n += m.geometry.index.count / 3; return { near: n, far: this.farTris, loaded: this.stats.loaded }; }
