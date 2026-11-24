@@ -46,20 +46,23 @@ export function addPropCols(city, sp = true) {
 // n samples along the route × S lateral states. fill(i, cost) writes the S costs of sample i; check(i) -> clearance of the
 // chosen lane at sample i (only the loops need it: their lane point is remapped at the corners). Written as a generator
 // that yields every few samples / DP rows, so the work can be spread over frames (pedWarm) or run straight through (finish).
+// fix_pt7 #1 (?oldpedyield = old): yield points every fill row / 4 DP-check rows instead of 2 / 16 (pedWarm slices of 4-17 ms over its
+// 2 ms budget on map B, tools/pf7.cjs: chunkMax); the computation is unchanged, only where the generator may pause
+const PY = typeof location !== 'undefined' && /[?&]oldpedyield\b/.test(location.search) ? [1, 15] : [0, 3];
 function* solveJob(n, S, fill, prof, lo, base, check, L) {
-  const cost = new Float32Array(n * S); L._ph = 'fill';
-  for (let i = 0; i < n; i++) { fill(i, cost); if (i & 1) yield; }
+  const cost = new Float32Array(n * S); L._ph = 'fill'; const [YF, YD] = PY;
+  for (let i = 0; i < n; i++) { fill(i, cost); if ((i & YF) === YF) yield; }
   const J = Math.round(0.35 / DS); const acc = new Float32Array(n * S); const from = new Int16Array(n * S); const pick = new Int16Array(n);
   for (let round = 0; round < 9; round++) { L._ph = 'dp' + round;
     for (let k = 0; k < S; k++) acc[k] = cost[k];
     for (let i = 1; i < n; i++) { for (let k = 0; k < S; k++) {
       let best = 1e30, bk = k; for (let j = Math.max(0, k - J); j <= Math.min(S - 1, k + J); j++) { const v = acc[(i - 1) * S + j] + Math.abs(j - k) * 0.02; if (v < best) { best = v; bk = j; } }
-      acc[i * S + k] = best + cost[i * S + k]; from[i * S + k] = bk; } if ((i & 15) === 15) yield; }
+      acc[i * S + k] = best + cost[i * S + k]; from[i * S + k] = bk; } if ((i & YD) === YD) yield; }
     let bk = 0, bv = 1e30; for (let k = 0; k < S; k++) if (acc[(n - 1) * S + k] < bv) { bv = acc[(n - 1) * S + k]; bk = k; }
     for (let i = n - 1; i >= 0; i--) { pick[i] = bk; prof[i] = lo + bk * DS - base; bk = from[i * S + bk]; }
     if (prof.length > n) prof[n] = L.closed ? prof[0] : prof[n - 1];
     if (round === 8 || !check) break;
-    L._ph = 'chk'; let bad = 0; for (let i = 0; i < n; i++) { if (check(i) < 0.05) { bad++; for (let k = Math.max(0, pick[i] - 3); k <= Math.min(S - 1, pick[i] + 3); k++) cost[i * S + k] += 80; } if ((i & 15) === 15) yield; }
+    L._ph = 'chk'; let bad = 0; for (let i = 0; i < n; i++) { if (check(i) < 0.05) { bad++; for (let k = Math.max(0, pick[i] - 3); k <= Math.min(S - 1, pick[i] + 3); k++) cost[i * S + k] += 80; } if ((i & YD) === YD) yield; }
     L.rounds = round + 1; if (!bad) break;
   }
 }

@@ -27,6 +27,7 @@ srv.listen(0, async () => {
     const S = G.stream; if (S) { wrap(S, 'buildNear', 'st.buildNear'); wrap(S, 'step', 'st.step'); const N = G.neon; if (N) { wrap(N, 'update', 'neon.update'); const B = N.bldg; if (B) { wrap(B, 'buildChunk', 'bl.buildChunk'); for (const k of ['via', 'alley', 'roofs', 'gaps', 'shops', 'ground']) if (B[k]) wrap(B[k], 'sync', 'bl.' + k); } if (N.port) wrap(N.port, 'sync', 'port.sync'); } if (G.nature) wrap(G.nature, 'update', 'nature.update'); }
     window.__STREAM = () => { if (S) { S.update(G.camera.position, 1); if (G.nature) G.nature.update(G.camera.position); if (G.neon) G.neon.update(G.env.look.night, G.U.uTime.value); } else if (R) R.update(G.camera.position, 1); };
     const P = G.game.P; return [P.pos.x, P.pos.z, G.game.P.yaw || 0]; })()`);
+  if (!process.env.NOFINISH) { const t = Date.now(); await p.evaluate('__G.finish ? __G.finish() : 0'); console.log('gpu finish (SwiftShader backlog of the warm-up frame) s', ((Date.now() - t) / 1000).toFixed(0)); }
   console.log('spawn', JSON.stringify(sp));
   const res = { spawn: sp }; const cdp = await p.context().newCDPSession(p);
   for (const sc of SC) {
@@ -56,11 +57,12 @@ srv.listen(0, async () => {
     const dt = {}; for (const id of profile.samples) { const k = nm(id); dt[k] = (dt[k] || 0) + 1; }
     const top = Object.entries(dt).sort((a, c) => c[1] - a[1]).slice(0, 20).map(([k, v]) => [k, +(100 * v / profile.samples.length).toFixed(1)]);
     const ms = F.map((f) => f.ms).sort((a, c) => a - c); const pct = (q) => ms[Math.min(ms.length - 1, Math.floor(q * ms.length))];
-    res[sc] = { frames: F.length, p50: pct(0.5), p95: pct(0.95), p99: pct(0.99), max: ms[ms.length - 1], over33: slow.length, alignedChunks: off ? off.length : 0,
+    res[sc] = { frames: F.length, p50: pct(0.5), p95: pct(0.95), p99: pct(0.99), max: ms[ms.length - 1], over33: slow.length, sumOver33: +slow.reduce((a, f) => a + f.ms - 33.3, 0).toFixed(0), totalMs: +F.reduce((a, f) => a + f.ms, 0).toFixed(0), alignedChunks: off ? off.length : 0,
       slow: slow.slice(0, 12).map((f) => ({ f: f.f, ms: f.ms, T: Object.entries(f.T).sort((a, c) => c[1] - a[1]).slice(0, 6), samples: f.samples, self: f.self, inc: f.inc })), first10: F.slice(0, 10).map((f) => f.ms), cpuTop: top };
-    console.log(TAG, MAPN, sc, 'p50/p95/p99/max', res[sc].p50, res[sc].p95, res[sc].p99, res[sc].max, 'over33', res[sc].over33, 'first10', JSON.stringify(res[sc].first10));
+    console.log(TAG, MAPN, sc, 'p50/p95/p99/max', res[sc].p50, res[sc].p95, res[sc].p99, res[sc].max, 'over33', res[sc].over33, 'sumOver33', res[sc].sumOver33, 'total', res[sc].totalMs, 'first10', JSON.stringify(res[sc].first10));
     for (const s of res[sc].slow.slice(0, 6)) console.log('  slow f' + s.f, s.ms, JSON.stringify(s.T), '\n    self', JSON.stringify(s.self), '\n    inc', JSON.stringify((s.inc || []).slice(0, 10)));
   }
+  res.streamStats = await p.evaluate('__G.stream ? JSON.stringify(__G.stream.stats) : (__G.city.region ? JSON.stringify(__G.city.region.stats) : "")'); res.pedStats = await p.evaluate('__G.city._pedStats ? JSON.stringify({ ...__G.city._pedStats, slow: __G.city._pedStats.slow.slice(0, 6) }) : ""'); console.log('stream', res.streamStats, 'ped', res.pedStats);
   res.heapMB = await p.evaluate('performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0');
   fs.mkdirSync(path.join(root, 'shots/fp7'), { recursive: true }); fs.writeFileSync(path.join(root, 'shots/fp7/pf7_' + MAPN + '_' + TAG + '.json'), JSON.stringify(res, null, 1));
   console.log('PAGEERROR', perr); await b.close(); process.exit(0);

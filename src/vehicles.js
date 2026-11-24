@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { prep } from './mats.js';
 import { bodyProto } from './carbody.js';
-import { buildInterior, interiorMats, setInteriorNight } from './carinterior.js';
+import { buildInterior, interiorMats, setInteriorNight, prebakeInteriors } from './carinterior.js';
 import { U } from './env.js';
 import { OLDENV2 } from './envprog.js'; // b_envprog2
 import { CYBER } from './mapsel.js';
@@ -309,6 +309,7 @@ function detailWheels(m, sc, spokes, style, darkRim, redCal) {
 // r6.4 body variants: a share of everyday sedans are drawn as the muscle coupe or the convertible, a share of pickups as the
 // lifted off-road truck (same vehicle type, handling and AI; only the look). Picked from a counter hash, so the game's
 // rng sequence is untouched. Vehicle.vis.force = 'muscle' | 'conv' | 'lifted' pins the next car (shots / tests).
+export function prebakeCabins() { return prebakeInteriors([...Object.values(CABIN).filter(Boolean), SPORT_CABIN]); } // fix_pt7 #1
 export const VIS = { force: null }; let VARN = 0;
 function bodyVariant(k, type) {
   if (VIS.force && VP['b_' + VIS.force]) { const f = 'b_' + VIS.force; if ((k === 'b_sedan' && f !== 'b_lifted') || (k === 'b_pickup' && f === 'b_lifted')) return f; }

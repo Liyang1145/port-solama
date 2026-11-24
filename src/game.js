@@ -1,7 +1,8 @@
 // Gameplay: player on foot / driving, third-person + chase camera, traffic & pedestrians, carjacking,
 // pistol combat, 1-5 star wanted level with police pursuit, HUD + minimap.
 import * as THREE from 'three';
-import { Vehicle, Traffic, prepareSport, prepareModels, setCarNight } from './vehicles.js';
+import { Vehicle, Traffic, prepareSport, prepareModels, setCarNight, prebakeCabins } from './vehicles.js';
+import { prebuildGuns } from './gunmodels.js';
 import { Occupants } from './seating.js';
 import { Character, Pedestrians, prepareCharacters } from './people.js';
 import { HUD } from './hud.js';
@@ -101,7 +102,8 @@ export class Game {
     // fix_pt7 #1 (?oldstartfill = old): the parked-car ring around the spawn was filled by the first gameplay frames (3 Vehicles per
     // manage call every 0.05 s: model clone + first cabin bakes + GC = logic frames of 145-154 ms at frames 0 and 8 on map B, the
     // "stuck at the start" hitch); fill it here, behind the loading screen (warm() then compiles their programs too)
-    if (!/[?&]oldstartfill\b/.test(typeof location !== 'undefined' ? location.search : '')) this.manage(true);
+    this._cabins = prebakeCabins(); // fix_pt7 #1 (?oldbake): every cabin x seat colour baked here, not on the first spawn of each while playing
+    if (!/[?&]oldstartfill\b/.test(typeof location !== 'undefined' ? location.search : '')) { this.manage(true); prebuildGuns(); } // + the weapon geometries (first frame built the drawn gun: ~10 ms)
     this.hud.msg('欢迎来到索拉纳港 · 走近车辆按 F 上车', 5);
     const help = document.getElementById('help'); if (snap) help.style.display = 'none'; else setTimeout(() => { help.style.transition = 'opacity 1s'; help.style.opacity = 0; }, 20000);
     this.started = true;
@@ -529,6 +531,7 @@ export class Game {
           const yw = C.yaw + dy, px = Math.sin(yw) * cp * dist, pz = Math.cos(yw) * cp * dist, py = -sp * dist + height + du;
           const tt = this.city.col.raycast(target.x, target.y, target.z, target.x + px, target.y + py, target.z + pz); const fr = tt * Math.hypot(px, py, pz);
           const sc = Math.min(fr, dist) - 0.35 * Math.abs(dy) - 0.25 * du; if (fr > free0 + 0.3 && sc > best) { best = sc; by = dy; bu = du; } } }
+      if (typeof window !== 'undefined' && window.__CAMDBG) window.__CAMDBG.push({ target: [target.x, target.y, target.z].map((v) => +v.toFixed(2)), free0: +free0.toFixed(2), by, bu, t: +t.toFixed(3) });
       const k = snap ? 1 : 1 - Math.exp(-6 * dt); C.wy = (C.wy || 0) + (by - (C.wy || 0)) * k; C.wu = (C.wu || 0) + (bu - (C.wu || 0)) * k;
       if (Math.abs(C.wy) > 0.01 || C.wu > 0.01) { const yw = C.yaw + C.wy; want.set(target.x + Math.sin(yw) * cp * dist, target.y - sp * dist + height + C.wu, target.z + Math.cos(yw) * cp * dist);
         t = this.city.col.raycast(target.x, target.y, target.z, want.x, want.y, want.z); }

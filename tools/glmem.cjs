@@ -10,7 +10,7 @@ const smaps = () => { try { const out = cp.execSync(`ps -eo pid=,ppid=,comm=`).t
   const agg = {}; for (const [p, , c] of out) { if (!kids.has(p) || p === String(process.pid) || !/chrome/.test(c)) continue; let cur = null; for (const l of fs.readFileSync('/proc/' + p + '/smaps', 'utf8').split('\n')) { const m = l.match(/^[0-9a-f]+-[0-9a-f]+ (\S+) \S+ \S+ \S+\s*(.*)$/); if (m) { const nm = m[2] ? (m[2].startsWith('/') ? m[2].split('/').pop() : m[2]) : 'anon'; cur = m[1] + ' ' + nm.slice(0, 30); continue; } const r = l.match(/^Rss:\s+(\d+)/); if (r && cur) agg[cur] = (agg[cur] || 0) + +r[1]; } }
   return Object.entries(agg).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => k + ' ' + Math.round(v / 1024)).join(' | '); } catch (e) { return 'smaps err ' + e.message; } };
 const avail = () => +cp.execSync("free -m | awk '/Mem:/{print $7}'").toString().trim();
-let peak = 0; const iv = setInterval(() => { const r = rss(); if (r > peak) peak = r; }, 1000);
+let peak = 0, phase = 'load', peakPh = ''; const PH = {}; const TL = []; const t00 = Date.now(); const iv = setInterval(() => { const r = rss(); if (r > peak) { peak = r; peakPh = phase; } PH[phase] = Math.max(PH[phase] || 0, r); if (process.env.TL) TL.push([Math.round((Date.now() - t00) / 1000), phase, r]); }, +(process.env.TLMS || 1000)); // fix_pt7: peak per phase
 const INIT = () => {
   const T = window.__GLM = { buf: new Map(), tex: new Map(), rb: new Map(), bb: 0, tb: 0, rbb: 0, peakB: 0, peakT: 0 };
   const P = WebGL2RenderingContext.prototype; const bound = new Map(); let unit = 0; const texB = new Map();
@@ -62,10 +62,11 @@ srv.listen(0, async () => {
   await p.waitForFunction('window.__G && window.__G.ready', null, { polling: 500 });
   const c = await p.context().newCDPSession(p);
   const hu = async () => { const h = await c.send('Runtime.getHeapUsage'); return Math.round(h.usedSize / 1048576) + '/back' + Math.round((h.backingStorageSize || 0) / 1048576) + '/emb' + Math.round((h.embedderHeapUsedSize || 0) / 1048576); };
+  phase = 'ready'; console.log(TAG, 'LT', JSON.stringify(await p.evaluate('window.__LT || null')));
   console.log(TAG, 'ready', ((Date.now() - t0) / 1000).toFixed(0) + 's', 'rss', rss(), 'heap', await hu(), 'avail', avail(), 'peak', peak);
   console.log(TAG, 'SMAPS@ready', smaps()); if (process.env.PROGS) console.log(TAG, 'programs', await p.evaluate('__G.renderer.info.programs.length'));
   console.log(TAG, 'GL@ready', JSON.stringify(await p.evaluate('__GLM.summary()')));
-  for (let i = 0; i < FR; i++) { const t = Date.now(); await p.evaluate('void __G.tick(1/30, true)'); const fin = await p.evaluate('__G.finish ? __G.finish() : 0'); console.log(TAG, 'frame', i, ((Date.now() - t) / 1000).toFixed(1) + 's', 'rss', rss(), 'heap', await hu(), 'avail', avail(), 'peak', peak); if (avail() < 500) { console.log('LOW'); break; } }
+  for (let i = 0; i < FR; i++) { phase = 'f' + i; const t = Date.now(); await p.evaluate('void __G.tick(1/30, true)'); const fin = await p.evaluate('__G.finish ? __G.finish() : 0'); console.log(TAG, 'frame', i, ((Date.now() - t) / 1000).toFixed(1) + 's', 'rss', rss(), 'heap', await hu(), 'avail', avail(), 'peak', peak); if (avail() < 500) { console.log('LOW'); break; } }
   console.log(TAG, 'SMAPS@frames', smaps()); if (process.env.PROGS) console.log(TAG, 'programs', await p.evaluate('__G.renderer.info.programs.length'));
   console.log(TAG, 'GL@frames', JSON.stringify(await p.evaluate('__GLM.summary()')));
   if (process.env.DATALIST) console.log(TAG, 'DATATEX', JSON.stringify(await p.evaluate('[...__GLM.tex.values()].filter((o) => o.src === "data" || o.d > 1).sort((a, b) => b.b - a.b).slice(0, 25).map((o) => [o.w, o.h, o.d, o.f.toString(16), +(o.b / 1048576).toFixed(2)])')));
@@ -73,6 +74,7 @@ srv.listen(0, async () => {
   console.log(TAG, 'CENSUS', JSON.stringify(await p.evaluate(CENSUS), null, 1));
   await c.send('HeapProfiler.collectGarbage'); await p.waitForTimeout(1000);
   if (process.env.ABTRACK) { await c.send('HeapProfiler.collectGarbage'); await p.waitForTimeout(1500); console.log(TAG, 'AB', JSON.stringify(await p.evaluate('__ABsum()'), null, 1)); }
+  phase = 'end'; console.log(TAG, 'PHASEPEAK', JSON.stringify(PH), 'peakPhase', peakPh); if (process.env.TL) console.log(TAG, 'TL', JSON.stringify(TL.filter((x, i) => i % 3 === 0 || x[2] >= peak - 40)));
   console.log(TAG, 'END rss', rss(), 'heap', await hu(), 'peak', peak, 'PAGEERROR', perr);
   if (process.env.SHOT) { const d = await p.evaluate('void __G.render(), document.getElementById("c").toDataURL("image/jpeg", 0.85)'); fs.writeFileSync(process.env.SHOT, Buffer.from(d.split(',')[1], 'base64')); console.log('shot', process.env.SHOT); }
   clearInterval(iv); await b.close(); process.exit(0);

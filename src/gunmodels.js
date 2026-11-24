@@ -244,6 +244,7 @@ const BUILD = {
 const CACHE = {}; let MATS = null; const _p = new THREE.Vector3();
 const LOD_NEAR2 = 8 * 8;
 function build(id, hi) { const k = new Kit(hi); BUILD[id](k); return k.geometry(); }
+export function prebuildGuns() { let n = 0; for (const id in BUILD) if (!CACHE[id]) { CACHE[id] = [build(id, true), build(id, false)]; n++; } return n; } // fix_pt7 #1: behind the loading screen
 export function gunMesh(id) {
   if (!BUILD[id]) return null;
   if (!CACHE[id]) CACHE[id] = [build(id, true), build(id, false)];

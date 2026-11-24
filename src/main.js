@@ -253,7 +253,19 @@ async function load() {
       g.setAttribute('position', new THREE.Float32BufferAttribute(z9, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(z9, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(6).fill(0), 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(z9, 3));
       const m = new THREE.Mesh(g, mt); m.castShadow = m.receiveShadow = true; const kk = R.rtOn(A); try { renderer.compile({ traverse: (fn) => fn(m), traverseVisible() {} }, camera, scene); n++; } catch (e) { } R.rtOff(A, kk); g.dispose(); }
     LT.warmStream = n; };
-  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); warmStream(); if (SNAP) renderFrame(0); else frame(1 / 60); LT.warm = Math.round(performance.now() - t); };
+  // fix_pt7 #2 (?oldupload = old): every texture of the scene was first uploaded inside the hidden warm-up frame, i.e. all of them
+  // (~490 MB on map A) staged at once by the GL backend before that frame's submit: the first-frame RSS peak (2443 MB, glmem.cjs).
+  // Upload them here in ~UPMB batches and let the GL queue drain (finish) after each, so staging never holds more than one batch.
+  const uploadBatched = () => { if (Q.has('oldupload')) return null; const gl = renderer.getContext(); const props = renderer.properties; const seen = new Set(); const list = [];
+    const add = (t) => { if (!t || !t.isTexture || seen.has(t) || t.isRenderTargetTexture || t.isVideoTexture) return; seen.add(t); const im = t.image; if (!im) return; if (props.get(t).__webglInit) return; list.push(t); };
+    const fromMat = (m) => { for (const k in m) { const v = m[k]; if (v && v.isTexture) add(v); } if (m.uniforms) for (const k in m.uniforms) { const v = m.uniforms[k] && m.uniforms[k].value; if (v && v.isTexture) add(v); else if (Array.isArray(v)) v.forEach(add); } };
+    const mats = new Set(); scene.traverse((o) => { const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : []; for (const m of ms) if (!mats.has(m)) { mats.add(m); fromMat(m); } });
+    if (scene.background && scene.background.isTexture) add(scene.background); if (scene.environment) add(scene.environment);
+    const UP = +(Q.get('upmb') || 48) * 1048576; let acc = 0, n = 0, fin = 0; const t0 = performance.now();
+    for (const t of list) { const im = t.image; const w = im.width || 0, h = im.height || 0, d = im.depth || 1; try { renderer.initTexture(t); } catch (e) { continue; } n++;
+      acc += w * h * d * 4 * (t.generateMipmaps ? 1.33 : 1); if (acc >= UP) { gl.finish(); acc = 0; fin++; } }
+    if (acc) { gl.finish(); fin++; } return { n, fin, ms: Math.round(performance.now() - t0) }; };
+  const warm = async () => { if (!CYBER) releaseCpuAttrs(scene); if (Q.has('nowarm')) return; const t = performance.now(); if (!Q.has('noprecompile')) LT.precompile3 = await pre(false); warmStream(); LT.upload = uploadBatched(); if (SNAP) renderFrame(0); else frame(1 / 60); LT.warm = Math.round(performance.now() - t); };
   st.onclick = async () => { if (st.dataset.busy) return; st.dataset.busy = 1; game.start(); await warm(); document.getElementById('load').style.display = 'none'; };
   addEventListener('keydown', (e) => { if (e.code === 'KeyP') { W.photo(!post.dof); } });
   if (PROF) {

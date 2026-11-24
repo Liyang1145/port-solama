@@ -161,10 +161,26 @@ const CACHE = new Map();
 const SEAT_COL = [0x1c1c1e, 0x5e4330, 0x47484c, 0xa89c86, 0x3a2622];
 const ROLE_COL = { dash: 0x18181a, trim: 0x2c2c2f, head: 0x8e8a83, carpet: 0x1f1f20, alu: 0x8a8d92, wheel: 0x141415 };
 const SEP = new Set(['gauge', 'screen', 'mirror']);
+// fix_pt7 #1 (?oldbake = old): every (cabin, seat colour) pair was built + merged from scratch the first time a car with it spawned
+// (buildRaw + RoundedBox geometries + mergeGeometries ~30-45 ms with GC, inside g:manage / spawnCar while playing; 8 cabins x 5 seat
+// colours). Now the cabin is baked once (seat colour 0) and the other seat colours share its position / normal / uv attributes
+// with their own colour array (same values as a full bake: only the 'seat' vertices differ); prebakeInteriors() runs them behind
+// the loading screen.
+const OLDBAKE = typeof location !== 'undefined' && /[?&]oldbake\b/.test(location.search);
 function bake(C, seatIdx) {
   const k = JSON.stringify(C) + '|' + seatIdx; if (CACHE.has(k)) return CACHE.get(k);
+  if (OLDBAKE) { const out = bakeFull(C, seatIdx); CACHE.set(k, out); return out; }
+  const kb = JSON.stringify(C) + '|base'; let B = CACHE.get(kb); if (!B) { B = bakeFull(C, 0, true); CACHE.set(kb, B); }
+  const sc = SEAT_COL[seatIdx % SEAT_COL.length]; if (sc === SEAT_COL[0]) { CACHE.set(k, B); return B; }
+  const col = new THREE.Color().setHex(sc); const c = B.col0.slice(); for (const [a, n] of B.seatR) for (let i = a; i < a + n; i++) { c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
+  const g = new THREE.BufferGeometry(); for (const nm of ['position', 'normal', 'uv']) g.setAttribute(nm, B.main.attributes[nm]); g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  g.boundingSphere = B.main.boundingSphere.clone(); g.boundingBox = B.main.boundingBox.clone();
+  const out = { ...B, main: g }; CACHE.set(k, out); return out;
+}
+export function prebakeInteriors(list) { if (OLDBAKE) return 0; let n = 0; for (const C of list) for (let s = 0; s < SEAT_COL.length; s++) { bake(C, s); n++; } return n; }
+function bakeFull(C, seatIdx, base = false) {
   const { grp, spin, grips, F, zD } = buildRaw(C); grp.updateMatrixWorld(true);
-  const main = [], sep = {}, spinList = []; const col = new THREE.Color();
+  const main = [], sep = {}, spinList = []; const col = new THREE.Color(); const seatR = []; let mv = 0;
   const norm = (g, role) => { g = g.index ? g.toNonIndexed() : g.clone(); for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(a)) g.deleteAttribute(a);
     const n = g.attributes.position.count; if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
     col.setHex(role === 'seat' ? SEAT_COL[seatIdx % SEAT_COL.length] : ROLE_COL[role] ?? 0x202022); const c = new Float32Array(n * 3); for (let i = 0; i < n; i++) { c[i * 3] = col.r; c[i * 3 + 1] = col.g; c[i * 3 + 2] = col.b; }
@@ -172,11 +188,12 @@ function bake(C, seatIdx) {
   grp.traverse((o) => { if (!o.isMesh) return; let p = o.parent, inSpin = false; while (p) { if (p === spin) inSpin = true; p = p.parent; }
     const r = o.userData.role; const g = norm(o.geometry, r);
     if (inSpin) { g.applyMatrix4(o.matrix); spinList.push(g); }
-    else { g.applyMatrix4(o.matrixWorld); if (SEP.has(r)) (sep[r] ||= []).push(g); else main.push(g); } });
+    else { g.applyMatrix4(o.matrixWorld); if (SEP.has(r)) (sep[r] ||= []).push(g); else { if (r === 'seat') seatR.push([mv, g.attributes.position.count]); mv += g.attributes.position.count; main.push(g); } } });
   const parts = {}; for (const r in sep) parts[r] = mergeGeometries(sep[r]);
   spin.updateMatrixWorld(true);
   const out = { main: mergeGeometries(main), parts, spinGeo: mergeGeometries(spinList), spinPos: spin.getWorldPosition(new THREE.Vector3()), spinQuat: spin.getWorldQuaternion(new THREE.Quaternion()), grips, F, zD };
-  CACHE.set(k, out); return out;
+  if (base) { out.main.computeBoundingSphere(); out.main.computeBoundingBox(); out.col0 = out.main.attributes.color.array.slice(); out.seatR = seatR; }
+  return out;
 }
 // one cabin instance. group.userData.near = the detail meshes (lit cluster / screen / mirror / wheel) hidden at mid distance
 export function buildInterior(C, seatIdx = 0) {

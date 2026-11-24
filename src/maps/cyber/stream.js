@@ -25,17 +25,24 @@ const nullCol = { add() {} };
 
 // fix_pt7 #1: World.append of every parcel bucket (transformed by its matrix) into one bucket per key, done once into typed arrays;
 // same vertex order / arithmetic (Vector3.applyMatrix4 / applyMatrix3 + normalize) and the same colour / custom-attribute padding
+// Each parcel bucket is transformed right after its parcel was generated into compact typed arrays (off-heap: the parcel's JS
+// arrays die young instead of being held, promoted, until the chunk is complete), then the merge only concatenates.
 const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _nm = new THREE.Matrix3();
+function packPart(o, m, sizes) {
+  _nm.getNormalMatrix(m); const vc = o.vc, op = o.p, on = o.n, ou = o.uv; const P = new Float32Array(vc * 3), N = new Float32Array(vc * 3), UV = new Float32Array(vc * 2);
+  for (let i = 0; i < vc; i++) { const j = i * 3; _v.set(op[j], op[j + 1], op[j + 2]).applyMatrix4(m); P[j] = _v.x; P[j + 1] = _v.y; P[j + 2] = _v.z;
+    _n.set(on[j], on[j + 1], on[j + 2]).applyMatrix3(_nm).normalize(); N[j] = _n.x; N[j + 1] = _n.y; N[j + 2] = _n.z; UV[i * 2] = ou[i * 2]; UV[i * 2 + 1] = ou[i * 2 + 1]; }
+  const CU = {}; for (const k in sizes) { const src = o.custom[k]; CU[k] = src && src.length ? new Float32Array(src) : null; }
+  return { vc, P, N, UV, C: o.c.length ? new Float32Array(o.c) : null, CU, idx: new Uint32Array(o.idx) };
+}
 function mergeParts(mat, list) {
   const sizes = ATTRS[mat] || {}; let vc = 0, ic = 0, cl = 0; const cu = {}; for (const k in sizes) cu[k] = 0;
-  for (const [o] of list) { if (o.c.length) cl += o.c.length; else if (cl) cl += o.vc * 3; for (const k in sizes) { const src = o.custom[k]; cu[k] += src && src.length ? src.length : o.vc * sizes[k]; } vc += o.vc; ic += o.idx.length; }
+  for (const o of list) { if (o.C) cl += o.C.length; else if (cl) cl += o.vc * 3; for (const k in sizes) cu[k] += o.CU[k] ? o.CU[k].length : o.vc * sizes[k]; vc += o.vc; ic += o.idx.length; }
   const P = new Float32Array(vc * 3), N = new Float32Array(vc * 3), UV = new Float32Array(vc * 2), C = cl ? new Float32Array(cl) : null; const CU = {}, co = {}; for (const k in sizes) { CU[k] = new Float32Array(cu[k]); co[k] = 0; }
   const I = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic); let base = 0, ii = 0, ci = 0;
-  for (const [o, m] of list) { _nm.getNormalMatrix(m); const op = o.p, on = o.n, ou = o.uv;
-    for (let i = 0; i < o.vc; i++) { const j = (base + i) * 3; _v.set(op[i * 3], op[i * 3 + 1], op[i * 3 + 2]).applyMatrix4(m); P[j] = _v.x; P[j + 1] = _v.y; P[j + 2] = _v.z;
-      _n.set(on[i * 3], on[i * 3 + 1], on[i * 3 + 2]).applyMatrix3(_nm).normalize(); N[j] = _n.x; N[j + 1] = _n.y; N[j + 2] = _n.z; UV[(base + i) * 2] = ou[i * 2]; UV[(base + i) * 2 + 1] = ou[i * 2 + 1]; }
-    if (o.c.length) { C.set(o.c, ci); ci += o.c.length; } else if (ci) { C.fill(1, ci, ci + o.vc * 3); ci += o.vc * 3; }
-    for (const k in sizes) { const src = o.custom[k]; if (src && src.length) { CU[k].set(src, co[k]); co[k] += src.length; } else co[k] += o.vc * sizes[k]; }
+  for (const o of list) { P.set(o.P, base * 3); N.set(o.N, base * 3); UV.set(o.UV, base * 2);
+    if (o.C) { C.set(o.C, ci); ci += o.C.length; } else if (ci) { C.fill(1, ci, ci + o.vc * 3); ci += o.vc * 3; }
+    for (const k in sizes) { const src = o.CU[k]; if (src) { CU[k].set(src, co[k]); co[k] += src.length; } else co[k] += o.vc * sizes[k]; }
     const oi = o.idx; for (let q = 0; q < oi.length; q++) I[ii++] = base + oi[q];
     base += o.vc; }
   const g = new THREE.BufferGeometry();
@@ -194,7 +201,7 @@ export class Stream {
     setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); CLUT_CTX.m = null; // b_tower3: crown sizes/content from the seed
     { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
       p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
-    if (W instanceof Map) { for (const b of lw.buckets.values()) { if (!b.vc) continue; const k = b.mat + '|' + Math.floor(p.x / 1e7) + '|' + Math.floor(p.z / 1e7); let e = W.get(k); if (!e) W.set(k, e = { mat: b.mat, list: [] }); e.list.push([b, m]); } }
+    if (W instanceof Map) { for (const b of lw.buckets.values()) { if (!b.vc) continue; const k = b.mat + '|' + Math.floor(p.x / 1e7) + '|' + Math.floor(p.z / 1e7); let e = W.get(k); if (!e) W.set(k, e = { mat: b.mat, list: [] }); e.list.push(packPart(b, m, ATTRS[b.mat] || {})); } }
     else for (const b of lw.buckets.values()) { if (!b.vc) continue; W.b(b.mat, p.x, p.z).append(b, m); }
     if (this.onParcel) this.onParcel(c, p, m); // r6.4 b_rooftop: hand this parcel's logged roof decks to roofs.js
   }

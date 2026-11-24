@@ -8,10 +8,25 @@ const DROP_JS = CYBER;
 // fresh EMPTY arrays (vc = 0) and keeps the bucket in its map, so a bucket reference someone still holds stays usable.
 const RESET_JS = !CYBER && !(typeof location !== 'undefined' && new URLSearchParams(location.search).has('keepjs'));
 
+const OLDQUAD = typeof location !== 'undefined' && /[?&]oldquad\b/.test(location.search); const ZERO4 = [0, 0, 0, 0];
 export class GeoBucket {
   constructor(attrs = {}) { this.p = []; this.n = []; this.uv = []; this.idx = []; this.c = []; this.custom = {}; this.attrSizes = attrs; for (const k in attrs) this.custom[k] = []; this.vc = 0; }
   // add a quad given 4 corners (counter-clockwise when viewed from the front), uv per corner, attribute values constant
   quad(a, b, c, d, uvs, at = {}, col = null) {
+    if (OLDQUAD) return this.quadOld(a, b, c, d, uvs, at, col);
+    // fix_pt7 #1 (?oldquad = old): same arithmetic as subVectors / cross / normalize, without the two Vector3 + four [a,b,c,d]
+    // arrays + a [0,0,0,0] per vertex per missing custom key that every quad allocated (young-gen churn of the generators)
+    const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z, wx = d.x - a.x, wy = d.y - a.y, wz = d.z - a.z;
+    let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx; const ln = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; const il = 1 / ln; nx *= il; ny *= il; nz *= il;
+    const base = this.vc; const P = this.p, N = this.n, U = this.uv;
+    P.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, d.x, d.y, d.z); N.push(nx, ny, nz, nx, ny, nz, nx, ny, nz, nx, ny, nz);
+    U.push(uvs[0], uvs[1], uvs[2], uvs[3], uvs[4], uvs[5], uvs[6], uvs[7]);
+    for (const k in this.custom) { const val = at[k] || ZERO4; const n = this.attrSizes[k]; const C = this.custom[k]; for (let i = 0; i < 4; i++) for (let j = 0; j < n; j++) C.push(val[j] ?? 0); }
+    if (col) this.c.push(col[0], col[1], col[2], col[0], col[1], col[2], col[0], col[1], col[2], col[0], col[1], col[2]);
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    this.vc += 4;
+  }
+  quadOld(a, b, c, d, uvs, at = {}, col = null) {
     const nx = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a)).normalize();
     const base = this.vc;
     for (let i = 0; i < 4; i++) {
