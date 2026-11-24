@@ -183,7 +183,7 @@ export let SPORT_CARVED = 0;
 function cloneSport(color) {
   const g = new THREE.Group(); const m = sportProto.clone(true); m.rotation.y = Math.PI; g.add(m);
   const wheels = [];
-  m.traverse((o) => { if (o.isMesh && o.userData.paint) o.material = paintMat(color); if (/^wheel_(f|r)(l|r)$/.test(o.name)) { o.rotation.order = 'YXZ'; wheels.push({ node: o, front: o.name[6] === 'f', r: 0.36 }); } });
+  m.traverse((o) => { if (o.isMesh && o.userData.paint) o.material = paintMat(color); if (/^wheel_(f|r)(l|r)$/.test(o.name)) { o.rotation.order = 'YXZ'; wheels.push({ node: o, front: o.name[6] === 'f', r: 0.36, flip: -1 }); } });
   // r6.2 mid-engine cabin (low seats, wraparound dash, bulkhead behind the seats) + back-face lining of the shell
   const cabin = buildInterior(SPORT_CABIN, Math.abs(Math.round(color * 0.000371)) % 5); g.add(cabin.group); cabin.liner = [];
   const IMt = interiorMats(); const lin = [];
@@ -331,7 +331,7 @@ function cloneModel(k, color, type) {
     const a = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.12, 0.25), new THREE.MeshBasicMaterial({ color: 0xff2020 })); a.position.x = -0.3; const b = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.12, 0.25), new THREE.MeshBasicMaterial({ color: 0x2050ff })); b.position.x = 0.3;
     lightbar.add(a, b); g.add(lightbar);
   }
-  if (type === 'taxi') { const sg = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.28), prep(new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe9a8, emissiveIntensity: 0.6 }), 'taxisign')); sg.position.set(0, d.H + 0.08, -0.1); g.add(sg); }
+  if (type === 'taxi') { const sg = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.18, 0.28), prep(new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe9a8, emissiveIntensity: 0.6 }), 'taxisign')); sg.position.set(0, d.H + 0.08, -0.1); sg.userData.taxiSign = true; g.add(sg); }
   let cabin = null;
   if (CABIN[k]) { const seatIdx = type === 'police' || type === 'taxi' ? 0 : Math.abs(Math.round((typeof color === 'number' ? color : 7) * 0.000371)) % 5; cabin = buildInterior(CABIN[k], seatIdx); m.add(cabin.group);
     m.traverse((o) => { if (o.name === 'liner') cabin.liner = o; }); }
@@ -379,19 +379,19 @@ TYPES.taxi = { ...TYPES.sedan }; TYPES.police = { ...TYPES.sedan };
 function buildProcCar(type, color) {
   const T = TYPES[type]; const S = shared(); const g = new THREE.Group();
   const paint = paintMat(color);
-  const body = new THREE.Mesh(bodyGeo(type, T), paint); body.castShadow = true; body.receiveShadow = true; g.add(body);
+  const body = new THREE.Mesh(bodyGeo(type, T), paint); body.castShadow = true; body.receiveShadow = true; body.userData.paint = true; g.add(body);
   const sill = new THREE.Mesh(GCACHE.get('sill' + type) || GCACHE.set('sill' + type, new THREE.BoxGeometry(T.W - 0.06, 0.1, T.L * 0.98)).get('sill' + type), S.black); sill.position.y = 0.3; g.add(sill);
   if (type === 'police') { // two-tone doors
     const door = new THREE.Mesh(extrudeSide([[-1.3, 0.34], [1.2, 0.34], [1.2, 0.9], [-1.3, 0.93]], T.W + 0.02, 0.05), paintMat(0xf4f4f4)); g.add(door);
   }
   const cabW = T.W - 0.2;
   const cabG = (() => { const k = 'cab' + type; if (GCACHE.has(k)) return GCACHE.get(k); const gg = extrudeSide(T.cab, cabW, 0.06).clone(); const p = gg.attributes.position; const yb = T.cab[0][1]; for (let i = 0; i < p.count; i++) { const y = p.getY(i); p.setX(i, p.getX(i) * (1 - Math.max(0, y - yb) * 0.22)); } gg.computeVertexNormals(); GCACHE.set(k, gg); return gg; })();
-  const cab = new THREE.Mesh(cabG, T.solidCab ? paint : S.glass); cab.castShadow = true; g.add(cab);
+  const cab = new THREE.Mesh(cabG, T.solidCab ? paint : S.glass); cab.castShadow = true; if (T.solidCab) cab.userData.paint = true; g.add(cab);
   if (T.solidCab) { // van: side windows only at the front
     const win = new THREE.Mesh(extrudeSide([[1.85, 1.2], [1.38, 2.05], [0.7, 2.05], [0.7, 1.2]], cabW + 0.03, 0.03), S.glass); g.add(win);
   } else { // roof panel + pillars in body colour
-    const c = T.cab; const roof = new THREE.Mesh(extrudeSide([[c[1][0] - 0.05, c[1][1] - 0.04], [c[2][0] + 0.05, c[2][1] - 0.04], [c[2][0] + 0.05, c[2][1] + 0.02], [c[1][0] - 0.05, c[1][1] + 0.02]], cabW + 0.01, 0.03), paint); roof.castShadow = true; g.add(roof);
-    const pil = new THREE.Mesh(extrudeSide([[0.0, 0.92], [0.12, 0.92], [-0.02, 1.4], [-0.14, 1.4]], cabW + 0.025, 0.02), paint); g.add(pil);
+    const c = T.cab; const roof = new THREE.Mesh(extrudeSide([[c[1][0] - 0.05, c[1][1] - 0.04], [c[2][0] + 0.05, c[2][1] - 0.04], [c[2][0] + 0.05, c[2][1] + 0.02], [c[1][0] - 0.05, c[1][1] + 0.02]], cabW + 0.01, 0.03), paint); roof.castShadow = true; roof.userData.paint = true; g.add(roof);
+    const pil = new THREE.Mesh(extrudeSide([[0.0, 0.92], [0.12, 0.92], [-0.02, 1.4], [-0.14, 1.4]], cabW + 0.025, 0.02), paint); pil.userData.paint = true; g.add(pil);
   }
   const L = T.L / 2;
   // lights, grille, bumpers, plates, mirrors
@@ -464,9 +464,10 @@ export class Vehicle {
     this.radius = Math.max(this.dims.W, this.dims.L) * 0.5;
   }
   get speed() { return this.vx * Math.sin(this.yaw) + this.vz * Math.cos(this.yaw); }
-  place(x, z, yaw) { this.x = x; this.z = z; this.yaw = yaw; this.vx = this.vz = 0; this.sync(0); }
+  place(x, z, yaw) { this.x = x; this.z = z; this.yaw = yaw; this.vx = this.vz = 0; this.yawRate = this.steer = this.pitch = this.roll = 0; this.inWater = false; this.sync(0); }
   forward(out = new THREE.Vector3()) { return out.set(Math.sin(this.yaw), 0, Math.cos(this.yaw)); }
   update(dt, city, wet = 0) {
+    if (!(dt > 0)) { this.sync(0); return; }
     const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw), rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     let vl = this.vx * fx + this.vz * fz, vt = this.vx * rx + this.vz * rz;
     const inp = this.input; const dead = this.health <= 0;
@@ -500,7 +501,7 @@ export class Vehicle {
     const r = this.dims.W * 0.5; const half = this.dims.L * 0.5 - r;
     for (const k of [-1, 0, 1]) {
       const cx = this.x + nfx * half * k, cz = this.z + nfz * half * k;
-      const res = city.col.resolve(cx, cz, r, 0.5, undefined, this.y + this.dims.H, this.y); // b_canopycol: body height vs overhead boxes
+      const res = city.col.resolve(cx, cz, r, this.y + 0.5, undefined, this.y + this.dims.H, this.y); // b_canopycol: body height vs overhead boxes
       if (res.hit) {
         const dx = res.x - cx, dz = res.z - cz; this.x += dx; this.z += dz;
         const vn = this.vx * res.nx + this.vz * res.nz;
@@ -522,12 +523,13 @@ export class Vehicle {
   sync(dt) {
     this.root.position.set(this.x, this.y, this.z); this.root.rotation.y = this.yaw;
     this.body.rotation.set(this.pitch, 0, this.roll);
-    for (const w of this.wheels) { w.node.rotation.x = this.spin / w.r; w.node.rotation.y = w.front ? this.steer : 0; }
+    for (const w of this.wheels) { w.node.rotation.x = (this.spin / w.r) * (w.flip || 1); w.node.rotation.y = w.front ? this.steer : 0; }
     if (this.cabin && this.cabinOn) this.cabin.steer.rotation.z = -this.steer * 4.2; // steering wheel follows the road wheels (~14:1 feel)
     if (this.lightbar) {
       const on = this.siren; const t = performance.now() / 1000; const ph = Math.floor(t * 6) % 2;
-      this.lightbar.children[0].material.color.setScalar(on && ph ? 4 : 0.3).multiply(new THREE.Color(1, 0.1, 0.1));
-      this.lightbar.children[1].material.color.setScalar(on && !ph ? 4 : 0.3).multiply(new THREE.Color(0.15, 0.25, 1));
+      const rK = on && ph ? 4 : 0.3, bK = on && !ph ? 4 : 0.3;
+      this.lightbar.children[0].material.color.setRGB(rK, rK * 0.1, rK * 0.1);
+      this.lightbar.children[1].material.color.setRGB(bK * 0.15, bK * 0.25, bK);
     }
   }
   // r6.2 cabin detail LOD (interior meshes + shell lining only near the camera)
@@ -542,7 +544,11 @@ export class Vehicle {
   }
   // r6.2 in-cabin camera: between the front seats at eye height (the old fixed y=1.25 clipped through low roofs)
   cockpitCam(out = new THREE.Vector3()) { this.root.updateMatrixWorld(true); const c = this.cabin; if (!c) return out.set(this.x, this.y + 1.1, this.z).addScaledVector(this.forward(), 0.3); const s = c.seats.driver; out.set(s.x * 0.35, s.y + 0.68, s.z + 0.12); return (c.group.parent).localToWorld(out); }
-  dispose() { this.scene.remove(this.root); }
+  dispose() {
+    if (this.lightbar) { for (const c of this.lightbar.children) { c.geometry?.dispose(); c.material?.dispose(); } }
+    this.root.traverse((o) => { if (o.userData && o.userData.taxiSign) { o.geometry?.dispose(); o.material?.dispose(); } });
+    this.scene.remove(this.root);
+  }
 }
 
 // --------------------------------------------------------------------------- Traffic ----
@@ -659,10 +665,12 @@ export class Traffic {
     else { let tot = options.reduce((s, o) => s + o.w, 0), r = rng() * tot; ch = options[0]; for (const o of options) { r -= o.w; if (r <= 0) { ch = o; break; } } }
     let lane = ch.uturn ? 0 : (ch.seg.axis === seg.axis ? a.lane : (rng() < 0.5 ? 0 : 1)); if (ch.seg.axis === 'z' && ch.seg.c === 290 && ch.dir > 0) lane = 0;
     const startS = ch.dir > 0 ? ch.seg.a0 : ch.seg.a1;
-    const to = this.lanePoint(ch.seg, ch.dir, lane, ch.uturn ? endS : startS);
-    const ctrl = ch.uturn ? from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(seg.axis === 'x' ? a.dir * 9 : 0, 0, seg.axis === 'z' ? a.dir * 9 : 0))
-      : (ch.seg.axis === seg.axis ? from.clone().add(to).multiplyScalar(0.5) : new THREE.Vector3(seg.axis === 'z' ? from.x : to.x, 0, seg.axis === 'z' ? to.z : from.z));
-    const pts = []; for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3().copy(from).multiplyScalar((1 - t) ** 2).addScaledVector(ctrl, 2 * t * (1 - t)).addScaledVector(to, t * t)); }
+    const uEnd = ch.uturn ? endS - a.dir * 8 : endS;
+    const from2 = ch.uturn ? this.lanePoint(seg, a.dir, a.lane, uEnd) : from;
+    const to = this.lanePoint(ch.seg, ch.dir, lane, ch.uturn ? uEnd : startS);
+    const ctrl = ch.uturn ? from2.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(seg.axis === 'x' ? a.dir * 3.5 : 0, 0, seg.axis === 'z' ? a.dir * 3.5 : 0))
+      : (ch.seg.axis === seg.axis ? from2.clone().add(to).multiplyScalar(0.5) : new THREE.Vector3(seg.axis === 'z' ? from2.x : to.x, 0, seg.axis === 'z' ? to.z : from2.z));
+    const pts = []; for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3().copy(from2).multiplyScalar((1 - t) ** 2).addScaledVector(ctrl, 2 * t * (1 - t)).addScaledVector(to, t * t)); }
     return { pts, next: { seg: ch.seg, dir: ch.dir, lane }, straight: !ch.uturn && ch.seg.axis === seg.axis };
   }
   update(dt, player, others) {
@@ -671,16 +679,17 @@ export class Traffic {
     const tgt = new THREE.Vector3();
     for (const v of this.cars) {
       const a = v.ai; if (!a || v.driver === 'player') continue;
-      if (a.mode === 'flee' || a.mode === 'dead') { if (a.mode === 'dead') { v.input.throttle = 0; v.input.handbrake = true; } }
+      if (a.mode === 'dead') { v.input.throttle = 0; v.input.handbrake = true; continue; }
       const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
       let desired = a.cruise;
       if (a.mode === 'lane') {
         const seg = a.seg; const s = seg.axis === 'z' ? v.z : v.x; const endS = a.dir > 0 ? seg.a1 : seg.a0;
         const remain = (endS - s) * a.dir;
-        if (remain < 3) { const pl = this.planTurn(v); a.mode = 'turn'; a.path = pl; a.pi = 1; continue; }
+        const hasLight = this.inter.has(Math.round(seg.axis === 'z' ? seg.c : endS + a.dir * 7) + ',' + Math.round(seg.axis === 'z' ? endS + a.dir * 7 : seg.c));
+        const isPortal = !hasLight && this.rib && this.rib.portal && seg.axis === 'x' && Math.abs(seg.c) < 0.5 && a.dir < 0 && Math.abs(endS - seg.a0) < 1;
+        if (remain < (!hasLight && !isPortal ? 11 : 3)) { const pl = this.planTurn(v); a.mode = 'turn'; a.path = pl; a.pi = 1; continue; }
         // traffic light at the end of this segment
         const myAxisGreen = (seg.axis === 'z' && this.phase === 0) || (seg.axis === 'x' && this.phase === 1);
-        const hasLight = this.inter.has(Math.round(seg.axis === 'z' ? seg.c : endS + a.dir * 7) + ',' + Math.round(seg.axis === 'z' ? endS + a.dir * 7 : seg.c));
         if (hasLight && !myAxisGreen && remain > 2.5 && remain < 26) desired = Math.min(desired, Math.max(0, (remain - 4.5) * 0.9));
         if (remain < 18) desired = Math.min(desired, 8);
         this.lanePoint(seg, a.dir, a.lane, s + a.dir * (7 + Math.abs(v.speed) * 0.5), tgt);
@@ -690,14 +699,15 @@ export class Traffic {
         tgt.copy(p); desired = a.path.straight ? a.cruise : 6.5;
         if (a.pi >= P.length - 1 && Math.hypot(p.x - v.x, p.z - v.z) < 4.5) { const nx = a.path.next; Object.assign(a, nx); a.mode = nx.mode || 'lane'; a.path = null; }
       } else if (a.mode === 'rib') {
-        const pc = a.pc; const path = pc.road.path; path.nearest(v.x, v.z, this._nq, a.s, 20); a.s = this._nq.s;
+        const pc = a.pc; const path = pc.road.path; path.nearest(v.x, v.z, this._nq, a.s, 20);
+        let rs = this._nq.s; if (pc.s1 > path.len && rs < pc.s0 - 10) rs += path.len; a.s = rs;
         const remain = a.dir > 0 ? pc.s1 - a.s : a.s - pc.s0;
         if (remain < 3) { a.path = this.planRib(v); a.mode = 'turn'; a.pi = 1; continue; }
         if (remain < 18) desired = Math.min(desired, 9);
         const p1 = path.at(a.s), p2 = path.at(a.s + a.dir * 30); const bend = Math.abs(p1.tx * p2.tz - p1.tz * p2.tx); desired = Math.min(desired, a.cruise * (1 - bend * 0.6));
         this.ribPoint(pc, a.dir, a.lane, a.s + a.dir * (7 + Math.abs(v.speed) * 0.5), tgt);
       } else if (a.mode === 'chase' || a.mode === 'flee') {
-        tgt.copy(a.target || player.pos); desired = a.mode === 'chase' ? a.chaseSpeed || 24 : 26;
+        tgt.copy(a.target || player.pos); desired = a.mode === 'chase' ? (a.chaseSpeed ?? 24) : 26;
       }
       // obstacle check: cars / player / peds ahead
       let block = 99;
@@ -713,18 +723,31 @@ export class Traffic {
       const ang = angWrap(Math.atan2(tgt.x - v.x, tgt.z - v.z) - v.yaw);
       v.input.steer = clamp(ang * 2.2, -1, 1);
       const sp = v.speed;
+      if (desired <= 0) { v.input.throttle = 0; v.input.handbrake = true; a.stuck = 0; a.revT = 0; continue; }
       v.input.throttle = sp < desired - 0.5 ? clamp((desired - sp) * 0.4, 0.15, 1) : sp > desired + 0.8 ? -clamp((sp - desired) * 0.35, 0.2, 1) : 0;
       v.input.handbrake = false;
       if (a.mode === 'chase' && Math.abs(ang) > 1.6 && Math.abs(sp) < 6) { v.input.throttle = -0.8; v.input.steer = -Math.sign(ang); }
-      // stuck detection -> nudge back to lane
-      if (Math.abs(sp) < 0.4 && desired > 3) { a.stuck += dt; if (a.stuck > 4) { v.input.throttle = -1; v.input.steer = -v.input.steer; if (a.stuck > 6) a.stuck = 0; } } else a.stuck = 0;
+      // stuck detection -> reverse cleanly for 1.6 s instead of cancelling once |sp| > 0.4
+      if (a.revT > 0) { a.revT -= dt; v.input.throttle = -0.85; v.input.steer = -v.input.steer; v.input.handbrake = false; }
+      else if (Math.abs(sp) < 0.4 && desired > 3) { a.stuck += dt; if (a.stuck > 4) { a.revT = 1.6; a.stuck = 0; } } else a.stuck = 0;
     }
   }
 }
 
 export function setCarNight(n) { setInteriorNight(n); const S = shared(); S.head.emissiveIntensity = 0.3 + n * 10; S.tail.emissiveIntensity = 0.4 + n * 5; S.drl.emissiveIntensity = 1.2 + n * 3.5; S.tlens.emissiveIntensity = 0.2 + n * 1.6; S.hglow.opacity = n * 0.85; S.tglow.opacity = n * 0.6; S.hglow.visible = S.tglow.visible = n > 0.02; }
 // v4.0: local street-level reflection probe for paint / glass / chrome (main.js refreshes it around the camera)
+let lastCarEnv = null, lastCarEnvK = 1;
 export function setCarEnv(tex, k = 1) {
+  lastCarEnv = tex; lastCarEnvK = k;
   const S = shared(); const ms = [...matCache.values(), S.glass, S.chrome, S.rim, S.lens, S.tlens];
   for (const m of ms) { if (m.envMap !== tex) { m.envMap = tex; m.needsUpdate = true; } m.envMapIntensity = k; }
+}
+export function setVehiclePaint(v, color) {
+  const pm = paintMat(color);
+  if (lastCarEnv && pm.envMap !== lastCarEnv) { pm.envMap = lastCarEnv; pm.envMapIntensity = lastCarEnvK; pm.needsUpdate = true; }
+  v.root.traverse((o) => {
+    if (!o.isMesh || !o.userData.paint) return;
+    if (Array.isArray(o.material)) { o.material = o.material.slice(); o.material[o.userData.paintSlot || 0] = pm; }
+    else o.material = pm;
+  });
 }

@@ -122,5 +122,23 @@ function buildIndex(edges) {
     for (const [e, i] of l) { if (!legacyToo && e.legacy) continue; const q = projSeg([x, z], e.pts[i], e.pts[i + 1]); if (q.d < e.hw + e.sw + 1 && (!best || q.d - e.hw < best.d - best.e.hw)) best = { e, d: q.d, s: e.cum[i] + (e.cum[i + 1] - e.cum[i]) * q.t }; }
     return best;
   };
-  return { near };
+  // wider lookup for routing / traffic attach (includes Deco sidewalks & POIs within maxD metres)
+  const nearAny = (x, z, maxD = 80) => {
+    const tight = near(x, z, true); if (tight) return tight;
+    const gx0 = Math.floor(x / C), gz0 = Math.floor(z / C), R = Math.ceil(maxD / C);
+    let best = null;
+    for (let r = 0; r <= R; r++) {
+      for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+        if (r > 0 && Math.abs(dx) < r && Math.abs(dz) < r) continue;
+        const l = map.get((gx0 + dx) * 100003 + (gz0 + dz)); if (!l) continue;
+        for (const [e, i] of l) {
+          const q = projSeg([x, z], e.pts[i], e.pts[i + 1]);
+          if (q.d <= maxD && (!best || q.d < best.d)) best = { e, d: q.d, s: e.cum[i] + (e.cum[i + 1] - e.cum[i]) * q.t };
+        }
+      }
+      if (best && best.d <= (r + 0.5) * C) break;
+    }
+    return best;
+  };
+  return { near, nearAny };
 }

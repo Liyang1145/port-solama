@@ -56,7 +56,7 @@ uniform float uHue, uVal, uSat, uSkin, uTint, uOpq;
 vec3 rgb2hsv(vec3 c){ vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g)); vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y); float e = 1.0e-10; return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x); }
 vec3 hsv2rgb(vec3 c){ vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0); vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www); return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y); }`;
 const TINT_APPLY = `{ vec3 hsv = rgb2hsv(diffuseColor.rgb);
-  float skin = uSkin * smoothstep(0.13, 0.08, hsv.x) * smoothstep(0.12, 0.25, hsv.y) * smoothstep(0.7, 0.5, hsv.y) * smoothstep(0.15, 0.3, hsv.z);
+  float skin = uSkin * (1.0 - smoothstep(0.08, 0.13, hsv.x)) * smoothstep(0.12, 0.25, hsv.y) * (1.0 - smoothstep(0.5, 0.7, hsv.y)) * smoothstep(0.15, 0.3, hsv.z);
   vec3 t = hsv2rgb(vec3(fract(hsv.x + uHue), clamp(hsv.y * uSat, 0.0, 1.0), clamp(hsv.z * uVal, 0.0, 1.0)));
   diffuseColor.rgb = mix(t, diffuseColor.rgb, skin); }`;
 
@@ -452,8 +452,14 @@ export class Character {
     this.deathA = this.deathF || this.deathB || null;
     for (const k in this.A) { this.A[k].w = k === 'idle' ? 1 : 0; this.A[k].weight = this.A[k].w; if (!LOOPED.includes(k)) this.A[k].stop(); else this.A[k].play(); }
     this._lp = null; this.idleT = -3; this.var = null;
+    this.swimW = 0; this.aimW = 0; this.hitW = 0; this.landW = 0; this.airW = 0; this.mv.set(0, 0);
   }
-  dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); if (this.phone) this.scene.remove(this.phone); }
+  dispose() {
+    this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); if (this.phone) this.scene.remove(this.phone);
+    if (this.mixer) this.mixer.uncacheRoot(this.model);
+    const skels = new Set();
+    this.model.traverse((o) => { if (o.isSkinnedMesh && o.skeleton && !skels.has(o.skeleton)) { skels.add(o.skeleton); o.skeleton.dispose(); } });
+  }
 }
 Character.lookTarget = null;
 let PHONE_G = null; const PHONE_MAT = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.25 });
@@ -580,7 +586,7 @@ export class Pedestrians {
         const nx = c.pos.x + Math.sin(c.yaw) * sp * dt, nz = c.pos.z + Math.cos(c.yaw) * sp * dt;
         const r = this.city.col.resolve(nx, nz, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z;
         if (r.hit) c.yaw += 1.2 * dt * 4;
-        a.t += dt; if (a.t > 12) { if (a.w) { a.mode = 'line'; const q = a.w.road.path.nearest(c.pos.x, c.pos.z); a.s = Math.min(a.w.s1 - 1, Math.max(a.w.s0 + 1, q.s)); } else if (a.path) { a.mode = 'walk'; let bu = 0, bd = 1e9; for (let u = 0; u < a.path.L; u += 3) { const q = this.pathPoint(a.path, u); const d = (q.x - c.pos.x) ** 2 + (q.z - c.pos.z) ** 2; if (d < bd) { bd = d; bu = u; } } a.u = bu; } else { a.mode = 'walk'; a.u = this.nearestU(a.loop, c.pos); } }
+        a.t += dt; if (a.t > 12) { if (a.w) { a.mode = 'line'; const q = a.w.road.path.nearest(c.pos.x, c.pos.z); let qs = q.s; if (a.w.s1 > a.w.road.path.len && qs < a.w.s0 - 10) qs += a.w.road.path.len; a.s = Math.min(a.w.s1 - 1, Math.max(a.w.s0 + 1, qs)); } else if (a.path) { a.mode = 'walk'; let bu = 0, bd = 1e9; for (let u = 0; u < a.path.L; u += 3) { const q = this.pathPoint(a.path, u); const d = (q.x - c.pos.x) ** 2 + (q.z - c.pos.z) ** 2; if (d < bd) { bd = d; bu = u; } } a.u = bu; } else { a.mode = 'walk'; a.u = this.nearestU(a.loop, c.pos); } }
       } else if (a.mode === 'cower') { sp = 0; a.t += dt; if (a.t > 6) a.mode = 'flee'; }
       c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt));
       c.setLocomotion(sp, dt); c.update(dt);

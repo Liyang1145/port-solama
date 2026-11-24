@@ -18,13 +18,13 @@ export const pick = (arr) => arr[Math.floor(rng() * arr.length)];
 export const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-export const angWrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+export const angWrap = (a) => (!Number.isFinite(a) ? 0 : ((((a + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI);
 export const damp = (a, b, lambda, dt) => lerp(a, b, 1 - Math.exp(-lambda * dt));
 
 // Axis-aligned box colliders on a uniform grid (x/z), with height.
 export class ColliderGrid {
-  constructor(cell = 32) { this.cell = cell; this.map = new Map(); this.boxes = []; }
-  key(ix, iz) { return ix * 73856093 ^ iz * 19349663; }
+  constructor(cell = 32) { this.cell = cell; this.map = new Map(); this.boxes = []; this._qseen = new Set(); this._rseen = new Set(); this._rtmp = []; }
+  key(ix, iz) { return ((ix & 0xffff) << 16) | (iz & 0xffff); }
   add(minX, minZ, maxX, maxZ, h = 100, tag = 'b') {
     const b = { minX, minZ, maxX, maxZ, h, tag };
     this.boxes.push(b);
@@ -36,6 +36,8 @@ export class ColliderGrid {
     return b;
   }
   remove(b) { // v4.4 (map 霓港 streaming)
+    if (!b) return;
+    if (b.y0 !== undefined && this.over) { this.over.remove(b); return; }
     const c = this.cell; const i = this.boxes.indexOf(b); if (i >= 0) this.boxes.splice(i, 1);
     for (let ix = Math.floor(b.minX / c); ix <= Math.floor(b.maxX / c); ix++)
       for (let iz = Math.floor(b.minZ / c); iz <= Math.floor(b.maxZ / c); iz++) { const l = this.map.get(this.key(ix, iz)); if (l) { const j = l.indexOf(b); if (j >= 0) l.splice(j, 1); } }
@@ -49,7 +51,7 @@ export class ColliderGrid {
   // query / boxes scan / hash of the ground-up colliders stays as it was. Only resolve() reads it, for a body reaching into y0..h.
   addOver(cx, cz, ux, uz, hl, hw, y0, h, tag = 'over') { const g = this.over || (this.over = new ColliderGrid(this.cell)); const b = g.addOBB(cx, cz, ux, uz, hl, hw, h, tag); b.y0 = y0; this.overY0 = Math.min(this.overY0 ?? Infinity, y0); return b; }
   query(x, z, r, out = []) {
-    out.length = 0; const c = this.cell; const seen = new Set();
+    out.length = 0; const c = this.cell; const seen = this._qseen; seen.clear();
     for (let ix = Math.floor((x - r) / c); ix <= Math.floor((x + r) / c); ix++)
       for (let iz = Math.floor((z - r) / c); iz <= Math.floor((z + r) / c); iz++) {
         const l = this.map.get(this.key(ix, iz)); if (!l) continue;
@@ -93,12 +95,10 @@ export class ColliderGrid {
   raycast(ax, ay, az, bx, by, bz) {
     let best = 1; const dx = bx - ax, dy = by - ay, dz = bz - az;
     const len = Math.hypot(dx, dz); const steps = Math.max(1, Math.ceil(len / this.cell));
-    const seen = new Set(); const tmp = [];
-    for (let s = 0; s <= steps; s++) {
-      const t = s / steps; this.query(ax + dx * t, az + dz * t, this.cell * 0.75, tmp);
-      for (const b of tmp) {
+    const seen = this._rseen; seen.clear(); const tmp = this._rtmp;
+    const testList = (list) => {
+      for (const b of list) {
         if (seen.has(b)) continue; seen.add(b);
-        // slab test in 3D (box from y=0 to b.h)
         let t0 = 0, t1 = 1; let ok = true;
         const sl = (o, d, mn, mx) => {
           if (Math.abs(d) < 1e-9) { if (o < mn || o > mx) ok = false; return; }
@@ -107,9 +107,15 @@ export class ColliderGrid {
         };
         if (b.o) { const o = b.o; const rx = ax - o.cx, rz = az - o.cz; sl(rx * o.ux + rz * o.uz, dx * o.ux + dz * o.uz, -o.hl, o.hl); if (ok) sl(-rx * o.uz + rz * o.ux, -dx * o.uz + dz * o.ux, -o.hw, o.hw); }
         else { sl(ax, dx, b.minX, b.maxX); if (ok) sl(az, dz, b.minZ, b.maxZ); }
-        if (ok) sl(ay, dy, -1, b.h);
+        if (ok) sl(ay, dy, b.y0 !== undefined ? b.y0 : -1, b.h);
         if (ok && t0 < best) best = t0;
       }
+    };
+    const checkOver = this.over && Math.max(ay, by) > this.overY0;
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps; const px = ax + dx * t, pz = az + dz * t;
+      this.query(px, pz, this.cell * 0.75, tmp); testList(tmp);
+      if (checkOver) { this.over.query(px, pz, this.cell * 0.75, tmp); testList(tmp); }
     }
     return best;
   }

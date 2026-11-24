@@ -48,32 +48,42 @@ export class GraphTraffic {
   removeCar(v) { const i = this.cars.indexOf(v); if (i >= 0) this.cars.splice(i, 1); v.dispose(); }
   // re-attach a car that lost its lane (chase ended, spawned by the player) to the nearest edge
   attach(v) {
-    const n = this.G.index.near(v.x, v.z); if (!n) return false; const e = n.e; const P = pointAt(e, n.s);
+    const n = (this.G.index.nearAny ? this.G.index.nearAny(v.x, v.z, 80) : this.G.index.near(v.x, v.z)); if (!n) return false; const e = n.e; const P = pointAt(e, n.s);
     const dir = P.tx * Math.sin(v.yaw) + P.tz * Math.cos(v.yaw) >= 0 ? 1 : -1;
-    v.ai = Object.assign(v.ai || {}, { mode: 'lane', edge: e, dir, lane: this.laneFix(e, dir, 0), s: n.s, cruise: v.ai?.cruise || 11, path: null, pi: 0, stuck: 0 }); return true;
+    v.ai = Object.assign(v.ai || {}, { mode: 'lane', edge: e, dir, lane: this.laneFix(e, dir, 0), s: n.s, cruise: v.ai?.cruise || 11, path: null, pi: 0, stuck: 0, revT: 0 }); return true;
   }
-  endS(a) { const e = a.edge; return a.dir > 0 ? e.L - e.n1.trim : e.n0.trim; }
+  endS(a) { const e = a.edge; const s0 = e.n0.trim, s1 = e.L - e.n1.trim; if (s1 <= s0) return e.L * 0.5; return a.dir > 0 ? s1 : s0; }
   planTurn(v) {
     const a = v.ai; const e = a.edge; const node = a.dir > 0 ? e.n1 : e.n0; const endS = this.endS(a);
-    const from = this.lanePoint(e, a.dir, a.lane, endS);
-    const inH = pointAt(e, endS); const ix = inH.tx * a.dir, iz = inH.tz * a.dir;
-    const options = [];
-    for (const o of node.edges) {
-      for (const od of (o.n0 === node ? [1] : []).concat(o.n1 === node ? [-1] : [])) {
-        if (o === e && od === -a.dir && node.deg > 1) continue; // no U-turn unless dead end
-        if (o.L - o.n0.trim - o.n1.trim < 4) continue;
-        const sS = od > 0 ? o.n0.trim : o.L - o.n1.trim; const H = pointAt(o, sS); const hx = H.tx * od, hz = H.tz * od;
-        const al = ix * hx + iz * hz; options.push({ edge: o, dir: od, sS, w: al > 0.7 ? 3 : al > -0.3 ? 1 : 0.15, al });
+    const deadLegacy = node.deg === 1 && node.legacy;
+    const fromS = deadLegacy ? Math.max(0, Math.min(e.L, endS - a.dir * 8)) : endS;
+    const from = this.lanePoint(e, a.dir, a.lane, fromS);
+    const inH = pointAt(e, fromS); const ix = inH.tx * a.dir, iz = inH.tz * a.dir;
+    const collect = (minUsable) => {
+      const opts = [];
+      for (const o of node.edges) {
+        for (const od of (o.n0 === node ? [1] : []).concat(o.n1 === node ? [-1] : [])) {
+          if (o === e && od === -a.dir && node.deg > 1) continue; // no U-turn unless dead end
+          if (o.L - o.n0.trim - o.n1.trim < minUsable) continue;
+          const s0 = o.n0.trim, s1 = o.L - o.n1.trim;
+          const sS = s1 <= s0 ? o.L * 0.5 : (od > 0 ? s0 : s1);
+          const H = pointAt(o, sS); const hx = H.tx * od, hz = H.tz * od;
+          const al = ix * hx + iz * hz; opts.push({ edge: o, dir: od, sS, w: al > 0.7 ? 3 : al > -0.3 ? 1 : 0.15, al });
+        }
       }
-    }
+      return opts;
+    };
+    let options = collect(4);
+    // short bridge edges between closely spaced junctions (e.g. ring_n, bay_blvd, dt_sun): allow through-traversal rather than illegal U-turn
+    if (!options.length && node.deg >= 2) options = collect(-1e9);
     let ch;
-    if (!options.length) ch = { edge: e, dir: -a.dir, sS: endS, uturn: true, al: -1 };
+    if (!options.length) ch = { edge: e, dir: -a.dir, sS: fromS, uturn: true, al: -1 };
     else { const tot = options.reduce((s, o) => s + o.w, 0); let r = rng() * tot; ch = options[0]; for (const o of options) { r -= o.w; if (r <= 0) { ch = o; break; } } }
     const lane = this.laneFix(ch.edge, ch.dir, ch.al > 0.7 ? a.lane : rng() < 0.5 ? 0 : 1);
     const to = this.lanePoint(ch.edge, ch.dir, lane, ch.sS);
     const H2 = pointAt(ch.edge, ch.sS); const ox = H2.tx * ch.dir, oz = H2.tz * ch.dir;
     let ctrl;
-    if (ch.uturn) ctrl = from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(ix * 9, 0, iz * 9));
+    if (ch.uturn) ctrl = from.clone().add(to).multiplyScalar(0.5).add(new THREE.Vector3(ix * (deadLegacy ? 3.5 : 9), 0, iz * (deadLegacy ? 3.5 : 9)));
     else { const den = ix * oz - iz * ox; if (Math.abs(den) < 0.15) ctrl = from.clone().add(to).multiplyScalar(0.5);
       else { const t = ((to.x - from.x) * oz - (to.z - from.z) * ox) / den; ctrl = new THREE.Vector3(from.x + ix * t, 0, from.z + iz * t); if (t < 0 || t > 60) ctrl = from.clone().add(to).multiplyScalar(0.5); } }
     const pts = []; for (let i = 0; i <= 10; i++) { const t = i / 10; pts.push(new THREE.Vector3().copy(from).multiplyScalar((1 - t) ** 2).addScaledVector(ctrl, 2 * t * (1 - t)).addScaledVector(to, t * t)); }
@@ -81,15 +91,24 @@ export class GraphTraffic {
   }
   green(node, e, dir) { // is the approach of edge e (arriving at node with travel dir) green?
     if (!node.signal) return true; if (this.phase === 2) return false;
-    const H = pointAt(e, dir > 0 ? e.L : 0); const hx = H.tx * dir, hz = H.tz * dir; const c = Math.cos(-node.rot), s = Math.sin(-node.rot);
-    const rx = hx * c - hz * s, rz = hx * s + hz * c; const grp = Math.abs(rz) >= Math.abs(rx) ? 0 : 1; return grp === this.phase;
+    if (!node._sigRef) {
+      let ref = null;
+      for (const o of node.edges) {
+        const P = pointAt(o, o.n0 === node ? Math.min(2, o.L * 0.5) : Math.max(0, o.L - 2));
+        if (!ref || (Math.abs(P.tz) >= 0.89 && Math.abs(ref[1]) < 0.89)) ref = [P.tx, P.tz];
+      }
+      node._sigRef = ref || [0, 1];
+    }
+    const H = pointAt(e, dir > 0 ? Math.max(0, e.L - 2) : Math.min(2, e.L * 0.5));
+    const grp = Math.abs(H.tx * node._sigRef[0] + H.tz * node._sigRef[1]) > 0.88 ? 0 : 1;
+    return grp === this.phase;
   }
   update(dt, player, others) {
     this.phaseT += dt; const cyc = this.phaseT % 30; this.phase = cyc < 13 ? 0 : cyc < 15 ? 2 : cyc < 28 ? 1 : 2;
     const tgt = new THREE.Vector3();
     for (const v of this.cars) {
       const a = v.ai; if (!a || v.driver === 'player') continue;
-      if (a.mode === 'flee' || a.mode === 'dead') { if (a.mode === 'dead') { v.input.throttle = 0; v.input.handbrake = true; } }
+      if (a.mode === 'dead') { v.input.throttle = 0; v.input.handbrake = true; continue; }
       if (a.mode === 'lane' && !a.edge) { if (!this.attach(v)) continue; }
       const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
       let desired = a.cruise;
@@ -97,8 +116,8 @@ export class GraphTraffic {
         const e = a.edge; // track arc length near the previous value
         const pr = project(e, v.x, v.z); a.s = pr.s; if (pr.d > 25) { this.attach(v); continue; }
         const endS = this.endS(a); const remain = (endS - a.s) * a.dir;
-        if (remain < 3) { a.path = this.planTurn(v); a.mode = 'turn'; a.pi = 1; continue; }
         const node = a.dir > 0 ? e.n1 : e.n0;
+        if (remain < (node.deg === 1 && node.legacy ? 11 : 3)) { a.path = this.planTurn(v); a.mode = 'turn'; a.pi = 1; continue; }
         if (node.signal && !this.green(node, e, a.dir) && remain > 2.5 && remain < 26) desired = Math.min(desired, Math.max(0, (remain - 4.5) * 0.9));
         if (remain < 18 && node.deg !== 2) desired = Math.min(desired, 8);
         this.lanePoint(e, a.dir, a.lane, a.s + a.dir * (7 + Math.abs(v.speed) * 0.5), tgt);
@@ -108,7 +127,7 @@ export class GraphTraffic {
         tgt.copy(p); desired = a.path.straight ? a.cruise : 6.5;
         if (a.pi >= P.length - 1 && Math.hypot(p.x - v.x, p.z - v.z) < 4.5) { Object.assign(a, a.path.next); a.mode = 'lane'; a.path = null; const ec = a.edge.kind; a.cruise = ec === 'cw' ? Math.max(a.cruise, 15) : ec === 'res' ? Math.min(a.cruise, 11) : a.cruise; }
       } else if (a.mode === 'chase' || a.mode === 'flee') {
-        tgt.copy(a.target || player.pos); desired = a.mode === 'chase' ? a.chaseSpeed || 24 : 26;
+        tgt.copy(a.target || player.pos); desired = a.mode === 'chase' ? (a.chaseSpeed ?? 24) : 26;
       }
       let block = 99;
       const chk = (ox, oz, rad) => { const dx = ox - v.x, dz = oz - v.z; const along = dx * fx + dz * fz; if (along < 0 || along > 28) return; const lat = Math.abs(dx * fz - dz * fx); if (lat < rad) block = Math.min(block, along); };
@@ -122,17 +141,24 @@ export class GraphTraffic {
       const ang = angWrap(Math.atan2(tgt.x - v.x, tgt.z - v.z) - v.yaw);
       v.input.steer = clamp(ang * 2.2, -1, 1);
       const sp = v.speed;
+      if (desired <= 0) { v.input.throttle = 0; v.input.handbrake = true; a.stuck = 0; a.revT = 0; continue; }
       v.input.throttle = sp < desired - 0.5 ? clamp((desired - sp) * 0.4, 0.15, 1) : sp > desired + 0.8 ? -clamp((sp - desired) * 0.35, 0.2, 1) : 0;
       v.input.handbrake = false;
       if (a.mode === 'chase' && Math.abs(ang) > 1.6 && Math.abs(sp) < 6) { v.input.throttle = -0.8; v.input.steer = -Math.sign(ang); }
-      if (Math.abs(sp) < 0.4 && desired > 3) { a.stuck += dt; if (a.stuck > 4) { v.input.throttle = -1; v.input.steer = -v.input.steer; if (a.stuck > 6) a.stuck = 0; } } else a.stuck = 0;
+      if (a.revT > 0) { a.revT -= dt; v.input.throttle = -0.85; v.input.steer = -v.input.steer; v.input.handbrake = false; }
+      else if (Math.abs(sp) < 0.4 && desired > 3) { a.stuck += dt; if (a.stuck > 4) { a.revT = 1.6; a.stuck = 0; } } else a.stuck = 0;
     }
   }
   // v4.4 graph route for police / fleeing AI: next waypoint on the shortest road path from the car toward (tx, tz)
   waypoint(v, tx, tz) {
-    const G = this.G; const a = this.G.index.near(v.x, v.z), b = this.G.index.near(tx, tz);
+    const G = this.G; const lk = G.index.nearAny || G.index.near;
+    const a = lk(v.x, v.z, 80), b = lk(tx, tz, 80);
     if (!a || !b) return new THREE.Vector3(tx, 0, tz);
-    if (a.e === b.e) return new THREE.Vector3(tx, 0, tz);
+    if (a.e === b.e) {
+      const ds = b.s - a.s;
+      if (Math.abs(ds) > 25) { const p = pointAt(a.e, a.s + Math.sign(ds) * 35); return new THREE.Vector3(p.x, 0, p.z); }
+      return new THREE.Vector3(tx, 0, tz);
+    }
     const key = a.e.id + ':' + b.e.id; v._route = v._route || {};
     if (v._route.key !== key || v._route.t < performance.now() - 1500) {
       const dist = new Map(), prev = new Map(), q = []; // r6.2: binary heap (was sort + includes per pop: O(n^2 log n) stalls on the big graph)
@@ -147,7 +173,21 @@ export class GraphTraffic {
       const path = []; for (let n = found; n; n = prev.get(n)) path.unshift(n);
       v._route = { key, t: performance.now(), path };
     }
-    const path = v._route.path; for (const n of path) { if (Math.hypot(n.x - v.x, n.z - v.z) > 14) return new THREE.Vector3(n.x, 0, n.z); }
+    const path = v._route.path;
+    while (path.length > 1 && Math.hypot(path[0].x - v.x, path[0].z - v.z) < 16) path.shift();
+    if (!path.length) return new THREE.Vector3(tx, 0, tz);
+    const n0 = path[0];
+    // sample along current edge a.e toward n0 so curved roads/bridges don't cut across water/buildings
+    if (a.e.n0 === n0 || a.e.n1 === n0) {
+      const targetS = a.e.n0 === n0 ? 0 : a.e.L;
+      const ds = targetS - a.s;
+      if (Math.abs(ds) > 16) { const p = pointAt(a.e, a.s + Math.sign(ds) * Math.min(Math.abs(ds), 35)); return new THREE.Vector3(p.x, 0, p.z); }
+      if (path.length > 1) {
+        const n1 = path[1]; const e2 = n0.edges.find((e) => (e.n0 === n0 && e.n1 === n1) || (e.n1 === n0 && e.n0 === n1));
+        if (e2) { const s0 = e2.n0 === n0 ? 0 : e2.L, s1 = e2.n0 === n0 ? e2.L : 0; const p = pointAt(e2, s0 + Math.sign(s1 - s0) * Math.min(e2.L, 35)); return new THREE.Vector3(p.x, 0, p.z); }
+      }
+    }
+    if (Math.hypot(n0.x - v.x, n0.z - v.z) > 14) return new THREE.Vector3(n0.x, 0, n0.z);
     return new THREE.Vector3(tx, 0, tz);
   }
 }
