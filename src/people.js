@@ -236,7 +236,12 @@ export function prepareCharacters(G) {
     P.cal = calibrate(P);
   }
   if (!OLDDROPIMG) dropBitmapsAfterUpload();
+  // anim2: retarget the UAL clips in the background, one per frame (Character.warmUAL from Game.update): protagonist moves first,
+  // then every proto's hit / knock-down set, so a first punch / shot never pays the ~3-8 ms retarget in the frame it happens
+  if (hasUAL()) { WARM.length = 0; for (const k of ['jab', 'cross', 'hook', 'hitC', 'hitH', 'cidle', 'cwalk', 'jstart', 'jland2']) WARM.push(['hero', k, ['jab', 'cross', 'hook', 'hitC', 'hitH'].includes(k)]);
+    for (const pk in PROTOS) if (pk !== 'hero') for (const k of ['hitC', 'hitH', 'knock', 'getup']) WARM.push([pk, k, false]); }
 }
+const WARM = [];
 // fix_pt6 #1 (?olddropimg = old): the cast GLB textures are decoded ImageBitmaps (1024² hero maps 4 MB each, ~150 textures in all) that
 // stayed alive next to their GPU copy for the whole session. Once every Texture that reads a bitmap has been uploaded (onUpdate), the
 // bitmap is closed and the source keeps only its size; three never re-uploads these (no needsUpdate after load).
@@ -532,22 +537,29 @@ export class Character {
     const a = this.uact(key, !!o.upper); if (!a) return false; const d = a.getClip().duration; const from = o.from ?? 0, to = Math.min(d, o.to ?? d), rate = o.rate ?? 1;
     for (const e of this.os) if (e.a === a) e.dead = true;
     a.reset(); a.play(); a.time = from; a.timeScale = rate; a.weight = 0;
-    this.os = this.os.filter((e) => !e.dead); this.os.push({ a, key, t: 0, dur: Math.max(0.05, (to - from) / rate), fi: o.fi ?? 0.08, fo: o.fo ?? 0.2, w: o.w ?? 1, upper: !!o.upper });
+    this.os = this.os.filter((e) => !e.dead); this.os.push({ a, key, t: 0, dur: Math.max(0.05, (to - from) / rate) + (o.hold || 0), fi: o.fi ?? 0.08, fo: o.fo ?? 0.2, w: o.w ?? 1, upper: !!o.upper, noik: !!o.noik, then: o.then || null });
     return true;
   }
   oneShots(dt, A) {
-    let ovF = 0; const L = this.os;
+    let ovF = 0, nik = 0; const L = this.os; let next = null;
     for (const e of L) { e.t += dt; const fi = e.fi > 0 ? Math.min(1, e.t / e.fi) : 1, fo = e.fo > 0 ? Math.min(1, Math.max(0, (e.dur - e.t) / e.fo)) : 1; e.env = smooth(Math.min(fi, fo), 0, 1) * e.w;
-      if (!e.upper) ovF = Math.max(ovF, e.env); }
-    this.ovF = ovF;
+      if (!e.upper) ovF = Math.min(1, ovF + e.env); if (e.noik) nik = Math.max(nik, e.w); if (e.then && e.t >= e.dur - e.fo) { next = e.then; e.then = null; } } // chained one-shots cross-fade (sum of weights)
+    this.ovF = ovF; this.noIK = nik;
     if (ovF > 0) { for (const k of LOOPED) if (A[k]) A[k].weight *= 1 - ovF; for (const k of ['cidle', 'cwalk']) { const a = this._U[k]; if (a) a.weight *= 1 - ovF; } if (A.jland) A.jland.weight *= 1 - ovF; }
     for (const e of L) { const x = Math.min(0.95, e.env); e.a.weight = e.upper ? x / (1.05 - x) : e.env; if (e.t >= e.dur) { e.a.weight = 0; e.a.stop(); } }
     if (L.length && L.some((e) => e.t >= e.dur)) this.os = L.filter((e) => e.t < e.dur);
+    if (next) next.call(this);
   }
   // anim2 (?oldstagger): a hit plays a UAL chest / head flinch (full body standing, upper body on the move or crouched) and the
   // knock-back becomes a short decaying shove (Character.update) instead of a same-frame teleport; heavy hits stagger further
   stagger(dmg = 20) {
-    if (this.dead || !hasUAL()) return; const head = this._hitHead ?? rng() < 0.3; this._hitHead = undefined;
+    if (this.dead || !hasUAL()) return;
+    if (this._down) { this._heavy = false; return; } // already on the ground: no standing flinch blended over the lying pose
+    if (this._heavy && !this.isPlayer && !this._down) { // bat hit on a pedestrian: knocked down (UAL Hit_Knockback, falls on the back), lies ~1 s, gets up (UAL LayToIdle), then flees
+      this._heavy = false; const d = this._heavyDir; if (d) this.yawKick = angWrap(Math.atan2(-d.x, -d.z) - this.yaw); this.push.multiplyScalar(0.4);
+      this._down = true; this.playUA('knock', { fi: 0.05, fo: 0.15, w: 1, noik: true, hold: 0.9 + rng() * 0.6, then() { this.playUA('getup', { fi: 0.15, fo: 0.3, w: 1, noik: true, then() { this._down = false; } }); } });
+      return; }
+    this._heavy = false; const head = this._hitHead ?? rng() < 0.3; this._hitHead = undefined;
     const mov = this.speed > 1.2 || this.crW > 0.3 || this.isPlayer || this.aimW > 0.3 || this._seat;
     this.playUA(head ? 'hitH' : 'hitC', { upper: mov, w: mov ? 0.85 : 1, fi: 0.04, fo: 0.25, rate: 0.9 });
     this.hitW = 0;
@@ -560,7 +572,7 @@ export class Character {
     if (da) {
       this.deathA = da;
       for (const k in this.A) { this.A[k].weight = 0; this.A[k].w = 0; }
-      for (const e of this.os) { e.a.weight = 0; e.a.stop(); } this.os = []; this.ovF = 0; for (const k in this._U) if (this._U[k]) this._U[k].weight = 0; // anim2
+      for (const e of this.os) { e.a.weight = 0; e.a.stop(); } this.os = []; this.ovF = 0; this.noIK = 0; this._down = false; for (const k in this._U) if (this._U[k]) this._U[k].weight = 0; // anim2
       if (this.aimA) this.aimA.weight = 0; if (this.raimA) this.raimA.weight = 0;
       da.reset(); da.weight = 1; da.play();
     } else for (const k in this.A) this.A[k].weight = k === 'idle' ? 1 : 0;
@@ -571,11 +583,12 @@ export class Character {
     this.deathA = this.deathF || this.deathB || null;
     for (const k in this.A) { this.A[k].w = k === 'idle' ? 1 : 0; this.A[k].weight = this.A[k].w; if (!LOOPED.includes(k)) this.A[k].stop(); else this.A[k].play(); }
     this._lp = null; this.idleT = -3; this.var = null;
-    for (const e of this.os) { e.a.weight = 0; e.a.stop(); } this.os = []; this.ovF = 0; this.push.set(0, 0); this.yawKick = 0; this.crouch = false; this.crW = 0; for (const k in this._U) if (this._U[k]) this._U[k].weight = 0; // anim2
+    for (const e of this.os) { e.a.weight = 0; e.a.stop(); } this.os = []; this.ovF = 0; this.noIK = 0; this._down = false; this.push.set(0, 0); this.yawKick = 0; this.crouch = false; this.crW = 0; for (const k in this._U) if (this._U[k]) this._U[k].weight = 0; // anim2
   }
   dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); if (this.phone) this.scene.remove(this.phone); }
 }
 Character.lookTarget = null;
+Character.warmUAL = () => { const w = WARM.shift(); if (!w || !PROTOS[w[0]]) return; ualClip(PROTOS[w[0]], w[1]); if (w[2]) ualClip(PROTOS[w[0]], w[1], true); }; // anim2
 Character.groundFn = null; // anim1: (x, z) -> ground height for the foot IK (set by Game)
 Character.colFn = null; // anim2: (x, z, y) -> resolved {x, z} for the stagger shove (set by Game)
 let PHONE_G = null; const PHONE_MAT = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.25 });
@@ -664,6 +677,7 @@ export class Pedestrians {
       const a = c.ai;
       if (cp) c.setLod(Math.hypot(c.pos.x - cp.x, c.pos.z - cp.z));
       if (c.dead) { c.update(dt); continue; }
+      if (c._down) { c.pos.y = lerp(c.pos.y, this.city.groundH(c.pos.x, c.pos.z), 1 - Math.exp(-15 * dt)); c.setLocomotion(0, dt); c.update(dt); continue; } // anim2 knock-down
       let sp = 0;
       if (a.mode === 'walk') {
         if (a.wait > 0) { a.wait -= dt; sp = 0; }

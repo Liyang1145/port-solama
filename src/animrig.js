@@ -85,7 +85,7 @@ export function rigApply(c, dt, posed, groundFn) {
   const t0 = performance.now(); const R = c._rg || (c._rg = init(c)); if (!R.ok) return;
   const full = (c.isPlayer || c.lod === 0 && (c._camD ?? 0) < FULL_D) && posed; ARIG_ST.calls++; R.full = full;
   if (R.hasOut) { restoreClean(R); if (!full) R.hasOut = false; } else if (full) restoreClean(R); if (full) ARIG_ST.full++; else ARIG_ST.lean++;
-  const sp = c.speed, moveT = sm(sp, 0.08, 0.7), runT = sm(sp, 2.3, 3.8), sprT = sm(sp, 4.4, 6.6), gnd = (1 - c.swimW) * (1 - c.airW);
+  const sp = c.speed, moveT = sm(sp, 0.08, 0.7), runT = sm(sp, 2.3, 3.8), sprT = sm(sp, 4.4, 6.6), gnd = (1 - c.swimW) * (1 - c.airW) * (1 - (c.noIK || 0)); // anim2: noIK = knock-down / get-up (body on the ground)
   // ---- signals: forward acceleration, lateral (turn) acceleration, slope of travel
   const a = (sp - R.lsp) / dt; R.lsp = sp; R.acc += (clamp(a, -20, 20) - R.acc) * ex(10, dt);
   const lat = clamp(c.yawRate, -6, 6) * sp;

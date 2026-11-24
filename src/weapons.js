@@ -118,7 +118,7 @@ export class Arsenal {
       if (d < best) { best = d; hit = c; }
     }
     if (!hit) return true;
-    const dir = new THREE.Vector3(fx, 0, fz); hit.health -= w.dmg; this.hitT = 0.14; this.hitHead = false; this.hits++;
+    const dir = new THREE.Vector3(fx, 0, fz); if (w.id === 'bat' && hit.ai && !hit.isCop && !hit.hostile) { hit._heavy = true; hit._heavyDir = dir; } hit.health -= w.dmg; this.hitT = 0.14; this.hitHead = false; this.hits++; // anim2: bat -> knock-down (people.js stagger)
     G.hitReact(hit, dir, w.id === 'bat' ? 0.6 : 0.3);
     G.sfx.burst?.(0.12, 300, 0.5);
     if (hit.health <= 0) G.killChar(hit, dir, true);

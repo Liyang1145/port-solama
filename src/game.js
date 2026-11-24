@@ -325,6 +325,7 @@ export class Game {
     if (!this.started) return;
     dt *= this.slowmo;
     this.clock = (this.clock || 0) + dt; // anim2: game time (melee combo window)
+    if (UA.melee || UA.stagger || UA.crouch) Character.warmUAL(); // anim2: one UAL retarget per frame in the background
     const P = this.P;
     this.input(dt);
     if (this.deadT > 0) { this.deadT -= dt; if (this.deadT <= 0) this.respawn(); }
