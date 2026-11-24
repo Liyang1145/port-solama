@@ -125,7 +125,7 @@ async function load() {
   probe.cam = new THREE.CubeCamera(2, 3600, probe.rt); probe.cam.position.set(-420, 38, -30); scene.add(probe.cam);
   probe.update = () => {
     if (Q.get('probe') === '0') return;
-    const envKeep = scene.environment; probe.cam.update(renderer, scene);
+    const envKeep = scene.environment; water.setProbe?.(1); probe.cam.update(renderer, scene); water.setProbe?.(0);
     const t = probe.pm.fromCubemap(probe.rt.texture); if (probe.tex) probe.tex.dispose(); probe.tex = t;
     M.building.envMap = t.texture; M.building.envMapIntensity = 1.0; M.building.needsUpdate = true; scene.environment = envKeep;
   };
@@ -138,7 +138,7 @@ async function load() {
     const p = camera.position; if (!force && sprobe.t < 2 && sprobe.pos.distanceTo(p) < 25) return;
     sprobe.t = 0; sprobe.pos.copy(p); sprobe.cam.position.set(p.x, 2.2, p.z);
     const pl = window.__G && window.__G.game ? window.__G.game.player?.root : null; const vis = pl ? pl.visible : null; if (pl) pl.visible = false;
-    sprobe.cam.update(renderer, scene); if (pl) pl.visible = vis;
+    water.setProbe?.(1); sprobe.cam.update(renderer, scene); water.setProbe?.(0); if (pl) pl.visible = vis;
     const t = sprobe.pm.fromCubemap(sprobe.rt.texture); if (sprobe.tex) sprobe.tex.dispose(); sprobe.tex = t; setCarEnv(t.texture, 1.0);
   };
   mark('post+probes');

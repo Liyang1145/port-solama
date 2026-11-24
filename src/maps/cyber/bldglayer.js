@@ -35,7 +35,7 @@ let CONE_MAT = null, CONE_G = null;
 export function coneMatU(cp, ck) {
   const m = coneMat0(); if (OLDENV2) return m;
   return new THREE.ShaderMaterial({ uniforms: { uNight: U.uNight, uCP: { value: cp }, uCK: { value: ck } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: m.vertexShader, fragmentShader: m.fragmentShader.replace('uniform float uNight;', 'uniform float uNight; uniform float uCP; uniform float uCK;').replace('pow(vT, 2.2) * uNight * 0.11', 'pow(vT, uCP) * uNight * uCK') });
+    vertexShader: m.vertexShader, fragmentShader: m.fragmentShader.replace('uniform float uNight;', 'uniform float uNight; uniform float uCP; uniform float uCK;').replace('(vt > 1e-4 ? pow(vt, 2.2) : 0.0) * uNight * 0.11', '(vt > 1e-4 ? pow(vt, uCP) : 0.0) * uNight * uCK') });
 }
 function coneMat() { if (CONE_MAT) return CONE_MAT; if (OLDENV2) return coneMat0(); return (CONE_MAT = coneMatU(2.2, 0.11)); }
 function coneMat0() {
@@ -44,7 +44,7 @@ function coneMat0() {
     // b_portlight: same program, second mode — uv.x >= 2 marks a "wash" vertex (ground light pool / light on a box face, portlight.js):
     // its vertex colour is the added night radiance, view-independent. Cone vertices (uv.x in [0, 1]) take the old path unchanged.
     vertexShader: 'attribute vec3 color; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ vC = color; vT = uv.y; vM = step(1.5, uv.x); vec4 wp = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }',
-    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ if (vM > 0.5) { gl_FragColor = vec4(vC * uNight, 1.0); return; } float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.5); float a = f * pow(vT, 2.2) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
+    fragmentShader: 'uniform float uNight; varying vec3 vC; varying float vT; varying vec3 vN; varying vec3 vV; varying float vM; void main(){ if (uNight < 0.01) discard; if (vM > 0.5) { gl_FragColor = vec4(vC * uNight, 1.0); return; } float nl = length(vN), vl = length(vV); float d = (nl > 1e-4 && vl > 1e-4) ? abs(dot(vN / nl, vV / vl)) : 0.0; float f = d > 1e-4 ? pow(d, 1.5) : 0.0; float vt = clamp(vT, 0.0, 1.0); float a = f * (vt > 1e-4 ? pow(vt, 2.2) : 0.0) * uNight * 0.11; gl_FragColor = vec4(vC * a, 1.0); }' });
   if (OLDENV2) CONE_MAT = m0; return m0;
 }
 // cone from the lamp at (x, y, z) down to the ground, radius r at the bottom (unit geometry: apex at y=0 top, base at y=-1)

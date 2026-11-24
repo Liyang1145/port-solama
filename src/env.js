@@ -151,7 +151,7 @@ void main(){
   if (envMode < 0.5 && d.y < 0.0) { vec3 sea = mix(fogC * vec3(0.55, 0.66, 0.78), fogC, 0.5) + fogSunC * pow(max(cs, 0.0), 7.0) * 0.4; c = mix(c, sea, (1.0 - smoothstep(-0.03, 0.0, d.y))); }
   // v4.5 cyberpunk city glow: magenta light pollution hugging the horizon, cyan higher up
 ${CYBER ? `if (uNightK > 0.0) { float yy = max(d.y, 0.0); c += uNightK * (vec3(0.50, 0.06, 0.40) * exp(-yy * 7.0) * 0.07 + vec3(0.04, 0.20, 0.30) * exp(-yy * 2.2) * 0.022); }` : ''}
-  c = min(c, vec3(48.0)); // r6.1 cap so the sun never floods the bloom chain
+  c = clamp(c, vec3(0.0), vec3(48.0)); // r6.1 cap so the sun never floods the bloom chain or emits negatives into probes
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>

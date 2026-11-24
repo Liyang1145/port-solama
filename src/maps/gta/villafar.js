@@ -130,7 +130,7 @@ function shellMat() {
 // solids: render-plaster slabs / boxes, darker soffits, slab-edge grime
 const F_SOLID = `
   diffuseColor.rgb *= 0.93 + 0.1 * sn(vIP.xz * 0.3 + sPp.xz * 0.6); diffuseColor.rgb *= 1.0 - step(sNn.y, -0.5) * 0.28;
-  diffuseColor.rgb *= 1.0 - (1.0 - step(0.5, abs(sNn.y))) * smoothstep(vSc.y * 0.5 - 0.06, -vSc.y * 0.5, sPp.y) * 0.08;`;
+  diffuseColor.rgb *= 1.0 - (1.0 - step(0.5, abs(sNn.y))) * (1.0 - smoothstep(-vSc.y * 0.5, max(-vSc.y * 0.5 + 1e-4, vSc.y * 0.5 - 0.06), sPp.y)) * 0.08;`;
 // thin: glazing walls, window units, glass rails, balustrades
 const F_THIN = `
   float fz = step(0.5, abs(sNn.z)); vec2 sF = vec2(sPp.x + vSc.x * 0.5, sPp.y + vSc.y * 0.5); // metres from the unit's lower-left corner (face)

@@ -100,13 +100,13 @@ function concreteMat() {
         float u = dot(P.xz, normalize(vec2(-N.z, N.x) + 1e-4)); // horizontal coordinate along a vertical face
         float base = 0.56 + (vn(P.xz * 0.35 + P.y * 0.2) - 0.5) * 0.08 + (vn(vec2(u, P.y) * 2.3) - 0.5) * 0.05;
         // formwork: horizontal lift lines every 1.2 m and panel joints every 2.4 m on vertical faces
-        float lift = smoothstep(0.03, 0.0, abs(fract(P.y / 1.2) - 0.5) - 0.47) * 0.06 * vert;
-        float joint = smoothstep(0.02, 0.0, abs(fract(u / 2.4) - 0.5) - 0.485) * 0.05 * vert;
+        float lift = (1.0 - smoothstep(0.0, 0.03, abs(fract(P.y / 1.2) - 0.5) - 0.47)) * 0.06 * vert;
+        float joint = (1.0 - smoothstep(0.0, 0.02, abs(fract(u / 2.4) - 0.5) - 0.485)) * 0.05 * vert;
         // rain streaks: long vertical noise, strongest under the deck edge, fading downwards
         float st = vn(vec2(u * 3.1, P.y * 0.12)) * vn(vec2(u * 7.7 + 3.0, P.y * 0.3));
         float runoff = smoothstep(0.25, 0.75, st) * vert * (0.25 + 0.5 * smoothstep(3.0, 10.5, P.y));
         float splash = (1.0 - smoothstep(0.2, 1.6, P.y)) * 0.22 * (0.6 + 0.4 * vn(vec2(u * 4.0, P.y * 3.0)));
-        float soffit = smoothstep(-0.4, -0.9, N.y) * 0.3; float topf = smoothstep(0.5, 0.9, N.y) * 0.05;
+        float soffit = (1.0 - smoothstep(-0.9, -0.4, N.y)) * 0.3; float topf = smoothstep(0.5, 0.9, N.y) * 0.05;
         float g = base - lift - joint - runoff * 0.24 - splash - soffit + topf;
         diffuseColor.rgb *= vec3(g * 1.0, g * 0.99, g * 0.97); }`);
   };

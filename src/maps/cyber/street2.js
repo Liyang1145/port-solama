@@ -102,7 +102,7 @@ export function steamMat() {
       float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(h(i), h(i + vec2(1,0)), f.x), mix(h(i + vec2(0,1)), h(i + vec2(1,1)), f.x), f.y); }
       void main(){ vec2 p = vec2(vUv.x * 2.2 + vS, vUv.y * 2.6 - uTime * 0.9);
         float d = n(p) * 0.6 + n(p * 2.3 + 7.0) * 0.4; float w = 1.0 - abs(vUv.x - 0.5) * 2.0; w = smoothstep(0.0, 0.7 - vUv.y * 0.3, w);
-        float a = smoothstep(0.25, 0.85, d) * w * smoothstep(0.0, 0.12, vUv.y) * pow(1.0 - vUv.y, 1.4);
+        float a = smoothstep(0.25, 0.85, d) * w * smoothstep(0.0, 0.12, vUv.y) * (vUv.y < 0.999 ? pow(1.0 - clamp(vUv.y, 0.0, 1.0), 1.4) : 0.0);
         vec3 c = vC * mix(0.95, 0.42, uNight); gl_FragColor = vec4(c, a * 0.5); }` });
   return STEAM_MAT;
 }

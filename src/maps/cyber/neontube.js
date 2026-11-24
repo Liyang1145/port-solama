@@ -137,7 +137,7 @@ export function neonReflMat() {
         // the mirror image of a sign shows on the ground between the viewer and the sign: strongest looking towards it, grazing
         float face = smoothstep(0.15, 0.85, dot(vh, normalize(vO.xz + 1e-4))); float graze = smoothstep(0.05, 0.6, 1.0 - abs(V.y) / max(dist, 1e-3));
         float lat = 1.0 - smoothstep(0.35, 1.0, abs(vUv.x - 0.5) * 2.0);
-        float along = smoothstep(0.0, 0.08, vUv.y) * pow(1.0 - vUv.y, 1.6);
+        float along = smoothstep(0.0, 0.08, vUv.y) * (vUv.y < 0.999 ? pow(1.0 - clamp(vUv.y, 0.0, 1.0), 1.6) : 0.0);
         // wet asphalt / paver breakup: puddle mask + streaky ripples stretched along the view
         float pud = smoothstep(0.35, 0.7, n2(vW.xz * 0.45)); float rip = 0.65 + 0.35 * n2(vec2(dot(vW.xz, vec2(-vh.y, vh.x)) * 9.0, uTime * 1.3));
         float fade = (1.0 - smoothstep(60.0, 180.0, dist));
