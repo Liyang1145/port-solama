@@ -236,7 +236,8 @@ export class RoofLayer {
     let im = this.kinds.get(k); if (im && im.instanceMatrix.count >= n) return im;
     const cap = Math.max(64, 1 << Math.ceil(Math.log2(Math.max(1, n)))); const [gk, mk, cast] = KINDS[k];
     if (im) { this.group.remove(im); im.dispose(); }
-    im = new THREE.InstancedMesh(geos()[gk], this.M[mk], cap); im.count = 0; im.castShadow = false; void cast; // no casters: the instanced depth program would be new in most views (b_rooftop census) im.receiveShadow = true; im.name = 'roof|' + k; im.visible = false; im.frustumCulled = false;
+    im = new THREE.InstancedMesh(geos()[gk], this.M[mk], cap); im.count = 0; im.castShadow = false; void cast; // no casters: the instanced depth program would be new in most views (b_rooftop census)
+    im.receiveShadow = true; im.name = 'roof|' + k; im.visible = false; im.frustumCulled = false;
     this.group.add(im); this.kinds.set(k, im); return im;
   }
   repack(cam) {

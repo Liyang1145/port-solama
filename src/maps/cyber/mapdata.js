@@ -136,8 +136,8 @@ export const ROADS = [
 // style drives the streamed parcel generator (src/stream.js) and the far impostors: deco, mid, condo, canal, mansion, villa,
 // downtown, port, lowrise (far only), park/golf (no buildings). poly = where parcels of that style may be placed.
 export const DISTRICTS = [
-  { id: 'south', name: '南光滩区', style: 'mid', poly: [[-60, -380], [300, -380], [300, -1250], [-60, -1250]] },
   { id: 'southdeco', name: '南光滩 Deco', style: 'deco', poly: [[230, -380], [330, -380], [330, -1150], [230, -1150]] },
+  { id: 'south', name: '南光滩区', style: 'mid', poly: [[-60, -380], [300, -380], [300, -1250], [-60, -1250]] },
   { id: 'spark', name: '南端公园', style: 'park', poly: [[40, -1250], [330, -1250], [330, -1500], [40, -1500]] },
   { id: 'northdeco', name: '北光滩 Deco', style: 'deco', poly: [[225, 380], [360, 380], [360, 1000], [225, 1000]] },
   { id: 'north', name: '北光滩区', style: 'mid', poly: [[-60, 380], [225, 380], [225, 1340], [-60, 1340]] },
@@ -146,8 +146,8 @@ export const DISTRICTS = [
   { id: 'goldpalm', name: '镀金岛', style: 'mansion', poly: ellipse(-640, -205, 196, 114, 36) },
   { id: 'sail', name: '信标列岛', style: 'villa', poly: [[-1010, 1000], [-210, 1000], [-210, 1150], [-1010, 1150]] },
   { id: 'golf', name: '全息高尔夫', style: 'golf', poly: ellipse(-640, 1860, 265, 195, 40, 0.25) },
-  { id: 'downtown', name: '数据核心区', style: 'downtown', poly: [[-1555, -760], [-1540, 760], [-2240, 760], [-2240, -760]] },
   { id: 'dtpark', name: '核心区公园', style: 'park', poly: [[-1830, -120], [-1975, -120], [-1975, 40], [-1830, 40]] },
+  { id: 'downtown', name: '数据核心区', style: 'downtown', poly: [[-1555, -760], [-1540, 760], [-2240, 760], [-2240, -760]] },
   { id: 'bayside', name: '芯湾区', style: 'mid', poly: [[-1520, 760], [-1520, 1300], [-2240, 1300], [-2240, 760]] },
   { id: 'port', name: '货柜港', style: 'port', poly: [[-1400, -760], [-880, -760], [-880, -1000], [-1400, -1000]] },
   { id: 'dtsouth', name: '南港区', style: 'mid', poly: [[-1560, -760], [-1560, -1150], [-2240, -1150], [-2240, -760]] },
@@ -177,7 +177,7 @@ export const POI = {
   lighthouse: { x: 528, z: -374, name: '灯塔' },
   wheel: { x: 384, z: 352, name: '霓虹之眼' },
   restaurants: [
-    { x: 281, z: -120, name: '合成海鲜' }, { x: 281, z: 130, name: '夜班咖啡馆' }, { x: 183.5, z: -110, name: '自动卷饼站' }, { x: 59.5, z: 210, name: '霓虹鱼档' }, { x: 160.5, z: 240, name: '芯片面包房' },
+    { x: 281, z: -120, name: '合成海鲜' }, { x: 281, z: 130, name: '夜班咖啡馆' }, { x: 179.5, z: -110, name: '自动卷饼站' }, { x: 59.5, z: 210, name: '霓虹鱼档' }, { x: 160.5, z: 240, name: '芯片面包房' },
   ],
 };
 // mission start markers (letters on the minimap)

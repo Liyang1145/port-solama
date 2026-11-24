@@ -219,7 +219,8 @@ export class Env {
       Object.assign(l.shadow.camera, { left: -S, right: S, top: S, bottom: -S, near: 1, far: 900 }); l.shadow.camera.updateProjectionMatrix(); scene.add(l); scene.add(l.target); return l; };
     // near cascade: 4096 over 64 m (1.6 cm texels) -> crisp contact; far cascade: 4096 over 360 m for the whole district
     const sun = mk2(this.shadowSizeN = 32, 4096, 0xffffff);
-    sun.shadow.bias = -0.00018; sun.shadow.normalBias = 0.01; // vis-sweep: 0.02 normal bias peter-panned a lit 1–3 px dashed sliver along every wall base on the shadow side sun.shadow.radius = 1.6;
+    sun.shadow.bias = -0.00018; sun.shadow.normalBias = 0.01; // vis-sweep: 0.02 normal bias peter-panned a lit 1–3 px dashed sliver along every wall base on the shadow side
+    sun.shadow.radius = 1.6;
     const far = mk2(this.shadowSize = 180, Q.has('lowshadow') ? 2048 : 4096, 0x000000);
     far.shadow.bias = -0.0003; far.shadow.normalBias = 0.06; far.shadow.radius = 2.5; far.intensity = 0;
     this.sun = sun; this.sunFar = far; U.uShMat.value = far.shadow.matrix; // same object: three rewrites it every shadow pass

@@ -259,7 +259,7 @@ export function buildBody(kind) {
     lip.translate(s * (xw + 0.004), cy, (ax - 0.5) * L); parts.black.push(lip);
   }
   if (S.ws) { const uw = S.ws[1] - 0.012; const yw = top(uw) + 0.02; for (const s of [-0.28, 0.32]) put(parts.black, new THREE.BoxGeometry(0.62, 0.018, 0.03), s * HW, yw, (uw - 0.5) * L - 0.05, 0, s > 0 ? 0.12 : -0.08, 0.05); }
-  { const ua = (S.roof[0] + S.roof[1]) / 2 - 0.12; const fin = new THREE.SphereGeometry(1, 10, 6); fin.scale(0.035, 0.05, 0.12); put(parts.black, fin, 0, top(ua) + 0.02, (ua - 0.5) * L); }
+  if (!S.tub && S.roof[1] - S.roof[0] > 0.05) { const ua = (S.roof[0] + S.roof[1]) / 2 - 0.12; const fin = new THREE.SphereGeometry(1, 10, 6); fin.scale(0.035, 0.05, 0.12); put(parts.black, fin, 0, top(ua) + 0.02, (ua - 0.5) * L); }
   for (const s of low ? [-1, 1] : [1]) { const ex = new THREE.CylinderGeometry(0.035, 0.035, 0.12, 12, 1, true); put(parts.chrome, ex, s * HW * 0.55, S.clear + 0.1, zr + 0.04, Math.PI / 2, 0, 0); }
   // wheel-well liners (dark half-cylinders inside the arches)
   for (const ax of [axF, axR]) { const lg = new THREE.CylinderGeometry(ra * 0.98, ra * 0.98, S.W * 0.86, 20, 1, true, -Math.PI / 2, Math.PI); lg.rotateZ(Math.PI / 2); lg.translate(0, cy, (ax - 0.5) * L); parts.black.push(lg); }

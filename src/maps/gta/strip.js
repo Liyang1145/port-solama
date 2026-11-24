@@ -226,7 +226,8 @@ export function prepStrip(fab) {
       // columns: ends, tenant bounds, and in between no more than 9 m apart
       const colS = [-hw + 0.35, hw - 0.35]; for (let i = 1; i < bounds.length - 1; i++) colS.push(bounds[i] * 1.5); colS.sort((p, q) => p - q);
       const colAll = []; for (let i = 0; i < colS.length; i++) { colAll.push(colS[i]); if (i < colS.length - 1) { const g = colS[i + 1] - colS[i]; const n = Math.floor(g / 9); for (let m = 1; m <= n; m++) colAll.push(colS[i] + (g * m) / (n + 1)); } }
-      for (const s of colAll) { const p = F2.W(s, 2.6); const R = { x: p[0], z: p[1], a, hl: 0.28, hw: 0.28 }; const w = blocked(R, { own: r, nowalk: true }); // on the shop's own walk if (w) { why('column:' + w); continue; }
+      for (const s of colAll) { const p = F2.W(s, 2.6); const R = { x: p[0], z: p[1], a, hl: 0.28, hw: 0.28 }; const w = blocked(R, { own: r, nowalk: true }); // on the shop's own walk
+        if (w) { why('column:' + w); continue; }
         cb(u.S, s, 2.6, 0.12, 0.4, 3.03, 0.4, colC); cb(u.S1, s, 2.6, 0.12, 0.54, 0.32, 0.54, mul(colC, 0.85)); cb(u.S1, s, 2.6, 2.95, 0.54, 0.2, 0.54, mul(colC, 1.03)); addCol(R, 3.2, 'column'); S.columns++; }
       // per tenant: entrance, light-box sign, rooftop unit
       for (let i = 0; i < bounds.length - 1; i++) { const m0 = bounds[i], m1 = bounds[i + 1], nm = m1 - m0; if (nm < 3) continue; S.tenants++; const ts = hh(seed * 3.1 + i, 5);

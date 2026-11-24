@@ -19,7 +19,7 @@ export const POI = {
   lighthouse: { x: 528, z: -374, name: '灯塔' },
   wheel: { x: 384, z: 352, name: '海风之眼' },
   restaurants: [
-    { x: 281, z: -120, name: '蓝鲸海鲜' }, { x: 281, z: 130, name: '古巴咖啡馆' }, { x: 183.5, z: -110, name: '卷饼小站' }, { x: 59.5, z: 210, name: '炸鱼小馆' }, { x: 160.5, z: 240, name: '海盐面包房' },
+    { x: 281, z: -120, name: '蓝鲸海鲜' }, { x: 281, z: 130, name: '古巴咖啡馆' }, { x: 179.5, z: -110, name: '卷饼小站' }, { x: 59.5, z: 210, name: '炸鱼小馆' }, { x: 160.5, z: 240, name: '海盐面包房' },
   ],
 };
 // mission start markers (letters on the minimap)
@@ -70,8 +70,8 @@ export const REGION = {
 // r5.0 mainland points of interest (axis-aligned shopfront on 第八街 so the shop/clerk code works unchanged)
 export const POI_R5 = {
   storeC: { id: 'C', x: -1059.5, z: -40, name: '甘蔗区杂货', icon: '店', col: '#2f9e5b', face: 1 },
-  atm: { x: -1059.5, z: -62 },
-  restaurants: [{ x: -1057, z: 70, name: '甘蔗面包坊' }, { x: -966, z: 120, name: '湾畔烤肉' }],
+  atm: { x: -1059.0, z: -62 },
+  restaurants: [{ x: -1057, z: 70, name: '甘蔗面包坊' }, { x: -963.5, z: 120, name: '湾畔烤肉' }],
 };
 
 POI.stores.push(POI_R5.storeC); POI.atms.push(POI_R5.atm); POI.restaurants.push(...POI_R5.restaurants);

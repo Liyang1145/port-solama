@@ -412,7 +412,8 @@ export function buildVegetation(scene, city, T) {
   });
   }
   // distribute instances to near/far meshes around the camera (cheap: a few thousand matrix copies, every ~0.4 s)
-  const NEAR2 = 75 * 75, FAR2 = CYBER ? 900 * 900 : Infinity; // r6.0: far cull only on map 霓港 (thousands of palms) let lastX = 1e9, lastZ = 1e9;
+  const NEAR2 = 75 * 75, FAR2 = CYBER ? 900 * 900 : Infinity; // r6.0: far cull only on map 霓港 (thousands of palms)
+  let lastX = 1e9, lastZ = 1e9;
   const updateLod = (cx, cz, force) => {
     if (!force && Math.hypot(cx - lastX, cz - lastZ) < 12) return; lastX = cx; lastZ = cz;
     for (const set of lodSets) {
