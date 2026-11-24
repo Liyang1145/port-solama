@@ -14,5 +14,5 @@ srv.listen(0, async () => {
       S.dropNear(c); t = performance.now(); S.startJob(c); let sl = 0; while (!S.stepJob(6)) sl++; row.newMs = Math.round(performance.now() - t); row.slices = sl + 1; row.new = H(c);
       S.dropNear(c); S.buildNear(c); row.old2 = H(c); row.same = JSON.stringify(row.old) === JSON.stringify(row.new); row.oldStable = JSON.stringify(row.old) === JSON.stringify(row.old2); out.push(row); }
     return { dbg: [JSON.stringify(d0), location.search, S.chunks.size, [...S.chunks.values()].filter((c) => c.near).length, JSON.stringify(S.stats), !!S.job], out, parcelMax: +S.stats.parcelMax.toFixed(1) }; })()`);
-  console.log(JSON.stringify(r, null, 1)); console.log('PAGEERROR', perr); fs.writeFileSync(path.join(root, 'shots/fp7/streameq.json'), JSON.stringify(r, null, 1)); await b.close(); process.exit(0);
+  console.log(JSON.stringify(r, null, 1)); console.log('PAGEERROR', perr); fs.writeFileSync(path.join(root, 'shots/fp8/streameq.json'), JSON.stringify(r, null, 1)); await b.close(); process.exit(0);
 });
