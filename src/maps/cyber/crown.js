@@ -32,6 +32,7 @@ export const HELI_MIN = 6.5;
 // size / content must match the far impostor can be derived from the parcel seed instead of the generator rng stream.
 let CP = null;
 export function setCrownParcel(p) { CP = p || null; }
+export const getCrownParcel = () => CP; // fix_pt8 #1 (stream.js ParcelTask context swap)
 const hs = (s, k) => { let h = ((s >>> 0) ^ Math.imul(k + 1, 0x9e3779b1)) >>> 0; h = Math.imul(h ^ (h >>> 16), 0x85ebca6b); h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 // smallest possible top-tier half extents (all setbacks 5 m) in the parcel frame [x (facing), z]; the near top is never smaller
 export function topMin(d, w, tall) { const nT = tall > 150 ? 4 : 3; return [Math.min(d - 7, 46) / 2 - (nT - 1) * 5, Math.min(w - 7, 46) / 2 - (nT - 1) * 5]; }

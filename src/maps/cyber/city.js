@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { envAdopt } from '../../mats.js'; // b_envprog2
 import { World, prismWalls, polyCap, rect, box } from '../../geo.js';
-import { ColliderGrid, rng, rand, randi, pick, clamp } from '../../util.js';
+import { ColliderGrid, rng, rand, randi, pick, clamp, drain } from '../../util.js';
 import { ROADS, landAt, beachX, BEACH_Z, DECO_CORE } from './mapdata.js';
 import { buildGraph } from './roadgraph.js';
 import { genParcels } from './parcels.js';
@@ -11,7 +11,7 @@ import { planGenfit } from './genfit.js'; // b_genfit
 import { planYards } from './portyard.js'; // r6.4 b_portyard
 import { buildRegion, buildBeach, beachHeight } from './region.js';
 import { wildField } from './nature.js';
-import { megatower, tenement, shopStreet, CORE_SHOP_LOG } from './arch.js';
+import { megatower, tenement, shopStreet, megatowerG, tenementG, shopStreetG, CORE_SHOP_LOG } from './arch.js';
 import { signFaceMat } from './dress.js';
 import { cnSignMat, steamMat } from './street2.js';
 import { neonGlowMat, neonReflMat } from './neontube.js';
@@ -687,7 +687,10 @@ function ledge(b, pts, closed, d0, d1, y0, y1, col) {
   if (!closed) for (const [i, sg] of [[0, 1], [n - 1, -1]]) { const a0 = O(i, d0), a1 = O(i, d1); const q = sg > 0 ? [a0, a1] : [a1, a0]; b.quad(V(q[0], y0), V(q[1], y0), V(q[1], y1), V(q[0], y1), [0, 0, 1, 0, 1, 1, 0, 1], {}, col); }
 }
 
-export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
+// fix_pt8 #1: decoHotel / midrise / downtownBlock are resumable for stream.js ParcelTask (`yield 0` checkpoints between whole
+// pieces, same call order and rng stream); the plain names drain them in one go.
+export function decoHotel(...a) { return drain(decoHotelG(...a)); }
+export function* decoHotelG(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   const { W, signs, awnings } = ctx;
   const floors = small ? randi(2, 4) : randi(3, 5);
   const fh = 3.3; const ground = 4.4; const top = 0.15 + ground + (floors - 1) * fh + 0.5;
@@ -704,6 +707,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   else if (R) { const k = poly.findIndex((p) => p[0] === x1 && p[1] === z0); fpts = [...poly.slice(k + 1), ...poly.slice(0, k - 1)]; } else fpts = [[x0, z0], [x0, z1]];
   if (facing > 0) { fpts.unshift([x1 - R - 2.5, z1]); fpts.push([x1 - R - 2.5, z0]); } else { fpts.unshift([x0 + R + 2.5, z0]); fpts.push([x0 + R + 2.5, z1]); }
   volume(ctx, poly, 0.15, top, { style: dStyle, fh, ww: dWw, wall, glass: [0.10, 0.14, 0.16], store: true, storeW: rand(3.5, 5), ground, up, relief: false, canopy: false });
+  yield 0;
   const tb = W.b('vcol', frontX, (z0 + z1) / 2);
   const s = facing; const fx = frontX;
   const lighter = wall.map((c) => Math.min(1, c * 1.06));
@@ -713,6 +717,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     ledge(tb, fpts, false, -0.02, 0.75, y, y + 0.16, lighter); // wrap-around eyebrow
   }
   if (dStyle === 2) facadeDetail(ctx, fx, s, z0 + R, z1 - R, 0.15 + ground, floors - 1, fh, dWw, wall, true);
+  yield 0;
   // cornice + parapet band
   ledge(tb, poly, true, -0.02, 0.3, top - 0.2, top + 0.2, lighter);
   prismWalls(tb, poly, top + 0.2, top + 1.2, null, wall); polyCap(tb, poly, top + 1.2, {}, wall);
@@ -727,6 +732,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   const nx = s > 0 ? fx + 0.33 : fx - 0.33;
   ledge(neon, fpts.slice(1, -1), false, 0.29, 0.37, top - 0.32, top - 0.24, nc); void nx;
   if (floors > 2) { const y = 0.15 + ground + (floors - 2) * fh + fh * 0.86 - 0.08; ledge(neon, fpts, false, 0.74, 0.82, y, y + 0.07, nc); }
+  yield 0;
   // central pylon / fin rising above the roof
   const zc = (z0 + z1) / 2; const pw = rand(2.2, 3.4); const ph = rand(3.5, 8);
   if (!small || rng() < 0.4) {
@@ -741,7 +747,7 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
     if (streamed(ctx)) { const hh = Math.min(10, (top + ph - ground - 1) * 0.8); neonSign(W, [fx + s * 1.15, 0.15 + ground + (top + ph - ground) * 0.5, zc], [0, 0, -s], pw * 0.8, hh, { glyphs: randGlyphs(Math.max(2, Math.min(5, Math.floor(hh / (pw * 0.75))))), gap: 0.12, t: 0.2, r: 0.045, alt: true }); }
     signs.push({ x: fx + s * 0.95, y: 0.15 + ground + (top + ph - ground) * 0.5, z: zc, ry: s > 0 ? Math.PI / 2 : -Math.PI / 2, name: pick(HOTEL_NAMES), w: pw * 0.8, h: Math.min(10, (top + ph - ground - 1) * 0.8), vertical: true, color: pick(['#ff5fa2', '#59f3ff', '#ffb347', '#b78cff', '#ff6f61', '#7dffb2']) });
   }
-  if (streamed(ctx)) { shopStreet(ctx, frontX, z0 + 1, z1 - 1, 0.15, ground, 4.5, { blade: false }); return; } // r6.2: streamed hotels drop ctx.awnings/signs -> real geometry
+  if (streamed(ctx)) { yield 0; yield* shopStreetG(ctx, frontX, z0 + 1, z1 - 1, 0.15, ground, 4.5, { blade: false }); return; } // r6.2: streamed hotels drop ctx.awnings/signs -> real geometry
   // awnings over storefront + cafe umbrellas on the sidewalk (front only)
   if (!small) {
     const aw = pick([[0.85, 0.25, 0.35], [0.95, 0.55, 0.62], [0.15, 0.55, 0.58], [0.95, 0.85, 0.75], [0.25, 0.3, 0.55]]);
@@ -752,16 +758,19 @@ export function decoHotel(ctx, x0, z0, x1, z1, small = false, facing = 1) {
   }
 }
 
-export function midrise(ctx, x0, z0, x1, z1) {
-  if (streamed(ctx) && rng() < 0.65) { tenement(ctx, x0, z0, x1, z1, { volume, rooftop }); return; } // r6.2 archetype: tenement
+export function midrise(...a) { return drain(midriseG(...a)); }
+export function* midriseG(ctx, x0, z0, x1, z1) {
+  if (streamed(ctx) && rng() < 0.65) { yield* tenementG(ctx, x0, z0, x1, z1, { volume, rooftop }); return; } // r6.2 archetype: tenement
   const floors = randi(3, 9); const fh = 3.2; const top = 0.15 + 4.6 + (floors - 1) * fh;
   const modern = rng() < 0.45;
   const wall = modern ? [0.93, 0.93, 0.91] : pick(PASTEL); const ww = rand(2.8, 4);
   volume(ctx, rect(x0, z0, x1, z1), 0.15, top, { style: modern ? 1 : 2, fh, ww, wall, glass: pick(GLASS), store: true });
+  yield 0;
   if (modern) condoSlabs(ctx, x0, z0, x1, z1, 4.75, top, fh, 1.2);
   else if (floors > 2 && rng() < 0.75) balconies(ctx, rect(x0, z0, x1, z1), 4.75, top, fh, ww, wall);
+  yield 0;
   rooftop(ctx, x0, z0, x1, z1, top, 'mid');
-  if (streamed(ctx)) shopStreet(ctx, x1, z0, z1, 0.15, 4.6, 4.5); // r6.2: modern mid-rises get the shop street too
+  if (streamed(ctx)) { yield 0; yield* shopStreetG(ctx, x1, z0, z1, 0.15, 4.6, 4.5); } // r6.2: modern mid-rises get the shop street too
 }
 
 function bayfrontBlock(ctx, b, palms, trees) {
@@ -791,7 +800,8 @@ function crownLights(ctx, poly, y, col) {
     prismWalls(b, [[p[0], p[1]], [q[0], q[1]], [q[0] + nx, q[1] + nz], [p[0] + nx, p[1] + nz]], y, y + 0.35, null, col);
   }
 }
-export function downtownBlock(ctx, b, palms, trees, forceTall) {
+export function downtownBlock(...a) { return drain(downtownBlockG(...a)); }
+export function* downtownBlockG(ctx, b, palms, trees, forceTall) {
   const [ix0, iz0, ix1, iz1] = b.inner;
   const W = ctx.W; const w = ix1 - ix0, d = iz1 - iz0;
   const parcels = [];
@@ -803,13 +813,15 @@ export function downtownBlock(ctx, b, palms, trees, forceTall) {
     const podH = 0.15 + rand(8, 18);
     const kind = rng();
     const tall = forceTall ?? Math.max(45, rand(80, 270) * (1 - distBay / 1000));
-    if (streamed(ctx) && tall >= 90 && pw > 24 && pd > 24) { megatower(ctx, x0, z0, x1, z1, tall, { volume, rooftop }); continue; } // r6.2 archetype: megatower
+    if (streamed(ctx) && tall >= 90 && pw > 24 && pd > 24) { yield* megatowerG(ctx, x0, z0, x1, z1, tall, { volume, rooftop }); yield 0; continue; } // r6.2 archetype: megatower
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     volume(ctx, rect(x0 + 1, z0 + 1, x1 - 1, z1 - 1), 0.15, podH, { style: rng() < 0.5 ? 0 : 2, fh: 4.0, ww: 3.5, wall: [0.78, 0.77, 0.74], glass: pick(GLASS), store: true });
-    if (streamed(ctx)) shopStreet(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 4.6, 4.5, { grit: 0.3 }); // r6.3: downtown podiums get the street-level shop row too
+    if (streamed(ctx)) { yield 0; yield* shopStreetG(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 4.6, 4.5, { grit: 0.3 }); }
+    yield 0; // r6.3: downtown podiums get the street-level shop row too
     const tw = Math.min(pw - 8, rand(26, 44)), td = Math.min(pd - 8, rand(26, 44));
     const tx0 = cx - tw / 2, tx1 = cx + tw / 2, tz0 = cz - td / 2, tz1 = cz + td / 2;
     rooftop(ctx, x0 + 1, z0 + 1, x1 - 1, z1 - 1, podH, 'pod', [[tx0 - 2, tz0 - 2, tx1 + 2, tz1 + 2]]);
+    yield 0;
     const lightCol = pick([[0.9, 0.95, 1.0], [0.3, 0.8, 1.0], [1.0, 0.35, 0.8], [0.7, 0.5, 1.0], [1.0, 0.85, 0.6]]);
     if (kind < 0.3) { // glass curtain-wall tower, chamfered, setback, vertical fins
       const glass = pick(GLASS); const ch = rng() < 0.6 ? rand(2, 6) : 0;
@@ -817,8 +829,10 @@ export function downtownBlock(ctx, b, palms, trees, forceTall) {
       const h1 = podH + tall * rand(0.6, 0.8);
       volume(ctx, poly, podH, h1, { style: 0, fh: 3.8, ww: rand(1.5, 2.2), wall: [0.55, 0.58, 0.6], glass, collide: false });
 
+      yield 0;
       const s = rand(2.5, 5); const poly2 = ch ? chamfer(tx0 + s, tz0 + s, tx1 - s, tz1 - s, ch) : rect(tx0 + s, tz0 + s, tx1 - s, tz1 - s);
       volume(ctx, poly2, h1, podH + tall, { style: 0, fh: 3.8, ww: rand(1.5, 2.2), wall: [0.55, 0.58, 0.6], glass, collide: false });
+      yield 0;
       // v3.5 crown: glass screen wall rising above the roof hides the plant; slim mullions continue; open top with a ledge
       const ch2 = rand(5, 11); const poly3 = ch ? chamfer(tx0 + s + 0.4, tz0 + s + 0.4, tx1 - s - 0.4, tz1 - s - 0.4, ch) : rect(tx0 + s + 0.4, tz0 + s + 0.4, tx1 - s - 0.4, tz1 - s - 0.4);
       volume(ctx, poly3, podH + tall, podH + tall + ch2, { style: 0, fh: ch2, ww: rand(1.5, 2.2), wall: [0.55, 0.58, 0.6], glass, collide: false, lite: true });
@@ -828,6 +842,7 @@ export function downtownBlock(ctx, b, palms, trees, forceTall) {
     } else if (kind < 0.45) { // round glass tower
       const r = Math.min(tw, td) / 2; const poly = circlePoly(cx, cz, r, 22); const glass = pick(GLASS);
       volume(ctx, poly, podH, podH + tall, { style: 0, fh: 3.7, ww: 2.0, wall: [0.6, 0.62, 0.64], glass, collide: false });
+      yield 0;
       const ch2 = rand(4, 8); volume(ctx, circlePoly(cx, cz, r * 0.97, 22), podH + tall, podH + tall + ch2, { style: 0, fh: ch2, ww: 2.0, wall: [0.6, 0.62, 0.64], glass, collide: false, lite: true });
       crownLights(ctx, circlePoly(cx, cz, r * 0.97, 22), podH + tall + ch2 - 0.6, lightCol);
       rooftop(ctx, cx - r * 0.6, cz - r * 0.6, cx + r * 0.6, cz + r * 0.6, podH + tall);
@@ -850,10 +865,13 @@ export function downtownBlock(ctx, b, palms, trees, forceTall) {
       const top = podH + tall * 0.6; const wall = pick([[0.85, 0.82, 0.78], [0.9, 0.88, 0.84], [0.72, 0.7, 0.68]]); const glass = pick(GLASS);
       const h1 = podH + (top - podH) * 0.55, h2 = podH + (top - podH) * 0.82;
       volume(ctx, rect(tx0, tz0, tx1, tz1), podH, h1, { style: 2, fh: 3.6, ww: 2.2, wall, glass, collide: false });
+      yield 0;
       volume(ctx, rect(tx0 + 3, tz0 + 3, tx1 - 3, tz1 - 3), h1, h2, { style: 2, fh: 3.6, ww: 2.2, wall, glass, collide: false });
+      yield 0;
       volume(ctx, rect(tx0 + 6, tz0 + 6, tx1 - 6, tz1 - 6), h2, top, { style: 2, fh: 3.6, ww: 2.2, wall, glass, collide: false });
       rooftop(ctx, tx0 + 6, tz0 + 6, tx1 - 6, tz1 - 6, top);
     }
+    yield 0;
   }
 }
 

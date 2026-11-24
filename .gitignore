@@ -11,3 +11,4 @@ RUNNING.lock
 work/
 dist_base/
 node_modules
+tools/fp8/bundle.mjs

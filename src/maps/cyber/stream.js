@@ -8,15 +8,17 @@
 //  * colliders come from the parcel footprints at startup (city.js obbCollider), so physics never depends on what is loaded.
 import * as THREE from 'three';
 import { World, box, polyCap, prismWalls, rect } from '../../geo.js';
-import { withSeed, rng, rand, randi, pick } from '../../util.js';
-import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies } from './city.js';
+import { withSeed, rng, rand, randi, pick, mulberry, rngGet, rngSet } from '../../util.js';
+import { volume, decoHotel, midrise, condoSlabs, rooftop, downtownBlock, balconies, decoHotelG, midriseG, downtownBlockG, ROOF_LOG, FOOT_LOG } from './city.js';
+import { SHOP_LOG } from './arch.js'; import { CLUTTER_LOG } from './clutcap.js';
 import { CLUT_CTX } from './clutcap.js'; // b_clutter
 import { SVC_CTX } from './svcface.js'; // b_alleyface2
 import { PY_OFF, yardContainers } from './portyard.js'; // r6.4 b_portyard
-import { farCrown, setCrownParcel } from './crown.js';
+import { farCrown, setCrownParcel, getCrownParcel } from './crown.js';
 
 const CH = 160, LOAD = 330, UNLOAD = 470;
 const OLDSTREAM = typeof location !== 'undefined' && /[?&]oldstream\b/.test(location.search), SLICE = 6; // fix_pt7 #1
+const OLDSLICE = typeof location !== 'undefined' && /[?&]oldslice\b/.test(location.search); // fix_pt8 #1: whole parcel per step (old)
 const NEAR_OPTS = { neon: { cast: false }, pavers: { cast: false }, concrete: { cast: false }, glassRail: { cast: false }, steam: { cast: false, receive: false }, cnsign: { cast: false }, nglow: { cast: false, receive: false }, nrefl: { cast: false, receive: false } };
 const PASTEL = [[1.0, 0.78, 0.72], [0.66, 0.90, 0.86], [1.0, 0.92, 0.66], [0.86, 0.76, 0.96], [0.78, 0.94, 0.76], [1.0, 0.98, 0.95], [1.0, 0.70, 0.58], [0.64, 0.82, 0.98], [1.0, 0.80, 0.86], [0.98, 0.95, 0.88]];
 const GLASS = [[0.10, 0.20, 0.24], [0.16, 0.24, 0.30], [0.22, 0.26, 0.28], [0.20, 0.17, 0.13], [0.08, 0.16, 0.20], [0.26, 0.32, 0.36]];
@@ -114,6 +116,16 @@ function port(ctx, p) {
   for (let x = -hx + 2; x < hx - 2.4; x += 3) for (let z = -hz + 1; z < hz - 12; z += 13.2) { const n = randi(1, 4); for (let k = 0; k < n; k++) { const c = pick(CC); box(v, x, 0.05 + k * 2.6, z, x + 2.44, 0.05 + (k + 1) * 2.6, z + 12.2, {}, c, false);
     for (let r = 1; r < 12; r++) box(v, x - 0.05, 0.15 + k * 2.6, z + r * 1.0, x + 2.49, 2.5 + k * 2.6, z + r * 1.0 + 0.08, {}, c.map((q) => q * 0.72)); } }
 }
+// fix_pt8 #1: resumable form (same calls, same order); the heavy archetypes yield between whole pieces
+function* genParcelG(ctx, p) {
+  const hx = p.d / 2, hz = p.w / 2;
+  switch (p.style) {
+    case 'deco': yield* decoHotelG(ctx, -hx, -hz, hx, hz, false, 1); break;
+    case 'mid': if (rng() < 0.5) yield* decoHotelG(ctx, -hx, -hz, hx, hz, true, 1); else yield* midriseG(ctx, -hx, -hz, hx, hz); break;
+    case 'downtown': yield* downtownBlockG(ctx, { inner: [-hx, -hz, hx, hz], x1: -1600 }, [], [], p.h); break;
+    default: genParcel(ctx, p);
+  }
+}
 export function genParcel(ctx, p) { // b_parcelfit: exported for the footprint census (tests only)
   const hx = p.d / 2, hz = p.w / 2;
   switch (p.style) {
@@ -194,11 +206,46 @@ export class Stream {
   // logic frame on map B whenever driving / teleporting brought a new chunk inside LOAD (tools/pf7.cjs tp: max 2336 ms, inside it
   // buildNear 2120 ms, ~1/3 GC). Now a job: parcels one at a time and then the meshes (one per key, hidden until complete), at most
   // SLICE ms per frame; the far boxes stay until the chunk is complete. sync() (snap / tools) still finishes everything at once.
+  // fix_pt8 #1 (?oldslice = old): one parcel (genParcel + pack) was the smallest unit of the job: 40-277 ms on map B (downtown /
+  // tenement / hotel generators, GC half of it). Now a parcel is a task: its generator runs until the slice budget is spent and is
+  // resumed next frame. Between slices everything global the generators read or write is swapped out (rng stream, clutter frame,
+  // service-face log, crown parcel, the SHOP / ROOF / FOOT / CLUTTER logs), so other code running in between (neon / side rows /
+  // peds) sees exactly what it saw before and the parcel sees exactly what a one-call build would have: same geometry, same logs.
+  ptBegin(c, p) {
+    const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
+    const m = parcelMatrix(p); const T = { c, p, lw, ctx, m, gen: null, st: null };
+    T.st = { rng: mulberry(p.seed), clut: m, svcP: p, svcLog: [], cp: p, logs: [SHOP_LOG.splice(0), ROOF_LOG.splice(0), FOOT_LOG.splice(0), CLUTTER_LOG.splice(0)] };
+    T.gen = genParcelG(ctx, p); return T;
+  }
+  ptSwap(T) { // exchange the task's saved globals with the live ones (enter and leave are the same operation)
+    const st = T.st, L = [SHOP_LOG, ROOF_LOG, FOOT_LOG, CLUTTER_LOG];
+    const o = { rng: rngGet(), clut: CLUT_CTX.m, svcP: SVC_CTX.p, svcLog: SVC_CTX.log, cp: getCrownParcel(), logs: L.map((a) => a.splice(0)) };
+    rngSet(st.rng); CLUT_CTX.m = st.clut; SVC_CTX.p = st.svcP; SVC_CTX.log = st.svcLog; setCrownParcel(st.cp); for (let i = 0; i < 4; i++) { const a = st.logs[i]; for (let k = 0; k < a.length; k++) L[i].push(a[k]); }
+    T.st = o;
+  }
+  // run the task for up to ms; true when the parcel is finished (packed, onParcel called)
+  ptStep(T, W, ms, t0) {
+    this.ptSwap(T); let done = false;
+    try { for (;;) { if (T.gen.next().done) { done = true; break; } if (performance.now() - t0 > ms) break; } }
+    catch (e) { this.ptSwap(T); throw e; }
+    if (!done) { this.ptSwap(T); return false; }
+    // finished: live globals are the parcel's; finish exactly as the one-call path did, then put the outer state back (outer log
+    // entries added while the task was suspended come after this parcel's, as they would have in a one-call build)
+    const outer = T.st; const { p, c, lw, m } = T;
+    setCrownParcel(null); CLUT_CTX.m = null;
+    this.parcelEnd(W, c, p, lw, m);
+    rngSet(outer.rng); CLUT_CTX.m = outer.clut; SVC_CTX.p = outer.svcP; SVC_CTX.log = outer.svcLog; setCrownParcel(outer.cp);
+    const L = [SHOP_LOG, ROOF_LOG, FOOT_LOG, CLUTTER_LOG]; for (let i = 0; i < 4; i++) { const a = outer.logs[i]; for (let k = 0; k < a.length; k++) L[i].push(a[k]); }
+    return true;
+  }
   parcel(W, c, p) {
     const lw = mkWorld(); const ctx = { W: lw, col: nullCol, signs: [], awnings: [], lamps: [], alleys: [], yards: [], pseed: p.seed };
     const m = parcelMatrix(p); CLUT_CTX.m = m; // b_clutter: lot frame -> world for the clutter kerb check (clutcap.js)
     SVC_CTX.p = p; SVC_CTX.log = []; // b_alleyface2: service faces on the lot's back / slot sides (city.js svcEdgesLot)
     setCrownParcel(p); withSeed(p.seed, () => genParcel(ctx, p)); setCrownParcel(null); CLUT_CTX.m = null; // b_tower3: crown sizes/content from the seed
+    this.parcelEnd(W, c, p, lw, m);
+  }
+  parcelEnd(W, c, p, lw, m) {
     { const e = m.elements; const W2 = (q) => [e[0] * q[0] + e[8] * q[1] + e[12], e[2] * q[0] + e[10] * q[1] + e[14]]; // openings -> world (parcelgap.js)
       p.svcF = SVC_CTX.log.map((o) => ({ a: W2(o.a), b: W2(o.b), lo: o.lo, hi: o.hi, t: o.t, floor: o.floor })); SVC_CTX.p = null; SVC_CTX.log = null; }
     if (W instanceof Map) { for (const b of lw.buckets.values()) { if (!b.vc) continue; const k = b.mat + '|' + Math.floor(p.x / 1e7) + '|' + Math.floor(p.z / 1e7); let e = W.get(k); if (!e) W.set(k, e = { mat: b.mat, list: [] }); e.list.push(packPart(b, m, ATTRS[b.mat] || {})); } }
@@ -218,7 +265,13 @@ export class Stream {
   startJob(c) { this.job = { c, parts: new Map(), list: c.parcels.filter((p) => !p.far), i: 0, keys: null, k: 0, meshes: [], ms: 0, t0: performance.now(), slices: 0 }; }
   stepJob(ms) {
     const J = this.job; const t0 = performance.now(); J.slices++;
-    while (J.i < J.list.length) { const ta = performance.now(); this.parcel(J.parts, J.c, J.list[J.i++]); const d = performance.now() - ta; if (d > this.stats.parcelMax) this.stats.parcelMax = d; if (performance.now() - t0 > ms) { J.ms += performance.now() - t0; return false; } }
+    if (J.task && (OLDSLICE || ms >= 1e8)) { this.ptStep(J.task, J.parts, Infinity, t0); J.task = null; J.i++; } // finish a started parcel task
+    if (OLDSLICE || ms >= 1e8) { while (J.i < J.list.length) { const ta = performance.now(); this.parcel(J.parts, J.c, J.list[J.i++]); const d = performance.now() - ta; if (d > this.stats.parcelMax) this.stats.parcelMax = d; if (performance.now() - t0 > ms) { J.ms += performance.now() - t0; return false; } } }
+    else while (J.i < J.list.length) { // fix_pt8 #1: parcel tasks, resumable inside a parcel
+      if (!J.task) J.task = this.ptBegin(J.c, J.list[J.i]);
+      const ta = performance.now(); const fin = this.ptStep(J.task, J.parts, ms, t0); const d = performance.now() - ta; if (d > this.stats.parcelMax) this.stats.parcelMax = d;
+      if (fin) { J.task = null; J.i++; }
+      if (performance.now() - t0 > ms) { J.ms += performance.now() - t0; return false; } }
     if (!J.keys) J.keys = [...J.parts];
     while (J.k < J.keys.length) { const [key, e] = J.keys[J.k++]; const o = NEAR_OPTS[e.mat] || {};
       const m = new THREE.Mesh(mergeParts(e.mat, e.list), this.mats[e.mat]); m.castShadow = o.cast !== false; m.receiveShadow = o.receive !== false; m.name = key; m.visible = false; this.group.add(m); J.meshes.push(m); e.list = null;

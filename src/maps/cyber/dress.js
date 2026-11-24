@@ -9,7 +9,7 @@
 // All invented / generic; no real brands.
 import * as THREE from 'three';
 import { polyCap, prismWalls } from '../../geo.js';
-import { rng, rand, randi, pick } from '../../util.js';
+import { rng, rand, randi, pick, drain } from '../../util.js';
 import { kg, beam, tube, put, cable, NEONC, RUST, DARK, STEEL } from './kit.js';
 import { U } from '../../env.js';
 import { mulberry } from '../../util.js';
@@ -201,7 +201,8 @@ export function laundryLine(W, A, B, sag = 0.3) {
 
 // One bay-run of sidewalk dressing in front of a shop frontage F (a ∈ [0, F.len], outward d): picks a mix weighted by `grit`
 // (0 clean commercial .. 1 tenement back street). Puddles everywhere (wet city), food stalls / umbrella tables on wider runs.
-export function sidewalk(W, F, y0, grit = 0.5, opts = {}) {
+export function sidewalk(...a) { return drain(sidewalkG(...a)); } // fix_pt8 #1: resumable (arch.js shopStreetG)
+export function* sidewalkG(W, F, y0, grit = 0.5, opts = {}) {
   const L = F.len; if (L < 5) return; const yP = y0 + 0.012; const lg = opts.log; // b_signsync: footprints (a span, d span) for storefront.js
   let a = rand(0.8, 2.5);
   // b_clutter: each item group is bracketed (clutSnap … grab): clutcap.js fits its collider footprint and, on a streamed lot, moves
@@ -219,6 +220,7 @@ export function sidewalk(W, F, y0, grit = 0.5, opts = {}) {
     else if (r < 0.52 && opts.stalls !== false && L > 10) { const f = rng() < 0.3 ? foodStall : pick(STALLS); const as = Math.min(L - 1.6, a + 1.2), d = rand(2.0, 2.6); f(W, F, as, d, y0); lg && lg.push({ k: 'stall', a0: as - 1.75, a1: as + 1.75, d0: d - 0.7, d1: d + 1.3 }); if (lg) grab(s0, n0, 'stall'); a += rand(6, 10); } // r6.4: + 面摊 / 烧烤 / 维修摊 (street2.js)
     else if (r < 0.62 && opts.tables !== false) { const d = rand(1.8, 2.6); umbrellaTable(W, F, a + 0.8, d, y0); lg && lg.push({ k: 'table', a0: a - 0.1, a1: a + 1.7, d0: d - 0.9, d1: d + 0.9 }); if (lg) grab(s0, n0, 'table'); a += rand(4, 7); }
     else a += rand(2, 5);
+    yield 0;
   }
   const np = Math.round(L / rand(6, 12)); for (let i = 0; i < np; i++) puddle(W, F, rand(1, L - 1), rand(1.0, 3.4), yP + i * 0.0005, rand(0.4, 1.3));
   if (grit > 0.4 && rng() < 0.7) { const a0 = rand(0, L * 0.4); groundPipes(W, F, a0, Math.min(L, a0 + rand(4, 12)), y0); }

@@ -9,9 +9,9 @@
 //  * shopStreet: the ground-floor dressing shared by both (and by the Deco hotels when streamed).
 import * as THREE from 'three';
 import { box, polyCap, prismWalls, rect } from '../../geo.js';
-import { rng, rand, randi, pick } from '../../util.js';
+import { rng, rand, randi, pick, drain } from '../../util.js';
 import { kg, beam, tube, put, cable, cableBundle, neonSign, randGlyphs, acUnit, cageBalcony, fireEscape, rollShutter, awning, signboard, vending, edge, storefront, NEONC, DARK, STEEL, RUST } from './kit.js';
-import { grime, sidewalk, hangingSign, laundryLine, streak } from './dress.js';
+import { grime, sidewalkG, hangingSign, laundryLine, streak } from './dress.js';
 import { clutSnap, clutGrab } from './clutcap.js'; // b_clutter
 import { cnSignboard, shopBits } from './street2.js';
 import { crownKind, topEst, HELI_MIN, plantDeck, crownScreen, roofBillboard, mastExtras, ladder, railRect, RED, STROBE } from './crown.js';
@@ -20,7 +20,10 @@ import { crownKind, topEst, HELI_MIN, plantDeck, crownScreen, roofBillboard, mas
 // ground-floor bays along the street face x = fx (z0..z1), storefront band height `ground` starting at y0
 export const CORE_SHOP_LOG = []; // b_corner: ground-floor store edges of the hand-built Deco core (world frame; city.js shopfront), drained by storefront.js
 export const SHOP_LOG = []; // r6.4 b_storefront: bays of streamed parcels (parcel frame), drained per parcel by storefront.js
-export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
+// fix_pt8 #1: the *G versions are resumable (stream.js ParcelTask yields at the `yield 0` checkpoints, between whole pieces, same
+// call order / rng stream); the plain names drain them in one go for every other caller.
+export function shopStreet(...a) { return drain(shopStreetG(...a)); }
+export function* shopStreetG(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
   const W = ctx.W; const F = edge([fx, z1], [fx, z0]); // runs from z1 to z0 -> outward +x
   const n = Math.max(1, Math.round(F.len / sw)); const cw = F.len / n; let vend = 0;
   // b_corner: opts.log = an explicit bay log (bldglayer.js corner side rows, built with no collider); else streamed parcels -> SHOP_LOG
@@ -40,11 +43,14 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
     if (LOG) LOG.push({ fx, z1, a0, a1, y0, yt, ground, kind, open, cl, sg, sk, aw, sw: swl, i, n });
     if (opts.dress !== false) shopBits(W, F, a0, a1, y0, yt, opts.grit ?? 0.5, i === n - 1, !!swl);
     if (vend < 3 && rng() < 0.22 && cw > 3.2) { const k = randi(1, 3); const s0 = swl && clutSnap(W), n0 = swl ? swl.length : 0; for (let j = 0; j < k && vend < 3; j++, vend++) { vending(W, F, a0 + 0.6 + j * 1.0, y0); if (swl) swl.push({ k: 'vend', a0: a0 + 0.1 + j * 1.0, a1: a0 + 1.1 + j * 1.0, d0: 0.25, d1: 1.1 }); } if (swl) { const r = clutGrab(W, s0, F, y0, 'vend'); if (r && r.hid) swl.length = n0; else if (r && (r.sh || r.sa)) for (let q = n0; q < swl.length; q++) { swl[q].d0 -= r.sh; swl[q].d1 -= r.sh; swl[q].a0 += r.sa; swl[q].a1 += r.sa; } } } // b_genfit: log follows the move
+    yield 0;
   }
+  yield 0;
   // r6.3: hanging light-box signs on wall arms over the pavement (every couple of bays) + sidewalk dressing (bins, trash, crates,
   // food stalls, umbrella tables, puddles, ground pipes) weighted by how gritty the street is
   for (let i = 0; i < n; i++) if (rng() < (opts.hang ?? 0.45)) hangingSign(W, F, i * cw + rand(0.4, 0.9), y0 + ground + rand(0.2, 1.4));
-  if (opts.dress !== false) sidewalk(W, F, y0, opts.grit ?? 0.5, swl ? { log: swl } : {});
+  yield 0;
+  if (opts.dress !== false) yield* sidewalkG(W, F, y0, opts.grit ?? 0.5, swl ? { log: swl } : {});
   // blade sign at one end of the frontage
   if (opts.blade !== false && rng() < 0.85) {
     const a = rng() < 0.5 ? 0.6 : F.len - 0.6; const h = rand(2.4, 4.2), w = rand(0.8, 1.2); const yc = y0 + ground + 0.6 + h / 2;
@@ -54,7 +60,8 @@ export function shopStreet(ctx, fx, z0, z1, y0, ground, sw, opts = {}) {
 
 // ----------------------------------------------------------------- megatower ----
 // x0..z1: parcel interior; tall: tower height above the podium; deps: { volume, rooftop } from city.js (avoids an import cycle)
-export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
+export function megatower(...a) { return drain(megatowerG(...a)); } // fix_pt8 #1
+export function* megatowerG(ctx, x0, z0, x1, z1, tall, deps) {
   const { volume, rooftop } = deps; const W = ctx.W; const G = kg();
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2; const pw = x1 - x0, pd = z1 - z0;
   const fam = randi(0, 3); // 0 dark glass + steel exo, 1 white concrete + bronze ribs, 2 black stone + red ribs, 3 teal glass + white exo
@@ -69,7 +76,9 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
   // podium with the shop street on the front
   const podH = 0.15 + rand(10, 15);
   volume(ctx, rect(x0 + 1, z0 + 1, x1 - 1, z1 - 1), 0.15, podH, { style: 2, fh: 4.6, ww: 3.6, wall: [0.36, 0.36, 0.38], glass: GL, store: true, ground: 5.0, storeW: 4.6, canopy: false });
-  shopStreet(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 5.0, 4.6, { grit: 0.25 });
+  yield 0;
+  yield* shopStreetG(ctx, x1 - 1, z0 + 1, z1 - 1, 0.15, 5.0, 4.6, { grit: 0.25 });
+  yield 0;
   // tiers
   const nT = tall > 150 ? 4 : 3; const FR = nT === 4 ? [0.42, 0.68, 0.88, 1.0] : [0.5, 0.8, 1.0];
   let tx = Math.min(pw - 7, 46) / 2, tz = Math.min(pd - 7, 46) / 2; let y = podH; const tiers = [];
@@ -82,7 +91,9 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
     volume(ctx, rect(X0, Z0, X1, Z1), y, yT, { style: tSt, fh, ww: tWw, wall: tWall, glass: tGl, collide: false, lite: true });
     tiers.push({ X0, X1, Z0, Z1, y0: y, y1: yT });
     const v = W.b('vcol', cx, cz), nb = W.b('neon', cx, cz);
+    yield 0;
     towerSkin(W, v, nb, X0, Z0, X1, Z1, y, yT, fh, tWw, RIB, tWall, k, fam, ctx, deps);
+    yield 0;
     // exoskeleton: corner columns (L-section read as 1.3 m square), edge ribs every ~8 m
     for (const [px, pz] of [[X0, Z0], [X1, Z0], [X1, Z1], [X0, Z1]]) box(v, px - 0.65, y, pz - 0.65, px + 0.65, yT + 0.6, pz + 0.65, {}, RIB);
     const ribs = (ax, a0, a1, c, s) => { const L = a1 - a0; const nr = Math.max(1, Math.round(L / 8)); const pts = [];
@@ -99,6 +110,7 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
       for (let i = 1; i < nf; i++) { const a = Z0 + ((Z1 - Z0) * i) / nf; box(v, s > 0 ? xf : xf - 0.45, y + 0.5, a - 0.07, s > 0 ? xf + 0.45 : xf, yT - 3.2, a + 0.07, {}, RIB); } }
     if (!xb) for (const [zf, s] of [[Z1, 1], [Z0, -1]]) { const nf = Math.max(2, Math.round((X1 - X0) / 2.4));
       for (let i = 1; i < nf; i++) { const a = X0 + ((X1 - X0) * i) / nf; box(v, a - 0.07, y + 0.5, s > 0 ? zf : zf - 0.45, a + 0.07, yT - 3.2, s > 0 ? zf + 0.45 : zf, {}, RIB); } }
+    yield 0;
     // mechanical floor + setback terrace at the tier top: louvre band, neon reveal under the cornice, parapet
     const yl = yT - 3.0; const Lc = [0.24, 0.25, 0.27];
     for (const [a0, b0, a1, b1] of [[X0 - 0.15, Z1, X1 + 0.15, Z1 + 0.15], [X0 - 0.15, Z0 - 0.15, X1 + 0.15, Z0], [X1, Z0, X1 + 0.15, Z1], [X0 - 0.15, Z0, X0, Z1]]) box(v, a0, yl, b0, a1, yT, b1, {}, Lc);
@@ -113,6 +125,7 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
       if (s > 4 && rng() < 0.5) dronePad(W, X1 - s / 2, yT + 1.2, cz, Math.min(1.6, s / 2 - 0.3), nb, v);
       tx = ntx; tz = ntz;
     }
+    yield 0;
   }
   // crown (r6.4 b_tower2: kind from the parcel seed so the far impostor shows the same crown; plant deck / stepped fin screen /
   // rooftop billboard / mast ladders + platforms + guy wires / aviation lights — see crown.js)
@@ -133,6 +146,7 @@ export function megatower(ctx, x0, z0, x1, z1, tall, deps) {
       yy += h; s *= 0.62; }
     put(v, G.cyl8, cx, yy + 12, cz, 0.35, 24, 0.35, STEEL); put(nb, G.ball, cx, yy + 12, cz, 0.25, 0.25, 0.25, RED); put(nb, G.ball, cx, yy + 24.3, cz, 0.35, 0.35, 0.35, STROBE);
   }
+  yield 0;
   // antennas / aviation lights on the tier corners
   for (const t of tiers) put(nb, G.ball, t.X1, t.y1 + 0.8, t.Z1, 0.18, 0.18, 0.18, [1, 0.12, 0.08]);
   // r6.3 building-maintenance unit on the top tier: roof rail ring, slewing jib, cables down to a cradle on one face
@@ -265,13 +279,16 @@ function _dish(v, x, y, z, ry) { put(v, _dg, x, y, z, 1.1, 1.1, 1.1, [0.85, 0.86
 
 // ------------------------------------------------------------------ tenement ----
 // deps: { volume, rooftop }. Returns nothing; everything goes into ctx.W.
-export function tenement(ctx, x0, z0, x1, z1, deps) {
+export function tenement(...a) { return drain(tenementG(...a)); } // fix_pt8 #1
+export function* tenementG(ctx, x0, z0, x1, z1, deps) {
   const { volume, rooftop } = deps; const W = ctx.W;
   const floors = randi(4, 9); const fh = 3.1, ground = 4.4; const top = 0.15 + ground + (floors - 1) * fh;
   const wall = pick([[0.62, 0.58, 0.52], [0.55, 0.6, 0.58], [0.7, 0.62, 0.55], [0.5, 0.52, 0.56], [0.66, 0.5, 0.46], [0.74, 0.72, 0.66], [0.45, 0.5, 0.42]]);
   const ww = rand(2.6, 3.2); const sw = rand(3.6, 4.6);
   volume(ctx, rect(x0, z0, x1, z1), 0.15, top, { style: 2, fh, ww, wall, glass: [0.1, 0.12, 0.13], store: true, storeW: sw, ground, canopy: false });
-  shopStreet(ctx, x1, z0, z1, 0.15, ground, sw, { grit: 0.9, hang: 0.6 });
+  yield 0;
+  yield* shopStreetG(ctx, x1, z0, z1, 0.15, ground, sw, { grit: 0.9, hang: 0.6 });
+  yield 0;
   // facades: front (x1, full dressing) + both sides (lighter); window bays line up with the facade shader (n = round(len / ww))
   const yF0 = 0.15 + ground; const poly = rect(x0, z0, x1, z1);
   const faces = [{ F: edge(poly[1], poly[2]), main: true }, { F: edge(poly[0], poly[1]), main: false }, { F: edge(poly[2], poly[3]), main: false }];
@@ -289,8 +306,10 @@ export function tenement(ctx, x0, z0, x1, z1, deps) {
         if (r < (main ? 0.14 : 0.04)) { cageBalcony(W, F, ac, yf + 0.02, Math.min(cw * 0.95, 3.2), fh); br.push({ a: ac - cw * 0.4, y: yf - 0.12, rust: 0.6 }, { a: ac + cw * 0.4, y: yf - 0.12, rust: 0.6 }); }
         else if (r < (main ? 0.5 : 0.24)) { const aa = ac + (rng() < 0.5 ? 0 : (rng() < 0.5 ? -1 : 1) * cw * 0.3); acUnit(W, F, aa, yf + fh * 0.04 + 0.05); br.push({ a: aa, y: yf + fh * 0.04 - 0.25, rust: 0.25 }); }
       }
+      yield 0;
     }
     grime(W, F, yF0, top, wall, br, { k: main ? 1.2 : 1, cw });
+    yield 0;
     // laundry strung along the front between window brackets on a few floors
     if (main && floors > 3) for (let i = 0; i < randi(1, 3); i++) { const k = randi(0, floors - 3); const yl = yF0 + k * fh + rand(1.9, 2.3); const c0 = randi(0, Math.max(0, n - 3)); const c1 = Math.min(n, c0 + randi(2, 3));
       const A = F.P(c0 * cw + 0.3, rand(0.55, 0.8)), B = F.P(c1 * cw - 0.3, rand(0.55, 0.8));
@@ -310,7 +329,9 @@ export function tenement(ctx, x0, z0, x1, z1, deps) {
   // a big vertical neon blade on the upper floors of tall tenements (hotel / karaoke / clinic style)
   if (floors >= 6 && rng() < 0.6) { const F = faces[0].F; const a = rng() < 0.5 ? 0.5 : F.len - 0.5; const h = Math.min((floors - 2) * fh, rand(6, 12)); const w = rand(1.2, 1.8);
     const q = F.P(a, 0.4 + w / 2); neonSign(W, [q[0], top - 1.2 - h / 2, q[1]], [F.ox, 0, F.oz], w, h, { blade: true, glyphs: randGlyphs(Math.max(3, Math.min(5, Math.floor(h / (w * 1.05))))), r: 0.05, t: 0.3, alt: true }); }
+  yield 0;
   rooftop(ctx, x0, z0, x1, z1, top, 'mid');
+  yield 0;
   // rooftop shanty additions: a corrugated shack + antenna forest + a billboard frame
   const v = W.b('vcol', (x0 + x1) / 2, (z0 + z1) / 2); const G = kg();
   if (rng() < 0.6 && x1 - x0 > 9) { const sx = rand(x0 + 1, x1 - 6), sz = rand(z0 + 1, z1 - 5); const sc = pick([[0.45, 0.42, 0.38], [0.35, 0.42, 0.45], [0.5, 0.35, 0.28]]);

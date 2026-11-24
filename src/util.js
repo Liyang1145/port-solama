@@ -12,6 +12,9 @@ let _rng = mulberry(20261119);
 export const rng = () => _rng();
 // v4.4 streaming (map 霓港): chunks reseed the shared generator so a chunk rebuilds identically after it was unloaded
 export function withSeed(seed, fn) { const old = _rng; _rng = mulberry(seed); try { return fn(); } finally { _rng = old; } }
+// fix_pt8 #1: resumable parcel generators (stream.js ParcelTask) keep their own rng between frames; drain() runs a generator to the end
+export const rngGet = () => _rng; export function rngSet(r) { _rng = r; }
+export function drain(g) { let r; while (!(r = g.next()).done); return r.value; }
 export const rand = (a, b) => a + (b - a) * rng();
 export const randi = (a, b) => Math.floor(rand(a, b + 1));
 export const pick = (arr) => arr[Math.floor(rng() * arr.length)];
