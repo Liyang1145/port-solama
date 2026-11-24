@@ -143,16 +143,20 @@ export class HUD {
     if (a.name !== this.lastArea) { this.lastArea = a.name; this.areaT = 5; }
     this.areaT -= dt;
     this.$('area').innerHTML = `<b>${a.name}</b><span>${a.sub} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}</span>`;
-    show('area', this.areaT > 0);
+    show('area', this.areaT > 0 && !(G.world && G.world.phoneOpen));
     // police search zone (GTA6 shows an area, not police dots)
     if (G.wanted > 0 && G.wantedFlash) { if (!this.searchPos) this.searchPos = (G.lastSeen || P.pos).clone(); } else this.searchPos = null;
     this.drawMinimap(G);
   }
   drawMinimap(G) {
+    const mmBox = this.$('mm');
+    if (mmBox) mmBox.classList.toggle('big', !!this.bigMap);
+    const tw = this.bigMap ? 780 : 412, th = this.bigMap ? 480 : 224;
+    if (this.mm.width !== tw || this.mm.height !== th) { this.mm.width = tw; this.mm.height = th; }
     const g = this.g, W = this.mm.width, H = this.mm.height; const P = G.P; const M = this.map;
     g.save(); g.clearRect(0, 0, W, H);
     g.beginPath(); g.roundRect(0, 0, W, H, 18); g.clip();
-    const zoom = (P.car ? 1.5 - Math.min(0.65, Math.abs(P.car.speed) / 40) : 1.9) * (CYBER ? 0.75 / M.S : 1); // canvas px per map px
+    const zoom = (P.car ? 1.5 - Math.min(0.65, Math.abs(P.car.speed) / 40) : 1.9) * (CYBER ? 0.75 / M.S : 1) * (this.bigMap ? 0.62 : 1); // canvas px per map px
     const yaw = G.cam.yaw + Math.PI; // camera forward
     const cx = W / 2, cy = H * 0.6;
     g.translate(cx, cy); g.rotate(Math.PI + yaw); g.scale(zoom, zoom);

@@ -88,6 +88,7 @@ export function wildField(graph) {
   field.slope = (x, z) => { const a = field.H(x - 2.5, z), b = field.H(x + 2.5, z), c = field.H(x, z - 2.5), d = field.H(x, z + 2.5); return Math.hypot(b - a, d - c) / 5; };
   field.forestK = (x, z) => field.inside(x, z) ? smooth(2280, 2480, z) : 0;
   field.waterAt = (x, z) => { if (Math.hypot((x - LAKE.x) / LAKE.rx, (z - LAKE.z) / LAKE.rz) < 1.06) return true; if (Math.hypot(x - FALLS.x, z - FALLS.z) < 15) return true; const q = streamQ(x, z); return !q.behind && q.d < field.streamHW(q.s) + 1.2; };
+  field.waterY = (x, z) => { if (Math.hypot((x - LAKE.x) / LAKE.rx, (z - LAKE.z) / LAKE.rz) < 1.06) return LAKE.y; if (Math.hypot(x - FALLS.x, z - FALLS.z) < 15) return FALLS.pool; const q = streamQ(x, z); if (!q.behind && q.d < field.streamHW(q.s) + 1.2) return level(q.s); return -1.0; };
   return field;
 }
 

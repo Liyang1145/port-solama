@@ -101,7 +101,12 @@ export class Game {
     this._init = { armor: this.P.armor, money: this.P.money, bank: this.P.bank, load: JSON.stringify(this.P.load) };
     if (!snap) { this.sfx.resume(); this.loadSave(); addEventListener('pagehide', () => this.save()); } // r6.2: also save when the tab closes / map switch (autosave was every 30 s only)
   }
-  tp(x, z, yaw = 0) { this.P.pos.set(x, this.city.groundH(x, z), z); this.P.yaw = yaw; this.cam.yaw = yaw + Math.PI; this.player.pos.copy(this.P.pos); this.player.yaw = yaw; this.updateCamera(1, true); }
+  tp(x, z, yaw = 0) {
+    const gh = this.city.groundH(x, z), wy = this.city.waterY ? this.city.waterY(x, z) : -1.0, swim = gh < wy - 0.25;
+    this.P.pos.set(x, swim ? wy - 0.15 : gh, z); this.P.vy = 0; this.P.grounded = true; this.P.yaw = yaw; this.cam.yaw = yaw + Math.PI;
+    this.player.pos.copy(this.P.pos); this.player.yaw = yaw; this.player.inWater = swim; if (!swim) this.player.swimW = 0;
+    this.updateCamera(1, true);
+  }
   skipTime(h) { window.__G.setHour((window.__G.hour + h) % 24); this.hud.msg('时间快进 1 小时', 1.5); }
   // ------------------------------------------------------------------ vehicles ----
   nearestCar(maxD = 4.5) {
@@ -314,7 +319,7 @@ export class Game {
     this.updatePolice(dt);
     // player
     if (P.onFoot) this.updateOnFoot(dt);
-    else { const v = P.car; P.pos.set(v.x, v.y, v.z); this.playerSpeed = Math.abs(v.speed); if (v.inWater && v.y < -2) { this.toggleCar(); this.tp(v.x, v.z); this.damagePlayer(30); } }
+    else { const v = P.car; P.pos.set(v.x, v.y, v.z); this.playerSpeed = Math.abs(v.speed); const wy = this.city.waterY ? this.city.waterY(v.x, v.z) : -1.0; if (v.inWater && v.y < wy - 1.0) { this.toggleCar(); this.tp(v.x, v.z); this.damagePlayer(30); } }
     // r5.0: weapon in hand + upper-body aim layer (player, police, gang)
     { const ov = this.override; const aimP = P.onFoot && !!(this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire)));
       const cw = this.arsenal.cur; this.player.setWeapon(P.onFoot && cw && cw.id !== 'fist' ? cw.id : null);
@@ -378,7 +383,8 @@ export class Game {
     if (P.cover) { if (Math.hypot(mx, mz) > 0.01 && Math.hypot(P.pos.x - P.cover.x, P.pos.z - P.cover.z) > 0.8) P.cover = null; else if (Math.hypot(mx, mz) > 0.01) { mx *= 0.35; mz *= 0.35; sprint = false; } }
     let sp = 0;
     const gh = this.city.groundH(P.pos.x, P.pos.z);
-    const swim = gh < -1.25;
+    const wy = this.city.waterY ? this.city.waterY(P.pos.x, P.pos.z) : -1.0;
+    const swim = gh < wy - 0.25;
     if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0; P.yaw += angWrap(Math.atan2(dx, dz) - P.yaw) * (1 - Math.exp(-12 * dt)); }
     P.sprint = sprint && len > 0.01 && !swim;
     if (this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire))) P.yaw = yawC; // face aim direction
@@ -390,7 +396,8 @@ export class Game {
     for (const v of this.traffic.cars) { const ddx = px - v.x, ddz = pz - v.z; const f = v.forward(); const al = ddx * f.x + ddz * f.z, lt = ddx * f.z - ddz * f.x; const hl = v.dims.L / 2 + 0.3, hw = v.dims.W / 2 + 0.3; if (Math.abs(al) < hl && Math.abs(lt) < hw) { const pa = hl - Math.abs(al), pl = hw - Math.abs(lt); if (pa < pl) { px += f.x * Math.sign(al) * pa; pz += f.z * Math.sign(al) * pa; } else { px += f.z * Math.sign(lt) * pl; pz += -f.x * Math.sign(lt) * pl; } if (Math.abs(v.speed) > 4) { this.damagePlayer(Math.abs(v.speed) * 2); } } }
     P.pos.x = px; P.pos.z = pz;
     // vertical
-    const ground = swim ? -1.35 : gh;
+    const ground = swim ? wy - 0.15 : gh;
+    c.inWater = swim;
     if ((k.Space || (ov && ov.jump)) && P.grounded && !swim) { P.vy = 4.6; P.grounded = false; if (ov) ov.jump = false; }
     P.vy -= 14 * dt; P.pos.y += P.vy * dt;
     if (P.pos.y <= ground) { P.pos.y = ground; P.vy = 0; P.grounded = true; }
@@ -452,9 +459,16 @@ export class Game {
       dist = (v.type === 'van' ? 9 : 7.2) + Math.min(3, Math.abs(v.speed) * 0.06); height = 0.0;
       if (idle && Math.abs(v.speed) > 2) C.yaw += angWrap(v.yaw + Math.PI - C.yaw) * (1 - Math.exp(-2.5 * dt));
       if (idle) C.pitch = damp(C.pitch, -0.16, 2, dt);
-      if (C.mode === 1) { // bonnet cam
-        const f = v.forward(); const p = v.cockpitCam ? v.cockpitCam(new THREE.Vector3()) : new THREE.Vector3(v.x, v.y + 1.25, v.z).addScaledVector(f, 0.3); // r6.2 eye point inside the modeled cabin
-        this.camera.position.copy(p); this.camera.lookAt(p.clone().addScaledVector(f, 10).add(new THREE.Vector3(0, -0.3, 0))); return;
+      if (C.mode === 1) { // bonnet / cockpit cam
+        const f = v.forward();
+        let p;
+        if (v.cabin) {
+          v.root.updateMatrixWorld(true);
+          const s = v.cabin.seats.driver;
+          p = new THREE.Vector3(s.x * 0.55, s.y + 0.67, s.z + 0.14);
+          v.cabin.group.parent.localToWorld(p);
+        } else p = v.cockpitCam ? v.cockpitCam(new THREE.Vector3()) : new THREE.Vector3(v.x, v.y + 1.25, v.z).addScaledVector(f, 0.3);
+        this.camera.position.copy(p); this.camera.lookAt(p.clone().addScaledVector(f, 10).add(new THREE.Vector3(0, -0.25, 0))); return;
       }
     } else {
       target = P.pos.clone(); target.y += P.cover ? 1.0 : 1.55; const aim = this.mouse.aim || (this.override && this.override.aim); dist = aim ? 2.0 : 3.3; side = aim ? 0.55 : 0.42; height = 0;

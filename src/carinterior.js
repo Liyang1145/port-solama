@@ -144,10 +144,10 @@ function buildRaw(C) {
   }
   // ---- headliner + rear-view mirror + sun visors
   { const z0 = C.zHead0, z1 = C.zHead1; if (!C.open) add(box(C.hwHead * 2, 0.02, z1 - z0), M.head, 0, C.headY, (z0 + z1) / 2); // open-top cars: no headliner
-    const my = C.yWsTop - 0.1, mz = C.zWsTop + 0.02;
-    add(box(0.02, 0.07, 0.02), M.trim, 0, my + 0.05, mz + 0.04);
-    add(rbox(0.25, 0.065, 0.03, 0.012), M.trim, 0, my, mz);
-    add(new THREE.PlaneGeometry(0.22, 0.05), M.mirror, 0, my, mz - 0.017, 0, Math.PI, 0);
+    const my = C.yWsTop - 0.068, mz = C.zWsTop + (C.zCowl - C.zWsTop) * 0.10;
+    add(box(0.016, 0.048, 0.016), M.trim, 0, my + 0.032, mz + 0.012);
+    add(rbox(0.16, 0.044, 0.022, 0.009), M.trim, 0, my, mz);
+    add(new THREE.PlaneGeometry(0.142, 0.034), M.mirror, 0, my, mz - 0.012, 0, Math.PI, 0);
     if (!C.open) for (const s of [-1, 1]) add(box(0.3, 0.012, 0.13), M.head, s * 0.33, C.headY - 0.012, C.zWsTop - 0.1, 0.04); } // visors folded up
   // ---- parcel shelf / rear wall
   if (C.shelf && C.rear) { const z0 = C.zBack, z1 = C.rear.z - 0.25; if (z1 > z0) add(box(C.hwRear * 2, 0.025, z1 - z0), M.trim, 0, C.yBack, (z0 + z1) / 2); }

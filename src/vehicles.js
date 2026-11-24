@@ -173,7 +173,7 @@ export function prepareSport(gltf) {
     const idx = g.index ? g.index.array : null; const n = idx ? idx.length : pos.count; const keep = []; let cut = 0;
     for (let i = 0; i < n; i += 3) { const i0 = idx ? idx[i] : i, i1 = idx ? idx[i + 1] : i + 1, i2 = idx ? idx[i + 2] : i + 2;
       a.fromBufferAttribute(pos, i0).applyMatrix4(M4); b.fromBufferAttribute(pos, i1).applyMatrix4(M4); c.fromBufferAttribute(pos, i2).applyMatrix4(M4); a.add(b).add(c).multiplyScalar(1 / 3);
-      if (Math.abs(a.x) < 0.6 && a.y > 0.15 && a.y < 1.12 && -a.z > -0.85 && -a.z < 0.75) { cut++; continue; } keep.push(i0, i1, i2); }
+      if (Math.abs(a.x) < 0.72 && a.y > 0.15 && a.y < 1.12 && -a.z > -0.85 && -a.z < 0.85) { cut++; continue; } keep.push(i0, i1, i2); }
     if (!cut) return; const ng = carved.get(g) || g.clone(); ng.setIndex(keep); carved.set(g, ng); o.geometry = ng; SPORT_CARVED += cut;
   });
   sportProto = root;
@@ -439,13 +439,13 @@ export class Vehicle {
     if (!GCACHE.has('hlpool')) {
       const g = new THREE.PlaneGeometry(1, 1); g.rotateX(-Math.PI / 2);
       // b_envprog2: head cone and tail pool share one program (uniform uCone picks the branch, each branch's code unchanged); ?oldenvmat2: two
-      const FC = 'float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = smoothstep(1.0, 0.1, x / w) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
-      const FP = 'float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
+      const FC = 'if (uNight < 0.01) discard; float y = clamp(vUv.y, 0.0, 1.0); float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = (1.0 - smoothstep(0.1, 1.0, x / w)) * smoothstep(0.0, 0.3, y) * (y < 0.999 ? pow(1.0 - y, 2.4) : 0.0) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0);';
+      const FP = 'if (uNight < 0.01) discard; float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = d < 0.999 ? pow(1.0 - d, 2.0) : 0.0; gl_FragColor = vec4(uCol * a * uNight, 1.0);';
       if (!OLDENV2) GCACHE.set('hlpoolFS', 'uniform float uNight; uniform vec3 uCol; uniform float uCone; varying vec2 vUv; void main(){ if (uCone > 0.5) { ' + FC + ' } else { ' + FP + ' } }');
       const mk = (col, cone) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: Object.assign({ uNight: U.uNight, uCol: { value: new THREE.Color(...col) } }, OLDENV2 ? {} : { uCone: { value: cone ? 1 : 0 } }),
         vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-        fragmentShader: cone ? 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float y = vUv.y; float x = abs(vUv.x - 0.5) * 2.0; float w = mix(0.35, 1.0, y); float a = (1.0 - smoothstep(0.1, 1.0, x / w)) * smoothstep(0.0, 0.3, y) * pow(1.0 - y, 2.4) * (0.75 + 0.25 * sin(x * 9.0 + y * 3.0)); gl_FragColor = vec4(uCol * a * uNight, 1.0); }'
-                             : 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length((vUv - 0.5) * vec2(1.0, 1.6)) * 2.0; float a = pow(max(1.0 - d, 0.0), 2.0); gl_FragColor = vec4(uCol * a * uNight, 1.0); }', ...(OLDENV2 ? {} : { fragmentShader: GCACHE.get('hlpoolFS') }) });
+        fragmentShader: cone ? 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ ' + FC + ' }'
+                             : 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ ' + FP + ' }', ...(OLDENV2 ? {} : { fragmentShader: GCACHE.get('hlpoolFS') }) });
       GCACHE.set('hlpool', { g, head: mk([0.42, 0.38, 0.31], true), tail: mk([0.5, 0.03, 0.02], false) });
     }
     { const P = GCACHE.get('hlpool');
@@ -510,7 +510,8 @@ export class Vehicle {
     if (this.lastImpact > 6) this.health -= (this.lastImpact - 6) * 2.2;
     // water: sink
     const gh = city.groundH(this.x, this.z);
-    if (gh < -1.5) { this.inWater = true; this.y = lerp(this.y, -2.4, 1 - Math.exp(-1.2 * dt)); this.vx *= Math.exp(-2 * dt); this.vz *= Math.exp(-2 * dt); this.health -= 20 * dt; }
+    const wy = city.waterY ? city.waterY(this.x, this.z) : -1.0;
+    if (gh < wy - 0.5) { this.inWater = true; this.y = lerp(this.y, wy - 1.4, 1 - Math.exp(-1.2 * dt)); this.vx *= Math.exp(-2 * dt); this.vz *= Math.exp(-2 * dt); this.health -= 20 * dt; }
     else { this.inWater = false; this.y = lerp(this.y, Math.max(gh, 0), 1 - Math.exp(-20 * dt)); }
     // body dynamics (visual suspension)
     const alon = ax * nfx + az * nfz, alat = ax * nrx + az * nrz;

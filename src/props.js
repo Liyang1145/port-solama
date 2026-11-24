@@ -176,7 +176,7 @@ export function buildProps(scene, city, T) {
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     uniforms: { uNight: U.uNight, uCol: { value: CYBER ? new THREE.Color(0.45, 0.78, 1.0) : new THREE.Color(1.0, 0.62, 0.32) } }, // r6.0: cool LED lamps only on map 霓港
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position,1.0); }',
-    fragmentShader: 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ float d = length(vUv-0.5)*2.0; float a = pow(max(1.0-d,0.0),2.2); gl_FragColor = vec4(uCol * a * uNight * 0.55, 1.0); }',
+    fragmentShader: 'uniform float uNight; uniform vec3 uCol; varying vec2 vUv; void main(){ if (uNight < 0.01) discard; float d = length(vUv-0.5)*2.0; float a = d < 0.999 ? pow(1.0-d,2.2) : 0.0; gl_FragColor = vec4(uCol * a * uNight * 0.55, 1.0); }',
   });
   // a_nightcheck (map A, ?oldanight = off): the 「海风之眼」 wheel's bulb rings lit nothing below -> two extra instances of this pool
   // (same draw, same program): an ellipse along the rim plane on each side of the boarding deck, which hides the centre (landmarks(): x 384, z 352)
@@ -220,8 +220,9 @@ export function buildProps(scene, city, T) {
         vN = normalize(mat3(modelMatrix * instanceMatrix) * vec3(normal.x, 0.0, normal.z)); vV = cameraPosition - wp.xyz; vD = length(vV);
         gl_Position = projectionMatrix * viewMatrix * wp; }`,
     fragmentShader: `uniform float uNight, uK; varying vec3 vC; varying float vH; varying vec3 vN; varying vec3 vV; varying float vD;
-      void main(){ float f = abs(dot(normalize(vN), normalize(vV)));            // 1 at the cone's centre line, 0 at its silhouette
-        float a = pow(f, 2.2) * pow(1.0 - vH, 1.6) * (1.0 - smoothstep(0.72, 1.0, vH)) * (0.35 + 0.65 * smoothstep(0.0, 0.08, vH));
+      void main(){ if (uNight < 0.01) discard; float nl = length(vN), vl = length(vV); float f = (nl > 1e-4 && vl > 1e-4) ? abs(dot(vN / nl, vV / vl)) : 0.0;
+        float vh = clamp(vH, 0.0, 1.0);
+        float a = (f > 1e-4 ? pow(f, 2.2) : 0.0) * (vh < 0.9999 ? pow(1.0 - vh, 1.6) : 0.0) * (1.0 - smoothstep(0.72, 1.0, vh)) * (0.35 + 0.65 * smoothstep(0.0, 0.08, vh));
         a *= (1.0 - smoothstep(60.0, 220.0, vD)) * smoothstep(1.5, 5.0, vD);                // no accumulation of far cones, no wash when standing inside
         gl_FragColor = vec4(vC * a * uK * smoothstep(0.35, 0.9, uNight), 1.0); }`,
   });
@@ -252,7 +253,7 @@ export function buildProps(scene, city, T) {
   for (const x of [im, glow, pools, cones]) { x.computeBoundingSphere(); if (CYBER) x.frustumCulled = false; scene.add(x); }
   // v4.4: the map has thousands of lamps -> only the ones within 450 m of the camera are drawn (re-packed every 25 m moved)
   if (CYBER) out.lampCull = { im, glow, pools, cones, lampM, lx: 1e9, lz: 1e9 }; // r6.0: lamp culling only on map 霓港
-  out.lampGlow = glowMat; out.pools = pools;
+  out.lampGlow = glowMat; out.pools = pools; out.cones = cones;
   if (SHOP_CAP) { pools.count = nFix; pools.computeBoundingSphere(); out.shopPools = SHOPS.islPools = { m: pools, nFix, cap: SHOP_CAP, at: null, n: 0 }; } // a_shopnight2
   // a pool of real point lights that follow the nearest lamps at night
   for (let i = 0; i < 10; i++) { const pl = new THREE.PointLight(0xffa860, 0, 30, 1.6); pl.castShadow = false; scene.add(pl); out.lampLights.push(pl); }
@@ -391,7 +392,7 @@ export function buildProps(scene, city, T) {
         const lm = m.clone().multiply(new THREE.Matrix4().makeRotationY(u.r)).multiply(new THREE.Matrix4().makeTranslation(0.9, 0, 0.6)); const wc = [0.97, 0.96, 0.93], fc = [0.75, 0.75, 0.74];
         for (const sx of [-0.3, 0.3]) { const rail = new THREE.BoxGeometry(0.04, 0.04, 1.35); rail.translate(sx, 0.3, 0.25); g.geom(rail, lm, {}, fc); for (const lz of [-0.35, 0.85]) { const leg = new THREE.BoxGeometry(0.04, 0.3, 0.04); leg.translate(sx, 0.15, lz); g.geom(leg, lm, {}, fc); } }
         for (let k = 0; k < 5; k++) { const sl = new THREE.BoxGeometry(0.62, 0.02, 0.2); sl.translate(0, 0.33, -0.3 + k * 0.26); g.geom(sl, lm, {}, wc); }
-        const back = new THREE.BoxGeometry(0.62, 0.03, 0.7); back.rotateX(-0.75); back.translate(0, 0.55, -0.7); g.geom(back, lm, {}, wc); }
+        const back = new THREE.BoxGeometry(0.62, 0.03, 0.7); back.rotateX(0.75); back.translate(0, 0.57, -0.66); g.geom(back, lm, {}, wc); }
       else if ((u.x * 7.3) % 1 < 0.4) { const cooler = new THREE.BoxGeometry(0.5, 0.35, 0.32); cooler.translate(0.6, 0.18, 0.3); g.geom(cooler, m, {}, [0.85, 0.15, 0.15]); }
       const towel = new THREE.BoxGeometry(0.75, 0.02, 1.6); towel.rotateY(u.r + 0.4); towel.translate(-1.0, 0.03, -0.4); g.geom(towel, m, {}, [u.color[2], u.color[0], u.color[1]]);
     }
@@ -457,6 +458,8 @@ function shopPools(S, p) { const L = SHOPS.isl; if (S.at && S.at[2] === L.length
   S.n = k; S.m.count = S.nFix + k; S.m.instanceMatrix.needsUpdate = true; S.m.computeBoundingSphere(); }
 export function updateProps(P, cam, night, phase) {
   const n = night;
+  if (P.pools) P.pools.visible = n > 0.01;
+  if (P.cones) P.cones.visible = n > 0.01;
   if (P.shopPools) shopPools(P.shopPools, cam.position);
   if (FINE_MESHES.length) { const cx = cam.position.x, cz = cam.position.z; // a_props: fine-detail chunks within ~120 m
     for (const f of FINE_MESHES) { const dx = Math.max(f.x0 - cx, 0, cx - f.x0 - f.s), dz = Math.max(f.z0 - cz, 0, cz - f.z0 - f.s); const v = dx * dx + dz * dz < f.r * f.r; f.m.visible = v; if (f.far) f.far.visible = !v; } }

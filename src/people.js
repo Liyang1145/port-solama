@@ -339,7 +339,7 @@ export class Character {
     const f = this.mv.x * sy + this.mv.y * cy, s = this.mv.x * cy - this.mv.y * sy; // forward / left components
     const cs = sp > 0.05 ? f / sp : 1, sn = sp > 0.05 ? s / sp : 0;
     const moveT = smooth(sp, 0.08, 0.7); const runT = smooth(sp, 2.3, 3.8);
-    const swim = this.pos.y < -1.2; this.swimW = lerp(this.swimW, swim ? 1 : 0, 1 - Math.exp(-6 * dt));
+    const swim = this.inWater !== undefined ? !!this.inWater : this.pos.y < -1.2; this.swimW = lerp(this.swimW, swim ? 1 : 0, 1 - Math.exp(-6 * dt));
     // turn-in-place: small side steps while the body turns on the spot
     const turn = (1 - moveT) * smooth(Math.abs(this.yawRate), 0.9, 2.5) * (1 - this.swimW);
     // idle variations (look around, phone call, texting, talking) after standing still for a while

@@ -269,8 +269,9 @@ export function buildCity(scene, mats, T) {
     return landAt(x, z) ? 0 : L.waterY - 3;
   };
   const bedH = (x, z) => { if (inCore(x, z)) return 0; if (wild.inside(x, z)) return wild.H(x, z); if (onBeach(x, z)) return Math.max(beachH(x, z), -6); return landAt(x, z) ? 0 : L.waterY - 3; }; // water shader bed (bridges ignored)
+  const waterY = (x, z) => (wild && wild.inside(x, z) ? wild.waterY(x, z) : L.waterY);
   const junctions = graph.nodes.filter((n) => n.deg >= 3);
-  const out = { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, wild, viaduct };
+  const out = { world: W, col, roads, segs, inters, blocks, lamps, palms, trees, shrubs, signs, awnings, deco, groundH, isLand, blockAt, beachH, alleys: bld.alleys, yards: bld.yards, piers: PIERS, graph, parcels, junctions, bedH, waterY, wild, viaduct };
   // r6.x b_palmloop: pedestrian lanes of the Deco block loops (off the palm / tree pits) + colliders for uncollided sidewalk props
   if (!Q_NOPALM) { out.pedLoop = (b) => pedLoop(out, b); out.pedInit = () => addPropCols(out, !Q_NOSP); out.lanePoint = lanePoint; }
   // r6.x b_streetpeds: road-graph sidewalk paths off the palm line + lanes solved a slice per frame around the player
@@ -1024,7 +1025,8 @@ function marina(ctx) {
 // skyline guides: lighthouse at the south jetty head, 「霓虹之眼」 Ferris wheel at the north end of the beach
 function landmarks(ctx) {
   const { W, col } = ctx;
-  { const x = 528, z = -374; const v = W.b('vcol', x, z);
+  { const x = 527.5, z = -378; const v = W.b('vcol', x, z);
+    box(v, x - 3.0, -1.8, z - 3.0, x + 3.0, 0.95, z + 3.0, {}, [0.72, 0.71, 0.68]); // stone plinth continuing the south jetty head
     const tw = new THREE.CylinderGeometry(1.7, 2.6, 24, 18, 6); tw.translate(0, 12, 0);
     const red = new THREE.CylinderGeometry(2.02, 2.22, 5, 18); red.translate(0, 12.5, 0); gput(v, red, x, -0.5, z, [0.78, 0.1, 0.08]);
     v.geom(tw, new THREE.Matrix4().makeTranslation(x, -0.5, z), {}, [1, 1, 1]);
