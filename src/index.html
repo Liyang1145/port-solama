@@ -19,9 +19,9 @@ body.photo #hud { display: none !important; }
 .bar .tr { width: 150px; height: 5px; border-radius: 3px; background: rgba(15,15,22,.42); overflow: hidden; box-shadow: 0 0 0 1px rgba(255,255,255,.06); position: relative; }
 .bar .tr i { display: block; height: 100%; border-radius: 3px; transition: width .25s; }
 .bar .tr b { position: absolute; left: 25%; top: 0; bottom: 0; width: 1.5px; background: rgba(0,0,0,.35); }
-#hp i { background: linear-gradient(90deg,#ff4f86,#ff86ad); } #hp svg { fill: #ff6b98; }
-#ar i { background: linear-gradient(90deg,#8a6bff,#b9a2ff); } #ar svg { fill: #a88bff; }
-#st i { background: linear-gradient(90deg,#3fe0b4,#8ff5d6); } #st svg { fill: #6befc8; }
+#hp i { background: linear-gradient(90deg,#ff4f86,#ff86ad); } #hpb svg { fill: #ff6b98; }
+#ar i { background: linear-gradient(90deg,#8a6bff,#b9a2ff); } #arb svg { fill: #a88bff; }
+#st i { background: linear-gradient(90deg,#3fe0b4,#8ff5d6); } #stb svg { fill: #6befc8; }
 #tr { position: absolute; right: 30px; top: 22px; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
 #stars { display: flex; gap: 3px; height: 20px; }
 #stars span { width: 19px; height: 19px; display: block; }
@@ -63,14 +63,17 @@ body.photo #hud { display: none !important; }
 .mcard.cy { background: linear-gradient(160deg, rgba(255,40,200,.38), rgba(20,200,255,.25) 60%, rgba(10,8,30,.7)); }
 #load.cy { background: #07060f radial-gradient(circle at 50% 120%, #29e3ff 0, #b51ee0 28%, #2a0f4a 58%, #07060f 82%); }
 #load.cy h1 { background: linear-gradient(#7ff3ff, #ff5fd2); -webkit-background-clip: text; color: transparent; }
+#pause { position: fixed; inset: 0; background: rgba(6,8,14,.62); backdrop-filter: blur(4px); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 9; cursor: pointer; }
+#pause b { font-size: 46px; letter-spacing: 6px; text-shadow: 0 3px 10px rgba(0,0,0,.7); }
+#pause span { font-size: 15px; opacity: .82; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hud">
   <div id="tl" class="fade"><div class="bar" id="hpb"><svg viewBox="0 0 16 16"><path d="M8 14.5 1.6 8.2A3.9 3.9 0 0 1 8 3.3a3.9 3.9 0 0 1 6.4 4.9z"/></svg><div class="tr" id="hp"><i style="width:100%"></i><b></b></div></div><div class="bar" id="arb"><svg viewBox="0 0 16 16"><path d="M8 1 14 3.2v4.3c0 3.6-2.6 6.3-6 7.5C4.6 13.8 2 11.1 2 7.5V3.2z"/></svg><div class="tr" id="ar"><i style="width:40%"></i></div></div><div class="bar" id="stb"><svg viewBox="0 0 16 16"><path d="M9.5 1 3 9h4l-1 6 6.5-8h-4z"/></svg><div class="tr" id="st"><i style="width:100%"></i></div></div></div>
-  <div id="help">WASD 移动 · 鼠标 视角 · Shift 冲刺 · 空格 跳跃/手刹<br>F 上车/下车(抢车) · 左键 射击/挥击 · 右键 瞄准 · R 换弹 · C 掩体<br>1–6 / 滚轮 / 按住 Q 武器轮盘 · E 使用商店/ATM · ↑ 或 I 手机 · Z 切换主角<br>. 切换电台 · H 喇叭 · T 快进时间 · V 车内视角 · Tab 显示状态 · Esc 释放鼠标</div>
-  <div id="tr"><div id="stars" class="fade"><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span></div><div id="evid" class="fade"></div><div id="wpn" class="fade"><svg viewBox="0 0 32 16"><path d="M2 3h24l2 2v3h-9l-1 1h-3l-2 6H6l2-6H4L2 7z"/></svg><span id="ammo">12<small> / 96</small></span></div><div id="money" class="fade"><svg viewBox="0 0 16 14"><rect x="0" y="2" width="16" height="11" rx="2"/><rect x="10" y="6" width="6" height="4" rx="1" fill="#0b3"/></svg><span id="cashv">$5,000</span></div></div>
+  <div id="help">WASD 移动 · 鼠标 视角 · Shift 冲刺 · 空格 跳跃/手刹<br>F 上车/下车(抢车) · 左键 射击/挥击 · 右键 瞄准 · R 换弹 · C 掩体<br>1–6 / 滚轮 / 按住 Q 武器轮盘 · E 使用商店/ATM · ↑ 或 I 手机 · Z 切换主角<br>. 切换电台 · H 喇叭 · T 快进时间 · V 车内视角 · Tab 显示状态 · Esc 暂停/释放鼠标</div>
+  <div id="tr"><div id="stars" class="fade"><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span><span><svg viewBox="0 0 20 20"><path d="M10 1.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L10 14.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/></svg></span></div><div id="evid" class="fade"></div><div id="wpn" class="fade"><svg viewBox="0 0 32 16"><path d="M2 3h24l2 2v3h-9l-1 1h-3l-2 6H6l2-6H4L2 7z"/></svg><span id="ammo">12<small> / 48</small></span></div><div id="money" class="fade"><svg viewBox="0 0 16 14"><rect x="0" y="2" width="16" height="11" rx="2"/><rect x="10" y="6" width="6" height="4" rx="1" fill="#0b3"/></svg><span id="cashv">$5,000</span></div></div>
   <div id="mm" class="fade"><canvas id="mmc" width="412" height="224"></canvas></div>
   <div id="cross"></div>
   <div id="veh" class="fade"></div>
@@ -78,6 +81,7 @@ body.photo #hud { display: none !important; }
   <div id="msg"></div>
   <div id="big"></div>
 </div>
+<div id="pause"><b>已暂停</b><span>按 Esc 或点击画面继续</span></div>
 <div id="load"><h1 id="ttl">PORT SOLANA</h1><p id="lp">选择地图 <small style="opacity:.6">r6.0</small></p>
   <div id="maps">
     <button data-map="gta" class="mcard gta"><b>索拉纳港</b><i>PORT SOLANA</i><span>写实 · 海湾都市 · 昼夜</span></button>

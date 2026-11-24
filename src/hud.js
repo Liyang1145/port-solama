@@ -87,7 +87,7 @@ export class HUD {
     this.mapCanvas = c;
   }
   toggleBig() { this.bigMap = !this.bigMap; }
-  msg(t, s = 2.5) { const m = this.$('msg'); m.textContent = t; m.style.opacity = 1; this.msgT = s; this.$('help').style.opacity = 0; }
+  msg(t, s = 2.5, keepHelp = false) { const m = this.$('msg'); m.textContent = t; m.style.opacity = 1; this.msgT = s; if (!keepHelp) this.$('help').style.opacity = 0; }
   big(t, col) { const b = this.$('big'); b.textContent = t; b.style.color = col; b.style.opacity = t ? 1 : 0; }
   cash(n) { this.cashEl.textContent = '+$' + n; this.cashEl.style.opacity = 1; this.cashT = 2.5; this.statT = Math.max(this.statT, 3); }
   hurt() { this.hurtT = 0.35; this.statT = 5; }
@@ -130,9 +130,9 @@ export class HUD {
       if (key !== this.evKey) { this.evKey = key; this.$('evid').innerHTML = ev.map((e) => `<i>${e}</i>`).join(''); }
     }
     this.$('cashv').textContent = '$' + P.money.toLocaleString('en-US');
-    { const A = G.arsenal, w = A.cur, a = A.ammo(); this.$('ammo').innerHTML = `<small style="font-size:13px;margin-right:6px">${w.name}</small>` + (w.melee ? '' : A.reloadT > 0 ? '换弹中' : `${a.clip}<small> / ${a.reserve}</small>`); }
+    { const A = G.arsenal, w = A.cur, a = A.ammo(); if (w) this.$('ammo').innerHTML = `<small style="font-size:13px;margin-right:6px">${w.name}</small>` + (w.melee ? '' : A.reloadT > 0 ? '换弹中' : `${a.clip}<small> / ${a.reserve}</small>`); }
     const v = this.$('veh');
-    if (P.car) { v.innerHTML = Math.round(Math.abs(P.car.speed) * 3.6) + '<small>km/h</small>'; v.style.opacity = 1; } else v.style.opacity = 0;
+    if (P.car) { v.innerHTML = P.car.health <= 0 ? '<span style="color:#ff5a5a">已报废</span>' : Math.round(Math.abs(P.car.speed) * 3.6) + '<small>km/h</small>'; v.style.opacity = 1; } else v.style.opacity = 0;
     this.$('cross').style.display = P.onFoot && (G.mouse.aim || G.mouse.down) ? 'block' : 'none';
     document.querySelector('#hp i').style.width = Math.max(0, P.health) + '%';
     document.querySelector('#ar i').style.width = Math.max(0, P.armor) + '%';
@@ -184,7 +184,7 @@ export class HUD {
     // player marker: white arrow in a dark disc
     g.save(); g.translate(cx, cy);
     g.fillStyle = 'rgba(20,22,30,.85)'; g.beginPath(); g.arc(0, 0, 13, 0, 7); g.fill();
-    g.rotate(-(P.onFoot ? P.yaw : P.car.yaw) + yaw + Math.PI);
+    g.rotate(-(P.onFoot ? P.yaw : P.car.yaw) + yaw);
     g.fillStyle = '#fff'; g.beginPath(); g.moveTo(0, -9); g.lineTo(6.5, 7); g.lineTo(0, 3.5); g.lineTo(-6.5, 7); g.closePath(); g.fill();
     g.restore();
     // north marker (bottom-left corner)
