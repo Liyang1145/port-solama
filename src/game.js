@@ -6,6 +6,7 @@ import { prebuildGuns } from './gunmodels.js';
 import { Occupants } from './seating.js';
 import { Character, Pedestrians, prepareCharacters } from './people.js';
 import { ARIG } from './animrig.js'; // anim1
+import { UA } from './ualanim.js'; // anim2
 import { HUD } from './hud.js';
 import { Sfx } from './sfx.js';
 import { clamp, lerp, rand, pick, angWrap, rng, damp } from './util.js';
@@ -41,6 +42,7 @@ export class Game {
     // player
     this.player = new Character(this.scene, 'man', { player: true });
     Character.groundFn = (x, z) => this.city.groundH(x, z); // anim1 foot IK
+    Character.colFn = (x, z, y) => this.city.col.resolve(x, z, 0.35, y + 0.5); // anim2 stagger shove
     this.P = { pos: this.player.pos, yaw: 0, vy: 0, onFoot: true, car: null, health: 100, armor: 40, money: 5000, bank: 12000, stamina: 100, load: newLoadout(['fist', 'pistol']), assets: [], outfit: null, reloadT: 0, fireT: 0, grounded: true, sprint: false };
     this.cam = { yaw: Math.PI, pitch: -0.12, dist: 3.4, lastMouse: 0, mode: 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
     this.keys = {}; this.mouse = { down: false, aim: false };
@@ -70,6 +72,7 @@ export class Game {
       { const m = /^Digit([1-6])$/.exec(e.code); if (m) this.arsenal.equip(['fist', 'bat', 'pistol', 'smg', 'shotgun', 'rifle'][+m[1] - 1]); }
       if (e.code === 'KeyQ') { this.arsenal.openWheel(true); this.wheelM = [0, 0]; }
       if (e.code === 'KeyC') this.arsenal.toggleCover();
+      if (e.code === 'KeyX' && UA.crouch && this.P.onFoot) { this.P.crouchOn = !this.P.crouchOn; this.hud.msg(this.P.crouchOn ? '蹲伏 · 再按 X 起身' : '起身', 1.2); } // anim2 crouch toggle (X: C is cover, Ctrl/Alt walk)
       if (e.code === 'KeyE' && this.P.onFoot) this.world.interact();
       if (e.code === 'KeyI' || (e.code === 'ArrowUp' && this.P.onFoot)) this.world.togglePhone(true);
       if (e.code === 'KeyZ') this.world.switchChar();
@@ -148,6 +151,8 @@ export class Game {
     // moved, with no hint (PLAYTEST_1H #1 / #4 / #24: the 'stuck' stolen cruisers were wrecked chase cars; the wanted-0 branch of
     // updatePolice also flipped their ai.mode 'dead' back to 'flee'). Refuse with a HUD line; smoke / fire / explosion stays GPT's #1.
     if (v.health <= 0 && !OLD_DEADCAR) { this.hud.msg('这辆车已经报废了', 2); return; }
+    // anim2 (?olddoor): walk to the driver's door first (any movement key cancels); the seat sequence (seating.js) starts there
+    if (UA.door && !this._atDoor && Math.abs(v.speed || 0) < 1) { const d = this.doorSpot(v); if (Math.hypot(d.x - P.pos.x, d.z - P.pos.z) > 0.4) { P.enter = { v, t: 0 }; return; } }
     if (v.ai && v.ai.mode !== 'dead' && v.health > 0) { // carjack: pull the driver out
       const kind = v.type === 'police' ? 'cop' : pick(['woman', 'man']);
       const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw);
@@ -157,10 +162,11 @@ export class Game {
       else { d.ai = { mode: 'flee', from: this.P.pos.clone(), t: 0, loop: [v.x - 20, v.z - 20, v.x + 20, v.z + 20, 160], u: 0, dir: 1, speed: 1.3, wait: 0 }; this.peds.list.push(d); if (this.policeNear(45) || rng() < 0.25) this.crime(1, '抢劫车辆'); }
       this.peds.panic(this.P.pos, 15);
     }
-    v.ai = null; v.driver = 'player'; v.input.handbrake = false; P.car = v; P.onFoot = false; this.player.root.visible = false;
+    v.ai = null; v.driver = 'player'; v.input.handbrake = false; P.car = v; P.onFoot = false; P.enter = null; P.crouchOn = false; this.player.root.visible = false; // anim2: P.enter / crouch cleared
     this.cam.yaw = v.yaw + Math.PI; this.hud.msg(v.type === 'sport' ? '跑车 · 按 F 下车' : '按 F 下车 · 空格 手刹 · H 喇叭', 2);
     if (v.type === 'police') v.siren = false;
   }
+  doorSpot(v) { const sp = v.seatWorld('driver').pos.clone(); const lx = Math.cos(v.yaw), lz = -Math.sin(v.yaw); const k = (v.dims.W || 1.9) / 2 + 0.07; sp.x += lx * k; sp.z += lz * k; return sp; } // anim2: standing spot beside the driver's door
   // ------------------------------------------------------------------ combat ----
   reload() { return this.arsenal.reload(); }
   aimRay() {
@@ -178,7 +184,10 @@ export class Game {
     for (const v of this.traffic.cars) { if (v === P.car) continue; const cp = new THREE.Vector3(v.x, v.y + 0.8, v.z); const t = cp.clone().sub(o).dot(d); if (t < 0 || t > hitT) continue; const q = o.clone().addScaledVector(d, t); if (q.distanceTo(cp) < v.dims.W * 0.6) { hitT = t; what = { v }; } }
     return { t: hitT, what };
   }
-  hitReact(c, d, push = 0.15) { if (c.dead) return; const r = this.city.col.resolve(c.pos.x + d.x * push, c.pos.z + d.z * push, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; c.yaw += (rng() - 0.5) * 0.6; c.hitT = 0.3; if (c.ai && c.ai.mode === 'gang') c.ai.fireT = Math.max(c.ai.fireT, 0.4); }
+  hitReact(c, d, push = 0.15) { if (c.dead) return;
+    if (UA.stagger) { c.push.x += d.x * push * 7; c.push.y += d.z * push * 7; c.yawKick += (rng() - 0.5) * 0.6; } // anim2 (?oldstagger): shove + turn over ~0.4 s (same distance / rng draw), not a same-frame jump
+    else { const r = this.city.col.resolve(c.pos.x + d.x * push, c.pos.z + d.z * push, 0.35, 0.5); c.pos.x = r.x; c.pos.z = r.z; c.yaw += (rng() - 0.5) * 0.6; }
+    c.hitT = 0.3; if (c.ai && c.ai.mode === 'gang') c.ai.fireT = Math.max(c.ai.fireT, 0.4); }
   killChar(c, d, melee = false) {
     const fwd = Math.sin(c.yaw) * d.x + Math.cos(c.yaw) * d.z; c.kill(fwd > 0 ? -1 : 1);
     if (c.thief || c.hostile) { if (c.hostile) this.dropCash(c.pos); return; }
@@ -295,6 +304,7 @@ export class Game {
   damagePlayer(n) {
     const P = this.P; if (this.deadT > 0) return;
     const a = Math.min(P.armor, n * 0.7); P.armor -= a; P.health -= n - a; this.hud.hurt();
+    if (UA.stagger && P.onFoot && P.health > 0) this.player.stagger(n); // anim2: the protagonist flinches (upper body; control is kept)
     if (P.health <= 0) this.wasted();
   }
   wasted() {
@@ -314,6 +324,7 @@ export class Game {
   update(dt) {
     if (!this.started) return;
     dt *= this.slowmo;
+    this.clock = (this.clock || 0) + dt; // anim2: game time (melee combo window)
     const P = this.P;
     this.input(dt);
     if (this.deadT > 0) { this.deadT -= dt; if (this.deadT <= 0) this.respawn(); }
@@ -352,7 +363,9 @@ export class Game {
     this.player.update(dt);
     { // r6.2 reload / melee swing / low-ready carry (src/actionpose.js)
       if (!this.pose) this.pose = new ActionPose(this.player);
-      const A = this.arsenal, cw = A.cur; if (A.swingReq) { this.pose.startSwing(A.swingReq, Math.max(0.3, cw.rate * 0.95)); A.swingReq = null; }
+      const A = this.arsenal, cw = A.cur;
+      if (A.swingReq === 'fist' && UA.melee && this.meleeCombo(cw)) A.swingReq = null; // anim2 (?oldmelee): UAL jab / cross / hook + procedural kick combo
+      if (A.swingReq) { this.pose.startSwing(A.swingReq, Math.max(0.3, cw.rate * 0.95)); A.swingReq = null; }
       this.pose.apply({ weapon: P.onFoot ? cw : null, aiming: this.player.aiming, reloadP: A.reloadT > 0 && cw.reload ? 1 - A.reloadT / cw.reload : -1, dt });
     }
     this.mission.update(dt); this.missions.update(dt); this.world.update(dt); this.updateGang(dt);
@@ -402,10 +415,20 @@ export class Game {
     if (ov) { mx = ov.mx || 0; mz = ov.mz || 0; }
     else { mz = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0); mx = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0); }
     if (this.deadT > 0) { mx = mz = 0; }
+    if (c._seat) { mx = mz = 0; P.enter = null; } // anim2: getting out of the seat (door sequence) holds the controls
+    let autoDir = null;
+    if (P.enter) { // anim2 walk to the door; movement input or 3 s cancels
+      const v = P.enter.v; P.enter.t += dt; const d = this.doorSpot(v); const ddx = d.x - P.pos.x, ddz = d.z - P.pos.z, dd = Math.hypot(ddx, ddz);
+      if (Math.hypot(mx, mz) > 0.01 || P.enter.t > 3 || !this.traffic.cars.includes(v) || dd > 6) P.enter = null;
+      else if (dd < 0.4) { P.enter = null; this._atDoor = true; this.toggleCar(); this._atDoor = false; if (P.car) return; }
+      else autoDir = [ddx / dd, ddz / dd, dd > 1.6 ? 4.0 : 1.5];
+    }
     const yawC = this.cam.yaw + Math.PI; // camera forward yaw
     const fx = Math.sin(yawC), fz = Math.cos(yawC), rx = -Math.cos(yawC), rz = Math.sin(yawC);
-    let dx = fx * mz + rx * mx, dz = fz * mz + rz * mx; const len = Math.hypot(dx, dz);
+    let dx = fx * mz + rx * mx, dz = fz * mz + rz * mx; if (autoDir) { dx = autoDir[0]; dz = autoDir[1]; } const len = Math.hypot(dx, dz);
     let sprint = ov ? !!ov.sprint : !!(k.ShiftLeft || k.ShiftRight); const walk = !!(k.ControlLeft || k.AltLeft);
+    if (ov && ov.crouch !== undefined) P.crouchOn = !!ov.crouch; // anim2 (test hook)
+    const crouch = UA.crouch && (P.crouchOn || !!P.cover); if (crouch && sprint && P.crouchOn) { P.crouchOn = false; } // anim2: sprinting stands up
     // v4.3 stamina: sprinting drains it; at 0 you can't sprint until it refills past 25
     if (P.stamina === undefined) P.stamina = 100;
     if (P.tired && P.stamina > 25) P.tired = false; if (P.stamina <= 0.5) P.tired = true; if (P.tired) sprint = false;
@@ -414,7 +437,7 @@ export class Game {
     let sp = 0;
     const gh = this.city.groundH(P.pos.x, P.pos.z);
     const swim = gh < -1.25;
-    if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0; const dyw = angWrap(Math.atan2(dx, dz) - P.yaw);
+    if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : autoDir ? autoDir[2] : (crouch && P.crouchOn) ? 1.35 : walk ? 1.5 : sprint ? 6.8 : 4.0; const dyw = angWrap(Math.atan2(dx, dz) - P.yaw);
       // anim1 pivot (?oldgait): from (near) standing, a > 60 deg turn is a quick turn on the spot (feet re-step) before walking off,
       // instead of spinning the whole body around while it already accelerates the other way
       if (ARIG.gait && !ARIG.off && !swim && (P.pivot || (Math.abs(dyw) > 1.05 && (this.curSpeed || 0) < 1.2))) { P.pivot = Math.abs(dyw) > 0.35; const st = Math.sign(dyw) * Math.min(Math.abs(dyw), 11 * dt); P.yaw += P.pivot ? st : dyw * (1 - Math.exp(-12 * dt)); if (P.pivot) sp = 0.6; }
@@ -430,11 +453,26 @@ export class Game {
     P.pos.x = px; P.pos.z = pz;
     // vertical
     const ground = swim ? -1.35 : gh;
-    if ((k.Space || (ov && ov.jump)) && P.grounded && !swim) { P.vy = 4.6; P.grounded = false; if (ov) ov.jump = false; }
+    if ((k.Space || (ov && ov.jump)) && P.grounded && !swim && !(P.jumpT > 0)) {
+      if (ov) ov.jump = false;
+      if (UA.jump2 && c.playUA('jstart', { from: 0, to: 0.42, fi: 0.04, fo: 0.16, w: 0.9 })) { P.jumpT = 0.07; P.crouchOn = false; } // anim2 (?oldjump2): 70 ms push-off from the UAL take-off crouch
+      else { P.vy = 4.6; P.grounded = false; }
+    }
+    if (P.jumpT > 0) { P.jumpT -= dt; if (P.jumpT <= 0) { P.jumpT = 0; P.vy = 4.6; P.grounded = false; } }
     P.vy -= 14 * dt; P.pos.y += P.vy * dt;
     if (P.pos.y <= ground) { P.pos.y = ground; P.vy = 0; P.grounded = true; }
     this.playerSpeed = this.curSpeed * (len > 0.01 ? 1 : 0);
-    c.yaw = P.yaw; c.setLocomotion(this.playerSpeed, dt);
+    c.yaw = P.yaw; c.setLocomotion(this.playerSpeed, dt); c.crouch = crouch && !swim; // anim2
+  }
+  // anim2 (?oldmelee): fist presses chain jab -> cross -> hook -> kick (within 1.1 s of the last one), UAL clips (upper body while
+  // moving / crouched); the kick is procedural (no CC0 kick clip in the UAL standard packs: src/actionpose.js 'kick')
+  meleeCombo(w) {
+    const c = this.player; const now = this.clock || 0; const chain = now - (this._mLast ?? -9) < 1.1; this._mLast = now;
+    this._mIdx = chain ? ((this._mIdx ?? -1) + 1) % 4 : 0; const key = ['jab', 'cross', 'hook', 'kick'][this._mIdx];
+    const mov = (this.playerSpeed || 0) > 0.6 || c.crW > 0.3;
+    if (key === 'kick') { if (mov) { this._mIdx = 0; return c.playUA('jab', { upper: true, to: 0.62, rate: 1.25, fi: 0.05, fo: 0.15 }); } this.pose.startSwing('kick', 0.62); return true; }
+    const R = { jab: [0, 0.62, 1.25], cross: [0, 0.78, 1.3], hook: [0, 0.47, 0.95] }[key];
+    return c.playUA(key, { upper: mov, from: R[0], to: R[1], rate: R[2], fi: 0.05, fo: 0.16 });
   }
   carCollisions(dt) {
     const cars = this.traffic.cars;

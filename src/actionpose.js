@@ -14,7 +14,7 @@ export class ActionPose {
   constructor(char) { this.bind(char); this.saved = []; this.swing = 0; this.swingDur = 0; this.swingKind = null; }
   bind(char) {
     this.c = char; const m = char.model;
-    this.b = { rA: find(m, /RightArm$/), rF: find(m, /RightForeArm$/), lA: find(m, /LeftArm$/), lF: find(m, /LeftForeArm$/), sp: find(m, /Spine2$/) || find(m, /Spine1$/) };
+    this.b = { rA: find(m, /RightArm$/), rF: find(m, /RightForeArm$/), lA: find(m, /LeftArm$/), lF: find(m, /LeftForeArm$/), sp: find(m, /Spine2$/) || find(m, /Spine1$/), rU: find(m, /RightUpLeg$/), rL: find(m, /RightLeg$/), rFt: find(m, /RightFoot$/), lU: find(m, /LeftUpLeg$/), lL: find(m, /LeftLeg$/), sp1: find(m, /Spine1$/) };
   }
   // undo last frame's offsets (the mixer may skip a frame at low LOD, so offsets must never accumulate)
   restore() { for (const [b, q] of this.saved) b.quaternion.copy(q); this.saved.length = 0; }
@@ -37,7 +37,12 @@ export class ActionPose {
         const lift = (b, a) => this.rot(b, R, a), abduct = (b, a, side) => this.rot(b, F, -side * a), twist = (b, a) => this.rot(b, UP, a); // +lift = forward/up, +abduct = away from the body, +twist = toward the character's left
     if (this.swing > 0) {
       this.swing = Math.max(0, this.swing - st.dt); const p = 1 - this.swing / this.swingDur; did = true;
-      if (this.swingKind === 'bat') {
+      if (this.swingKind === 'kick') { // anim2: front kick (no CC0 kick clip): chamber the knee, snap the shin out, recoil, set down
+        const ch = ss(0, 0.3, p) * (1 - ss(0.72, 1, p)); const ext = bump(0.28, 0.42, 0.55, 0.72, p);
+        lift(B.rU, 1.45 * ch); lift(B.rL, -1.7 * ch + 1.55 * ext); lift(B.rFt, 0.5 * ext); // thigh forward/up, knee folded then extended, toes pointed
+        lift(B.sp1, -0.28 * ch); lift(B.lU, 0.12 * ch); lift(B.lL, -0.22 * ch); // lean back over the bent standing leg
+        lift(B.lA, 0.7 * ch); lift(B.lF, 1.5 * ch); lift(B.rA, 0.45 * ch); lift(B.rF, 1.6 * ch); abduct(B.rA, 0.3 * ch, 1); abduct(B.lA, 0.2 * ch, -1); // fists up (guard)
+      } else if (this.swingKind === 'bat') {
         // wind-up (0-0.35): raise and pull back; strike (0.35-0.6): sweep across; follow-through and recover
         const up = ss(0, 0.3, p) * (1 - ss(0.55, 1, p)); const sweep = ss(0.32, 0.6, p); const back = 1 - ss(0.6, 1, p);
         twist(B.sp, (-0.55 * up + 0.75 * sweep) * back);

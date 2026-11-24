@@ -67,6 +67,7 @@ const texList = ['sky_day.jpg', 'sky_golden.jpg', 'sky_sunset.jpg', 'sky_dusk.jp
 const AP = (f) => (window.__A && window.__A[f]) || 'assets/' + f;
 const glbList = { car: 'car_sport.glb', carLod: 'car_sport_lod.glb', ph_hydrant: 'ph_hydrant.glb', ph_bin: 'ph_bin.glb', ph_cafe: 'ph_cafe.glb' };
 for (const k in CAST) glbList['ch_' + k] = CAST[k].file;
+glbList.anim_ual = 'anim_ual.glb'; // anim2: CC0 Quaternius UAL clips (retargeted per cast proto at first use, src/ualanim.js)
 
 async function load() {
   const T = {}; let done = 0; const total = texList.length + Object.keys(glbList).length;

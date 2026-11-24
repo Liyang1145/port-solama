@@ -7,6 +7,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { OLD, CHAR_LAYER } from './perf.js'; // perf_debug1
 import { ARIG, rigApply, rigReset, rigEnd } from './animrig.js'; // anim1
+import { UA, setUAL, ualClip, hasUAL } from './ualanim.js'; // anim2: CC0 Quaternius UAL clips retargeted per proto
 export const charLodReady = MeshoptSimplifier.ready;
 // v4.2 character LOD: per proto geometry, two simplified index buffers sharing the skinned vertex data (meshoptimizer)
 // r6.2 memory: glTF morph targets are per mesh, so every sub-mesh of a cast model (clothes, shoes, hair, ...) carried all 34 ARKit /
@@ -211,6 +212,7 @@ function cleanMorphTrack(t) {
 }
 export const morphFixStats = () => ({ ...MORPH_BAD });
 export function prepareCharacters(G) {
+  if (G.anim_ual) setUAL(G.anim_ual); // anim2
   for (const key in CAST) {
     const g = G['ch_' + key]; if (!g) continue;
     const names = new Set(); g.scene.traverse((o) => names.add(o.name));
@@ -303,6 +305,7 @@ export class Character {
     this._lp = null; this._ly = 0; this.mv = new THREE.Vector2(); this.mvy = 0; this.yawRate = 0; this.cmdSpeed = 0;
     this.phase = rng(); this.moveT = 0; this.runT = 0; this.idleT = -rand(1, 6); this.var = null; this.varW = 0; this.varT = 0;
     this.airW = 0; this.landW = 0; this.hitW = 0; this.swimW = 0; this.lookY = 0; this._hp = 100; this.lift = 0;
+    this.crouch = false; this.crW = 0; this._U = {}; this.os = []; this.ovF = 0; this.push = new THREE.Vector2(); this.yawKick = 0; // anim2
     this.mixer.update(0);
     this.root.scale.setScalar(opt.player ? 1 : rand(0.96, 1.04));
     this.lod = 0; this.lodAcc = 0; this.lodMeshes = [];
@@ -405,7 +408,8 @@ export class Character {
     if (wasAir && !air && A.jland) { A.jland.reset().play(); A.jland.time = 0.15; this.landW = 1; }
     this.landW = Math.max(0, this.landW - dt * 2.4);
     // hit flinch when health drops without dying
-    if (this.health < this._hp - 0.5 && !this.dead && A.hitF) { const k = rng() < 0.7 ? 'hitF' : 'hitB'; if (A[k]) { A[k].reset().play(); this.hitK = k; this.hitW = 1; } }
+    if (this.health < this._hp - 0.5 && !this.dead && UA.stagger && hasUAL()) this.stagger(this._hp - this.health); // anim2 (?oldstagger)
+    else if (this.health < this._hp - 0.5 && !this.dead && A.hitF) { const k = rng() < 0.7 ? 'hitF' : 'hitB'; if (A[k]) { A[k].reset().play(); this.hitK = k; this.hitW = 1; } }
     this._hp = this.health; this.hitW = Math.max(0, this.hitW - dt * 1.6);
     // target weights
     const T = {}; for (const k in A) T[k] = 0;
@@ -429,11 +433,21 @@ export class Character {
     for (const k of LOOPED) { const a = A[k]; if (!a) continue; a.w = lerp(a.w, T[k] || 0, r); if (a.w < 1e-4) a.w = 0; sum += a.w; }
     if (sum < 1e-3) { A.idle.w = 1; sum = 1; }
     for (const k of LOOPED) if (A[k]) A[k].weight = A[k].w / sum;
+    // anim2 crouch (?oldcrouch): UAL crouch idle / crouch walk take the ground share of the base layer
+    let cwA = null;
+    if (UA.crouch && (this.crW > 0 || this.crouch)) {
+      this.crW = lerp(this.crW, this.crouch && !this.dead ? ground : 0, 1 - Math.exp(-7 * dt)); if (this.crW < 1e-3 && !this.crouch) this.crW = 0;
+      const ci = this.uact('cidle', false, true), cw = cwA = this.uact('cwalk', false, true);
+      if (ci && cw) { const cr = this.crW; for (const k of LOOPED) if (A[k]) A[k].weight *= 1 - cr; ci.weight = cr * (1 - moveT); cw.weight = cr * moveT; cw.timeScale = 0; } else cwA = null;
+    }
+    // anim2 one-shots (punches, staggers, jump take-off / landing, get-up): full-body ones fade the base layer out under them
+    this.oneShots(dt, A);
     // one-shot overlays (weighted over the base)
     if (A.jland) A.jland.weight = this.landW * 0.8 * (1 - this.swimW);
     for (const k of ['hitF', 'hitB']) if (A[k]) A[k].weight = this.hitK === k ? Math.sin(Math.min(1, this.hitW) * Math.PI / 2) * 1.2 : 0;
     // shared stride phase: cycle frequency = speed / blended stride length, so planted feet do not slide
     let ws = 0, st = 0; for (const k of GAIT) if (A[k] && cal[k]) { ws += A[k].weight; st += A[k].weight * cal[k].stride; }
+    if (cwA && cwA.weight > 0) { ws += cwA.weight; st += cwA.weight * cwA.getClip().userData.stride; } // anim2 crouch walk shares the stride phase
     let stride = ws > 1e-3 ? st / ws : 1.4;
     if (ARIG.gait && !ARIG.off) stride *= 1 + 0.3 * smooth(sp, 4.2, 6.8); // anim1: sprint = longer strides, not just a faster cadence
     let fq = sp > 0.05 ? sp / stride : 0;
@@ -450,6 +464,7 @@ export class Character {
     if (this.swimW > 0.5) fq = 0;
     this.phase = (this.phase + clamp(fq, 0, 2.2) * dt) % 1;
     for (const k of GAIT) { const a = A[k]; if (!a) continue; const c = cal[k]; const d = c ? c.dur : a.getClip().duration; a.time = ((this.phase + (c ? c.ph : 0)) % 1) * d; }
+    if (cwA) { const u = cwA.getClip().userData; cwA.time = ((this.phase + u.ph) % 1) * cwA.getClip().duration; }
     // feet on the ground: weighted per-clip lift (calibrated against the bind pose)
     let lift = 0; for (const k of ['idle', ...GAIT, 'look', 'phone', 'text', 'talk']) if (A[k] && cal[k]) lift += A[k].weight * cal[k].lift;
     this.lift = lift;
@@ -491,12 +506,47 @@ export class Character {
       else if (this.lod === 1) { this.lodAcc = (this.lodAcc || 0) + dt; if (((this._af = (this._af || 0) + 1) + (this.id | 0)) % 2 === 0) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } }
       else if (this.lod === 2) { this.lodAcc = (this.lodAcc || 0) + dt; if (this.lodAcc > 0.16) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } } else this.lodAcc = Math.min(0.5, (this.lodAcc || 0) + dt); // lod 3 (not drawn): no pose work
     }
+    if (this.push.x || this.push.y) { // anim2 stagger shove (decays over ~0.4 s; collisions via Character.colFn)
+      const k = Math.exp(-7 * dt); const nx = this.pos.x + this.push.x * dt, nz = this.pos.z + this.push.y * dt; const r = Character.colFn ? Character.colFn(nx, nz, this.pos.y) : null;
+      this.pos.x = r ? r.x : nx; this.pos.z = r ? r.z : nz; this.push.multiplyScalar(k); if (this.push.lengthSq() < 1e-3) this.push.set(0, 0); }
+    if (this.yawKick) { const s = this.yawKick * (1 - Math.exp(-12 * dt)); this.yaw += s; this.yawKick -= s; if (Math.abs(this.yawKick) < 1e-3) this.yawKick = 0; }
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
     if (!ARIG.off && !(this.dead && !this.deathA)) rigApply(this, dt, this.mixer.time !== posed0 || this._posed0Always, Character.groundFn); // anim1 procedural layer
     if (!this.dead && this.lod === 0) this.lookAt(dt); else this.lookY = 0;
     if (this._rg) rigEnd(this);
     if (this.weaponMesh) this.poseWeapon();
     if (this.phone || this.var === 'phone' || this.var === 'text' || this.lastVar === 'phone' || this.lastVar === 'text') this.posePhone();
+  }
+  // anim2: lazily retargeted UAL action (per proto clip cache in ualanim.js); loop = base-layer clip, else one-shot (clamped)
+  uact(key, upper = false, loop = false) {
+    const ck = key + (upper ? '_u' : ''); if (ck in this._U) return this._U[ck];
+    const clip = hasUAL() ? ualClip(this.P, key, upper) : null; if (!clip) return this._U[ck] = null;
+    const a = this.mixer.clipAction(clip); if (!loop) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; } a.play(); a.weight = 0; return this._U[ck] = a;
+  }
+  // play a UAL clip as an overlay: from / to (s in the clip), rate, fade in / out (s), w = peak weight, upper = arms + spine only
+  playUA(key, o = {}) {
+    const a = this.uact(key, !!o.upper); if (!a) return false; const d = a.getClip().duration; const from = o.from ?? 0, to = Math.min(d, o.to ?? d), rate = o.rate ?? 1;
+    for (const e of this.os) if (e.a === a) e.dead = true;
+    a.reset(); a.play(); a.time = from; a.timeScale = rate; a.weight = 0;
+    this.os = this.os.filter((e) => !e.dead); this.os.push({ a, key, t: 0, dur: Math.max(0.05, (to - from) / rate), fi: o.fi ?? 0.08, fo: o.fo ?? 0.2, w: o.w ?? 1, upper: !!o.upper });
+    return true;
+  }
+  oneShots(dt, A) {
+    let ovF = 0; const L = this.os;
+    for (const e of L) { e.t += dt; const fi = e.fi > 0 ? Math.min(1, e.t / e.fi) : 1, fo = e.fo > 0 ? Math.min(1, Math.max(0, (e.dur - e.t) / e.fo)) : 1; e.env = smooth(Math.min(fi, fo), 0, 1) * e.w;
+      if (!e.upper) ovF = Math.max(ovF, e.env); }
+    this.ovF = ovF;
+    if (ovF > 0) { for (const k of LOOPED) if (A[k]) A[k].weight *= 1 - ovF; for (const k of ['cidle', 'cwalk']) { const a = this._U[k]; if (a) a.weight *= 1 - ovF; } if (A.jland) A.jland.weight *= 1 - ovF; }
+    for (const e of L) { const x = Math.min(0.95, e.env); e.a.weight = e.upper ? x / (1.05 - x) : e.env; if (e.t >= e.dur) { e.a.weight = 0; e.a.stop(); } }
+    if (L.length && L.some((e) => e.t >= e.dur)) this.os = L.filter((e) => e.t < e.dur);
+  }
+  // anim2 (?oldstagger): a hit plays a UAL chest / head flinch (full body standing, upper body on the move or crouched) and the
+  // knock-back becomes a short decaying shove (Character.update) instead of a same-frame teleport; heavy hits stagger further
+  stagger(dmg = 20) {
+    if (this.dead || !hasUAL()) return; const head = this._hitHead ?? rng() < 0.3; this._hitHead = undefined;
+    const mov = this.speed > 1.2 || this.crW > 0.3 || this.isPlayer || this.aimW > 0.3 || this._seat;
+    this.playUA(head ? 'hitH' : 'hitC', { upper: mov, w: mov ? 0.85 : 1, fi: 0.04, fo: 0.25, rate: 0.9 });
+    this.hitW = 0;
   }
   kill(dirSign = 1) {
     if (this.dead) return;
@@ -506,6 +556,7 @@ export class Character {
     if (da) {
       this.deathA = da;
       for (const k in this.A) { this.A[k].weight = 0; this.A[k].w = 0; }
+      for (const e of this.os) { e.a.weight = 0; e.a.stop(); } this.os = []; this.ovF = 0; for (const k in this._U) if (this._U[k]) this._U[k].weight = 0; // anim2
       if (this.aimA) this.aimA.weight = 0; if (this.raimA) this.raimA.weight = 0;
       da.reset(); da.weight = 1; da.play();
     } else for (const k in this.A) this.A[k].weight = k === 'idle' ? 1 : 0;
@@ -516,11 +567,13 @@ export class Character {
     this.deathA = this.deathF || this.deathB || null;
     for (const k in this.A) { this.A[k].w = k === 'idle' ? 1 : 0; this.A[k].weight = this.A[k].w; if (!LOOPED.includes(k)) this.A[k].stop(); else this.A[k].play(); }
     this._lp = null; this.idleT = -3; this.var = null;
+    for (const e of this.os) { e.a.weight = 0; e.a.stop(); } this.os = []; this.ovF = 0; this.push.set(0, 0); this.yawKick = 0; this.crouch = false; this.crW = 0; for (const k in this._U) if (this._U[k]) this._U[k].weight = 0; // anim2
   }
   dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); if (this.phone) this.scene.remove(this.phone); }
 }
 Character.lookTarget = null;
 Character.groundFn = null; // anim1: (x, z) -> ground height for the foot IK (set by Game)
+Character.colFn = null; // anim2: (x, z, y) -> resolved {x, z} for the stagger shove (set by Game)
 let PHONE_G = null; const PHONE_MAT = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.25 });
 function phoneGeo() { if (!PHONE_G) { PHONE_G = new THREE.BoxGeometry(0.068, 0.142, 0.009); } return PHONE_G; }
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
@@ -706,4 +759,20 @@ export function poseSeated(c, S, w = 1) {
   }
   if (w < 1) SB.forEach((n, i) => { if (B[n]) B[n].quaternion.slerpQuaternions(q0[i], B[n].quaternion.clone(), w); });
   return true;
+}
+
+// anim2 (?olddoor): reach for a door handle (two-bone arm IK, hand pulled toward target, blended by w) and a duck (spine + neck
+// flexion about the character's left axis) for getting in / out of a car; used by src/seating.js after poseSeated
+export function poseReach(c, right, target, w) {
+  if (w <= 0.001) return; const B = c._seatBones || (c._seatBones = Object.fromEntries(SB.map((n) => [n, c.model.getObjectByName(n)])));
+  const arm = right ? B.RightArm : B.LeftArm, fore = right ? B.RightForeArm : B.LeftForeArm, hand = right ? B.RightHand : B.LeftHand; if (!arm || !fore || !hand) return;
+  const q0 = [arm.quaternion.clone(), fore.quaternion.clone()]; const sp = arm.getWorldPosition(new THREE.Vector3());
+  const yq = c.root.getWorldQuaternion(new THREE.Quaternion()); const left = new THREE.Vector3(1, 0, 0).applyQuaternion(yq), back = new THREE.Vector3(0, 0, -1).applyQuaternion(yq);
+  ik2(arm, fore, hand, target, sp.clone().addScaledVector(_up, -0.6).addScaledVector(left, right ? -0.4 : 0.4).addScaledVector(back, 0.25));
+  if (w < 1) { arm.quaternion.slerpQuaternions(q0[0], arm.quaternion.clone(), w); fore.quaternion.slerpQuaternions(q0[1], fore.quaternion.clone(), w); arm.updateMatrixWorld(true); }
+}
+export function poseDuck(c, ang) {
+  if (Math.abs(ang) < 0.005) return; const B = c._seatBones || (c._seatBones = Object.fromEntries(SB.map((n) => [n, c.model.getObjectByName(n)])));
+  const yq = c.root.getWorldQuaternion(new THREE.Quaternion()); const left = new THREE.Vector3(1, 0, 0).applyQuaternion(yq);
+  if (B.Spine1) rotateBoneWorld(B.Spine1, left, ang * 0.6); if (B.Neck) rotateBoneWorld(B.Neck, left, ang * 0.5);
 }
