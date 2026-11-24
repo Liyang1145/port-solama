@@ -19,6 +19,7 @@ const sm = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t
 const ex = (k, dt) => 1 - Math.exp(-k * dt);
 const NAMES = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftShoulder', 'RightShoulder', 'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm',
   'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase'];
+const FULL_D = 12; // m from the camera: NPCs farther (LOD0 up to 20 m) get the lean only
 const AMP = ['LeftUpLeg', 'RightUpLeg', 'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm'];
 const _m = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3(), _v6 = new THREE.Vector3(), _v7 = new THREE.Vector3();
@@ -26,8 +27,14 @@ const _fw = new THREE.Vector3(), _lf = new THREE.Vector3(), _up = new THREE.Vect
 const wq = (o, out) => out.setFromRotationMatrix(_m.extractRotation(o.matrixWorld));
 const wp = (o, out) => out.setFromMatrixPosition(o.matrixWorld);
 // set a bone's world rotation (parent matrixWorld must be current), then refresh its subtree
-function setWorldQ(b, q) { wq(b.parent, _qc).invert(); b.quaternion.copy(_qc.multiply(q)); b.updateMatrixWorld(true); }
-function rotWorld(b, axis, ang) { if (Math.abs(ang) < 1e-5) return; _qa.setFromAxisAngle(axis, ang); wq(b, _qb); _qa.multiply(_qb); setWorldQ(b, _qa); }
+// perf: world matrices are refreshed only for the bones this layer reads (R.ord: the edited bones + their ancestors, parents first;
+// fingers etc. are left to the renderer's scene.updateMatrixWorld before the draw)
+let CUR = null;
+function upd(L) { for (let i = 0; i < L.length; i++) { const b = L[i]; b.matrix.compose(b.position, b.quaternion, b.scale); b.matrixWorld.multiplyMatrices(b.parent.matrixWorld, b.matrix); } }
+function updB(b) { const L = CUR && CUR.sub.get(b); if (L) upd(L); else b.updateMatrixWorld(true); }
+function setWorldQ(b, q) { wq(b.parent, _qc).invert(); b.quaternion.copy(_qc.multiply(q)); updB(b); }
+// small world-axis rotation without refreshing matrices (the caller refreshes once after a batch; second-order error only)
+function rotWorldL(b, axis, ang) { if (Math.abs(ang) < 1e-5) return; wq(b.parent, _qc); _qb.copy(_qc).invert(); _qa.setFromAxisAngle(axis, ang); _qb.multiply(_qa).multiply(_qc); b.quaternion.premultiply(_qb); }
 // rotate bone so that the direction bone->child points at target (world)
 function aim(b, child, target) {
   const bp = wp(b, _v5), cur = wp(child, _v6).sub(bp), want = _v7.copy(target).sub(bp);
@@ -48,9 +55,13 @@ function init(c) {
   const B = {}; for (const n of NAMES) B[n] = c.model.getObjectByName(n) || null;
   const ok = B.Hips && B.Spine1 && B.LeftUpLeg && B.LeftLeg && B.LeftFoot && B.RightUpLeg && B.RightLeg && B.RightFoot;
   const bl = NAMES.map((n) => B[n]).filter(Boolean); // bones this layer (and the look-at after it) edits
+  const set = new Set(); for (const b of bl) for (let o = b; o && o !== c.model; o = o.parent) set.add(o);
+  const depth = (o) => { let d = 0; for (; o && o !== c.model; o = o.parent) d++; return d; };
+  const ord = [...set].sort((x, y) => depth(x) - depth(y)); const sub = new Map();
+  for (const b of ord) sub.set(b, ord.filter((o) => { for (let p = o; p && p !== c.model; p = p.parent) if (p === b) return true; return false; }));
   const rest = {}; for (const n of AMP) if (B[n]) rest[n] = B[n].quaternion.clone(); // idle frame-0 pose (constructor ran mixer.update(0) on idle)
   const r = Math.random;
-  return { B, ok, rest, bl, clean: new Float64Array(bl.length * 4), out: new Float64Array(bl.length * 4), hasOut: false, roll: 0, pitch: 0, acc: 0, lsp: 0, exert: 0, bt: r(), st: r() * 50, sway: r() * 6.28, hq: new THREE.Quaternion(), hqOk: false,
+  return { B, ok, rest, bl, ord, sub, clean: new Float64Array(bl.length * 4), out: new Float64Array(bl.length * 4), hasOut: false, roll: 0, pitch: 0, acc: 0, lsp: 0, exert: 0, bt: r(), st: r() * 50, sway: r() * 6.28, hq: new THREE.Quaternion(), hqOk: false,
     aq: { LeftArm: new THREE.Quaternion(), RightArm: new THREE.Quaternion() }, aqOk: false, drop: 0, slope: 0,
     feet: [mkFoot(B.LeftUpLeg, B.LeftLeg, B.LeftFoot, B.LeftToeBase), mkFoot(B.RightUpLeg, B.RightLeg, B.RightFoot, B.RightToeBase)], ank: null };
 }
@@ -72,7 +83,7 @@ export function rigApply(c, dt, posed, groundFn) {
   if (ARIG.off || dt <= 0) return;
   if (c.dead || c._seat || !c.root.visible || c.lod > 1 && !c.isPlayer) { const R = c._rg; if (R) { if (!c.dead && !c._seat) rigReset(c); else if (R.hasOut) { restoreClean(R); R.hasOut = false; R.full = false; } } return; }
   const t0 = performance.now(); const R = c._rg || (c._rg = init(c)); if (!R.ok) return;
-  const full = (c.isPlayer || c.lod === 0) && posed; ARIG_ST.calls++; R.full = full;
+  const full = (c.isPlayer || c.lod === 0 && (c._camD ?? 0) < FULL_D) && posed; ARIG_ST.calls++; R.full = full;
   if (R.hasOut) { restoreClean(R); if (!full) R.hasOut = false; } else if (full) restoreClean(R); if (full) ARIG_ST.full++; else ARIG_ST.lean++;
   const sp = c.speed, moveT = sm(sp, 0.08, 0.7), runT = sm(sp, 2.3, 3.8), sprT = sm(sp, 4.4, 6.6), gnd = (1 - c.swimW) * (1 - c.airW);
   // ---- signals: forward acceleration, lateral (turn) acceleration, slope of travel
@@ -94,25 +105,26 @@ export function rigApply(c, dt, posed, groundFn) {
   const swayX = full && ARIG.breath ? Math.sin(R.st * 0.75 + R.sway) * 0.018 * idleW : 0;
   c.model.rotation.set(R.pitch * bodyK, 0, R.roll * bodyK); c.model.position.x = swayX / (c.root.scale.x || 1);
   if (!full) { ARIG_ST.ms += performance.now() - t0; return; }
-  const B = R.B; c.root.updateMatrixWorld(true);
+  const B = R.B; CUR = R;
   _fw.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)); _lf.set(Math.cos(c.yaw), 0, -Math.sin(c.yaw)); // character forward / left (world)
   // ---- sprint: larger thigh / arm swing (extrapolate the clip pose away from the idle rest pose)
   if (ARIG.sec && sprT > 0.01 && c.aimW < 0.1 && gnd > 0.5) {
     const k = 1 + 0.32 * sprT * gnd; for (const n of AMP) { const b = B[n]; if (!b || !R.rest[n]) continue; if (n.includes('Arm') && c.weaponId && /smg|rifle|shotgun|carbine|lmg|sniper/i.test(c.weaponId)) continue; _qa.copy(R.rest[n]).slerp(b.quaternion, k); b.quaternion.copy(_qa); }
-    B.Hips.updateMatrixWorld(true);
   }
+  c.root.updateWorldMatrix(false, false); c.model.updateWorldMatrix(false, false); upd(R.ord);
   // ---- spine share of the lean + breathing
   const sR = R.roll * (1 - bodyK), sP = R.pitch * (1 - bodyK);
-  if (sR || sP) { rotWorld(B.Spine1, _fw, sR * 0.6); rotWorld(B.Spine1, _lf, sP * 0.6); if (B.Spine2) { rotWorld(B.Spine2, _fw, sR * 0.4); rotWorld(B.Spine2, _lf, sP * 0.4); } }
+  if (sR || sP) { rotWorldL(B.Spine1, _fw, sR * 0.6); rotWorldL(B.Spine1, _lf, sP * 0.6); if (B.Spine2) { rotWorldL(B.Spine2, _fw, sR * 0.4); rotWorldL(B.Spine2, _lf, sP * 0.4); } }
   if (ARIG.breath) {
     R.bt += dt * (0.24 + 0.34 * R.exert); const br = Math.sin(R.bt * 6.2832), dep = (0.6 + 0.9 * R.exert) * (1 - 0.6 * moveT);
-    if (B.Spine2) rotWorld(B.Spine2, _lf, -0.014 * br * dep);
-    if (B.LeftShoulder) rotWorld(B.LeftShoulder, _fw, -0.018 * br * dep);
-    if (B.RightShoulder) rotWorld(B.RightShoulder, _fw, 0.018 * br * dep);
-    if (idleW > 0.01) { rotWorld(B.Hips, _fw, Math.sin(R.st * 0.75 + R.sway + 1.2) * 0.022 * idleW); rotWorld(B.Spine1, _fw, -Math.sin(R.st * 0.75 + R.sway + 1.2) * 0.026 * idleW); }
+    if (B.Spine2) rotWorldL(B.Spine2, _lf, -0.014 * br * dep);
+    if (B.LeftShoulder) rotWorldL(B.LeftShoulder, _fw, -0.018 * br * dep);
+    if (B.RightShoulder) rotWorldL(B.RightShoulder, _fw, 0.018 * br * dep);
+    if (idleW > 0.01) { rotWorldL(B.Hips, _fw, Math.sin(R.st * 0.75 + R.sway + 1.2) * 0.022 * idleW); rotWorldL(B.Spine1, _fw, -Math.sin(R.st * 0.75 + R.sway + 1.2) * 0.026 * idleW); }
   }
   // ---- head: counter the body roll (eyes level), stabilise while moving; upper arms lag a little (follow-through)
-  if (ARIG.lean && B.Neck) rotWorld(B.Neck, _fw, -R.roll * 0.7);
+  if (ARIG.lean && B.Neck) rotWorldL(B.Neck, _fw, -R.roll * 0.7);
+  upd(R.ord);
   if (ARIG.sec && B.Head && c.aimW < 0.1) {
     wq(B.Head, _qb); if (!R.hqOk) { R.hq.copy(_qb); R.hqOk = true; }
     R.hq.slerp(_qb, ex(9, dt)); const w = 0.5 * moveT * gnd; if (w > 0.01) { _qa.copy(_qb).slerp(R.hq, w); setWorldQ(B.Head, _qa); }
@@ -124,7 +136,7 @@ export function rigApply(c, dt, posed, groundFn) {
   // ---- feet on the ground
   if (ARIG.ik && groundFn && gnd > 0.3) footIK(c, R, dt, groundFn, gnd);
   else { R.drop += (0 - R.drop) * ex(10, dt); for (const f of R.feet) { f.locked = false; f.lw = 0; } }
-  ARIG_ST.ms += performance.now() - t0;
+  CUR = null; ARIG_ST.ms += performance.now() - t0;
 }
 function footIK(c, R, dt, G, gnd) {
   const s = c.P.scale * (c.root.scale.x || 1); const base = c.pos.y;
@@ -139,7 +151,7 @@ function footIK(c, R, dt, G, gnd) {
   }
   // hips sink to the lower foot (step down, kerb edge, slope); smoothed
   R.drop += (minOff - R.drop) * ex(12, dt);
-  c.model.position.y += R.drop / (c.root.scale.x || 1); c.model.updateMatrixWorld(true);
+  c.model.position.y += R.drop / (c.root.scale.x || 1); if (R.drop) { c.model.matrixWorld.elements[13] += R.drop; for (const b of R.ord) b.matrixWorld.elements[13] += R.drop; }
   for (const f of R.feet) {
     const A = wp(f.f, _v1); // after the hip drop
     // anim clearance of the sole above the root plane (0 when the clip plants this foot)

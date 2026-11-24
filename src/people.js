@@ -340,6 +340,7 @@ export class Character {
   setLod(d) {
     // r6.2 crowd draw distance: beyond CROWD_DRAW a character (< ~10 px tall at 960 px) is not drawn at all (model hidden, root
     // logic untouched); with 84 peds + seated drivers + 17 distinct cast models this keeps draw calls and GPU memory bounded
+    this._camD = d; // anim1
     const far = d > (this.lod === 3 ? CROWD_DRAW - 5 : CROWD_DRAW);
     const L = far ? 3 : d < 20 ? 0 : d < 50 ? 1 : 2; if (L === this.lod) return; this.lod = L; this.model.visible = L < 3; if (L === 3) return;
     for (const e of this.lodMeshes) { if (e.g) e.m.geometry = e.g[L]; e.m.visible = !(e.small && L > 0); e.m.castShadow = e.cast && d < 28; }
