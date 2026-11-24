@@ -5,6 +5,7 @@ import { Vehicle, Traffic, prepareSport, prepareModels, setCarNight, prebakeCabi
 import { prebuildGuns } from './gunmodels.js';
 import { Occupants } from './seating.js';
 import { Character, Pedestrians, prepareCharacters } from './people.js';
+import { ARIG } from './animrig.js'; // anim1
 import { HUD } from './hud.js';
 import { Sfx } from './sfx.js';
 import { clamp, lerp, rand, pick, angWrap, rng, damp } from './util.js';
@@ -39,6 +40,7 @@ export class Game {
     this.sfx = new Sfx();
     // player
     this.player = new Character(this.scene, 'man', { player: true });
+    Character.groundFn = (x, z) => this.city.groundH(x, z); // anim1 foot IK
     this.P = { pos: this.player.pos, yaw: 0, vy: 0, onFoot: true, car: null, health: 100, armor: 40, money: 5000, bank: 12000, stamina: 100, load: newLoadout(['fist', 'pistol']), assets: [], outfit: null, reloadT: 0, fireT: 0, grounded: true, sprint: false };
     this.cam = { yaw: Math.PI, pitch: -0.12, dist: 3.4, lastMouse: 0, mode: 0, pos: new THREE.Vector3(), look: new THREE.Vector3() };
     this.keys = {}; this.mouse = { down: false, aim: false };
@@ -412,7 +414,11 @@ export class Game {
     let sp = 0;
     const gh = this.city.groundH(P.pos.x, P.pos.z);
     const swim = gh < -1.25;
-    if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0; P.yaw += angWrap(Math.atan2(dx, dz) - P.yaw) * (1 - Math.exp(-12 * dt)); }
+    if (len > 0.01) { dx /= len; dz /= len; sp = swim ? 1.6 : walk ? 1.5 : sprint ? 6.8 : 4.0; const dyw = angWrap(Math.atan2(dx, dz) - P.yaw);
+      // anim1 pivot (?oldgait): from (near) standing, a > 60 deg turn is a quick turn on the spot (feet re-step) before walking off,
+      // instead of spinning the whole body around while it already accelerates the other way
+      if (ARIG.gait && !ARIG.off && !swim && (P.pivot || (Math.abs(dyw) > 1.05 && (this.curSpeed || 0) < 1.2))) { P.pivot = Math.abs(dyw) > 0.35; const st = Math.sign(dyw) * Math.min(Math.abs(dyw), 11 * dt); P.yaw += P.pivot ? st : dyw * (1 - Math.exp(-12 * dt)); if (P.pivot) sp = 0.6; }
+      else { P.pivot = false; P.yaw += dyw * (1 - Math.exp(-12 * dt)); } } else P.pivot = false;
     P.sprint = sprint && len > 0.01 && !swim;
     if (this.mouse.aim || this.mouse.down || (ov && (ov.aim || ov.fire))) P.yaw = yawC; // face aim direction
     this.curSpeed = damp(this.curSpeed || 0, sp, 10, dt);

@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import { OLD, CHAR_LAYER } from './perf.js'; // perf_debug1
+import { ARIG, rigApply, rigReset } from './animrig.js'; // anim1
 export const charLodReady = MeshoptSimplifier.ready;
 // v4.2 character LOD: per proto geometry, two simplified index buffers sharing the skinned vertex data (meshoptimizer)
 // r6.2 memory: glTF morph targets are per mesh, so every sub-mesh of a cast model (clothes, shoes, hair, ...) carried all 34 ARKit /
@@ -190,6 +191,12 @@ function calibrate(P) {
     cal[k] = { lift: clamp(rest - lo, -0.12, 0.12), stride: Math.max(0.3, 2 * (mx - mn)), ph: tm, dur: d };
     a.stop(); mixer.uncacheAction(c);
   }
+  // anim1: ankle / ball-of-foot joint heights above the sole, read in the idle clip's first frame (both feet flat; the idle lift puts
+  // the soles on the ground) — the foot IK and the probes take sole = min(ankle - __ank, toe - __toe)
+  const lt = m.getObjectByName('LeftToeBase');
+  if (P.clips.idle && lf && lt) { const a = mixer.clipAction(P.clips.idle); a.play(); a.weight = 1; mixer.setTime(0); m.updateMatrixWorld(true); const L = (cal.idle ? cal.idle.lift : 0);
+    cal.__ank = clamp(lf.getWorldPosition(v).y + L, 0.04, 0.16); cal.__toe = clamp(lt.getWorldPosition(v).y + L, 0.0, 0.1); a.stop(); mixer.uncacheAction(P.clips.idle); }
+  else { cal.__ank = 0.085; cal.__toe = 0.05; }
   return cal;
 }
 
@@ -426,8 +433,19 @@ export class Character {
     for (const k of ['hitF', 'hitB']) if (A[k]) A[k].weight = this.hitK === k ? Math.sin(Math.min(1, this.hitW) * Math.PI / 2) * 1.2 : 0;
     // shared stride phase: cycle frequency = speed / blended stride length, so planted feet do not slide
     let ws = 0, st = 0; for (const k of GAIT) if (A[k] && cal[k]) { ws += A[k].weight; st += A[k].weight * cal[k].stride; }
-    const stride = ws > 1e-3 ? st / ws : 1.4; let fq = sp > 0.05 ? sp / stride : 0;
+    let stride = ws > 1e-3 ? st / ws : 1.4;
+    if (ARIG.gait && !ARIG.off) stride *= 1 + 0.3 * smooth(sp, 4.2, 6.8); // anim1: sprint = longer strides, not just a faster cadence
+    let fq = sp > 0.05 ? sp / stride : 0;
     if (tw > 0 && moveT < 0.5) fq = Math.max(fq, 0.9 * turn);
+    if (ARIG.gait && !ARIG.off) {
+      // anim1 start: leaving a stand still, the cycle starts at the passing pose (feet together, right foot about to swing) instead of
+      // wherever the shared phase was left -> no first-frame stride split / foot pop
+      if (moveT > 0.02 && this._mT <= 0.02 && ws < 0.15) this.phase = 0.2;
+      // stop: while the gait weights fade out, finish the step to the next passing pose (feet under the body) instead of freezing
+      // mid-stride and sliding the spread feet together
+      if (sp < 0.6 && ws > 0.06 && !(tw > 0)) { const ph = this.phase % 0.5; const left = ph <= 0.25 ? 0.25 - ph : 0.75 - ph; if (left > 0.02) fq = Math.max(fq, 1.5); else fq = Math.min(fq, 0.2); }
+    }
+    this._mT = moveT;
     if (this.swimW > 0.5) fq = 0;
     this.phase = (this.phase + clamp(fq, 0, 2.2) * dt) % 1;
     for (const k of GAIT) { const a = A[k]; if (!a) continue; const c = cal[k]; const d = c ? c.dur : a.getClip().duration; a.time = ((this.phase + (c ? c.ph : 0)) % 1) * d; }
@@ -451,7 +469,7 @@ export class Character {
     }
   }
   update(dt) {
-    this.sense(dt);
+    this.sense(dt); const posed0 = this.mixer.time; // anim1: mixer advanced this frame?
     const long = this.weaponId && LONG_GUNS.test(this.weaponId);
     this.aimW = lerp(this.aimW, this.aiming && !this.dead ? 1 : 0, 1 - Math.exp(-14 * dt));
     if (this.aimA) this.aimA.weight = this.aimW * (long ? 0 : 6) * (1 - this.swimW);
@@ -473,6 +491,7 @@ export class Character {
       else if (this.lod === 2) { this.lodAcc = (this.lodAcc || 0) + dt; if (this.lodAcc > 0.16) { this.mixer.update(this.lodAcc); this.lodAcc = 0; } } else this.lodAcc = Math.min(0.5, (this.lodAcc || 0) + dt); // lod 3 (not drawn): no pose work
     }
     this.root.position.copy(this.pos); this.root.rotation.y = this.yaw;
+    if (!ARIG.off && !(this.dead && !this.deathA)) rigApply(this, dt, this.mixer.time !== posed0 || this._posed0Always, Character.groundFn); // anim1 procedural layer
     if (!this.dead && this.lod === 0) this.lookAt(dt); else this.lookY = 0;
     if (this.weaponMesh) this.poseWeapon();
     if (this.phone || this.var === 'phone' || this.var === 'text' || this.lastVar === 'phone' || this.lastVar === 'text') this.posePhone();
@@ -499,6 +518,7 @@ export class Character {
   dispose() { this.scene.remove(this.root); if (this.weaponMesh) this.scene.remove(this.weaponMesh); if (this.phone) this.scene.remove(this.phone); }
 }
 Character.lookTarget = null;
+Character.groundFn = null; // anim1: (x, z) -> ground height for the foot IK (set by Game)
 let PHONE_G = null; const PHONE_MAT = new THREE.MeshStandardMaterial({ color: 0x15171b, metalness: 0.4, roughness: 0.25 });
 function phoneGeo() { if (!PHONE_G) { PHONE_G = new THREE.BoxGeometry(0.068, 0.142, 0.009); } return PHONE_G; }
 const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _q3 = new THREE.Quaternion();
