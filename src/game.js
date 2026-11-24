@@ -527,10 +527,15 @@ export class Game {
     if (!P.car && !(this.oldCamWall ?? (this.oldCamWall = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldcamwall')))) {
       const free0 = t * dist; let by = 0, bu = 0;
       if (free0 < 1.6) { let best = free0 - 0.2;
-        for (const dy of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6]) for (const du of [0, 0.8, 1.6]) { if (!dy && !du) continue;
+        // fix_pt7 #3 (?oldcamcorner = old: |swing| <= 1.6 rad): in an inside corner (two walls behind / beside the player, container
+        // corner B (140.8,-336.5): 2 of 16 yaws hidden) the only free booms are swung 2.0-2.8 rad, round to the player's open side;
+        // also try +-2.2 / +-2.8 (same penalty per rad), and keep to the side already swung to (0.15 bonus) so the choice does not flip
+        const DYS = this._camDys || (this._camDys = typeof location !== 'undefined' && /[?&]oldcamcorner\b/.test(location.search) ? [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6] : [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.2, -2.2, 2.8, -2.8]);
+        const hyst = DYS.length > 7 ? 0.15 : 0;
+        for (const dy of DYS) for (const du of [0, 0.8, 1.6]) { if (!dy && !du) continue;
           const yw = C.yaw + dy, px = Math.sin(yw) * cp * dist, pz = Math.cos(yw) * cp * dist, py = -sp * dist + height + du;
           const tt = this.city.col.raycast(target.x, target.y, target.z, target.x + px, target.y + py, target.z + pz); const fr = tt * Math.hypot(px, py, pz);
-          const sc = Math.min(fr, dist) - 0.35 * Math.abs(dy) - 0.25 * du; if (fr > free0 + 0.3 && sc > best) { best = sc; by = dy; bu = du; } } }
+          const sc = Math.min(fr, dist) - 0.35 * Math.abs(dy) - 0.25 * du + (hyst && dy * (C.wy || 0) > 0 ? hyst : 0); if (fr > free0 + 0.3 && sc > best) { best = sc; by = dy; bu = du; } } }
       if (typeof window !== 'undefined' && window.__CAMDBG) window.__CAMDBG.push({ target: [target.x, target.y, target.z].map((v) => +v.toFixed(2)), free0: +free0.toFixed(2), by, bu, t: +t.toFixed(3) });
       const k = snap ? 1 : 1 - Math.exp(-6 * dt); C.wy = (C.wy || 0) + (by - (C.wy || 0)) * k; C.wu = (C.wu || 0) + (bu - (C.wu || 0)) * k;
       if (Math.abs(C.wy) > 0.01 || C.wu > 0.01) { const yw = C.yaw + C.wy; want.set(target.x + Math.sin(yw) * cp * dist, target.y - sp * dist + height + C.wu, target.z + Math.cos(yw) * cp * dist);
