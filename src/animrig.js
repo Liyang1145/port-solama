@@ -18,13 +18,13 @@ const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const sm = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const ex = (k, dt) => 1 - Math.exp(-k * dt);
 const NAMES = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftShoulder', 'RightShoulder', 'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm',
-  'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase'];
+  'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase', 'LeftHand', 'RightHand']; // anim3: hands (vault hand plant)
 const FULL_D = 12; // m from the camera: NPCs farther (LOD0 up to 20 m) get the lean + (anim3) the light foot lock only
 const FEET_D = 20; // anim3: light tier = leg IK lock only (one ground sample per foot, no sole tilt, no spine / breath / head / arms)
 const AMP = ['LeftUpLeg', 'RightUpLeg', 'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm'];
 const _m = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3(), _v6 = new THREE.Vector3(), _v7 = new THREE.Vector3();
-const _k1 = new THREE.Vector3(), _k2 = new THREE.Vector3(), _k3 = new THREE.Vector3(), _k4 = new THREE.Vector3();
+const _hq = new THREE.Quaternion(), _k1 = new THREE.Vector3(), _k2 = new THREE.Vector3(), _k3 = new THREE.Vector3(), _k4 = new THREE.Vector3();
 const _fw = new THREE.Vector3(), _lf = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _n = new THREE.Vector3();
 const wq = (o, out) => out.setFromRotationMatrix(_m.extractRotation(o.matrixWorld));
 const wp = (o, out) => out.setFromMatrixPosition(o.matrixWorld);
@@ -141,10 +141,21 @@ export function rigApply(c, dt, posed, groundFn) {
       R.aqOk = true;
     }
   } else R.hqOk = R.aqOk = false;
+  // ---- anim3 vault: hands planted on the obstacle's top edge (c.handT = { w, L: Vector3, R: Vector3 } set by src/vault.js)
+  if (c.handT && c.handT.w > 0.001 && B.LeftHand && B.RightHand) handIK(c, R);
   // ---- feet on the ground
   if (ARIG.ik && groundFn && gnd > 0.3) footIK(c, R, dt, groundFn, gnd);
   else { R.drop += (0 - R.drop) * ex(10, dt); for (const f of R.feet) { f.locked = false; f.lw = 0; } }
   CUR = null; ARIG_ST.ms += performance.now() - t0;
+}
+function handIK(c, R) {
+  const B = R.B, H = c.handT, w = Math.min(1, H.w);
+  for (const [s, T, sg] of [['Left', H.L, 1], ['Right', H.R, -1]]) {
+    const up = B[s + 'Arm'], mid = B[s + 'ForeArm'], end = B[s + 'Hand']; if (!up || !mid || !end || !T) continue;
+    const P0 = wp(end, _v1); _k3.copy(P0).lerp(T, w); wq(end, _hq);
+    const E = wp(mid, _v2); _k4.copy(E).addScaledVector(_lf, 0.35 * sg).addScaledVector(_fw, -0.25).addScaledVector(_up, 0.1); // elbows out and back
+    ik2(up, mid, end, _k3, _k4); setWorldQ(end, _hq); // keep the clip's hand orientation (palm down in the tuck)
+  }
 }
 function footIK(c, R, dt, G, gnd, lite) {
   const s = c.P.scale * (c.root.scale.x || 1); const base = c.pos.y;

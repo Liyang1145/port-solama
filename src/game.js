@@ -21,6 +21,7 @@ import { POI } from './mapdata.js';
 import { CYBER } from './mapsel.js';
 import { routeWaypoint } from './roadroute.js';
 import { ActionPose } from './actionpose.js';
+import { VAULT, vaultScan, vaultStart, vaultStep } from './vault.js'; // anim3
 const OLD_EXIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldexit'); // fix_pt6 #4
 const OLDMANAGE = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmanage'); // perf_debug6
 const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one save per map (positions differ)
@@ -416,6 +417,7 @@ export class Game {
     if (ov) { mx = ov.mx || 0; mz = ov.mz || 0; }
     else { mz = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0); mx = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0); }
     if (this.deadT > 0) { mx = mz = 0; }
+    if (P.vault) { if (this.deadT > 0 || c._seat || P.car) { P.vault = null; if (c.handT) c.handT.w = 0; } else if (vaultStep(this, dt)) return; } // anim3 vault in progress
     if (c._seat) { mx = mz = 0; P.enter = null; } // anim2: getting out of the seat (door sequence) holds the controls
     let autoDir = null;
     if (P.enter) { // anim2 walk to the door; movement input or 3 s cancels
@@ -454,6 +456,11 @@ export class Game {
     P.pos.x = px; P.pos.z = pz;
     // vertical
     const ground = swim ? -1.35 : gh;
+    // anim3 (?oldvault): jump towards / sprint into a low obstacle (0.45-1.25 m) -> vault over it (src/vault.js)
+    const jumpKey = (k.Space || (ov && ov.jump)) && P.grounded && !swim && !(P.jumpT > 0);
+    if (VAULT.on && P.grounded && !swim && !(P.jumpT > 0) && !P.cover && (jumpKey || (P.sprint && this.curSpeed > 4.2 && (r.hit || px !== r.x || pz !== r.z)))) {
+      const plan = vaultScan(this, P.yaw, len < 0.01 || this.curSpeed < 0.5); if (plan && (jumpKey || plan.tin < 0.8) && vaultStart(this, plan, len > 0.01 ? this.curSpeed : 0)) { if (ov) ov.jump = false; k.Space = false; P.crouchOn = false; vaultStep(this, dt); return; }
+    }
     if ((k.Space || (ov && ov.jump)) && P.grounded && !swim && !(P.jumpT > 0)) {
       if (ov) ov.jump = false;
       if (UA.jump2 && c.playUA('jstart', { from: 0, to: 0.42, fi: 0.04, fo: 0.16, w: 0.9 })) { P.jumpT = 0.07; P.crouchOn = false; } // anim2 (?oldjump2): 70 ms push-off from the UAL take-off crouch

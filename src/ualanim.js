@@ -28,6 +28,7 @@ for (const S of SIDE) {
 export const UPPER_RE = /(Spine1|Spine2|Neck|Head|Shoulder|Arm|ForeArm|Hand)/;
 let SRC = null;
 const FLATY = new Set(['jstart', 'jland2']);
+const NOROOTY = new Set(['climb']); // anim3: the vault (ClimbUp_1m is a running tuck vault) — game.js drives the root height, the clip only the pose
 export const UAL_ST = { clips: 0, ms: 0 };
 if (typeof window !== 'undefined') window.__UAL_ST = UAL_ST;
 export function setUAL(gltf) {
@@ -91,7 +92,7 @@ function retarget(P, key, upperOnly) {
         v[f * 4] = pq.x; v[f * 4 + 1] = pq.y; v[f * 4 + 2] = pq.z; v[f * 4 + 3] = pq.w;
       } else W.set(o, pw.clone().multiply(T.restQ.get(o)));
     }
-    const disp = wpos(S.Hips).sub(ps0).applyQuaternion(R).multiplyScalar(k); if (FLATY.has(key) && disp.y > 0) disp.y = 0; const pt = pt0.clone().add(disp).applyMatrix4(hInv); // jump clips (FLATY): the physics does the rise
+    const disp = wpos(S.Hips).sub(ps0).applyQuaternion(R).multiplyScalar(k); if (FLATY.has(key) && disp.y > 0 || NOROOTY.has(key)) disp.y = 0; const pt = pt0.clone().add(disp).applyMatrix4(hInv); // jump clips (FLATY): the physics does the rise
     T.root.position.copy(pt); pv[f * 3] = pt.x; pv[f * 3 + 1] = pt.y; pv[f * 3 + 2] = pt.z;
     T.root.updateMatrixWorld(true); lows[f] = lowJ(N);
     lf[f] = wpos(N.LeftFoot).z - wpos(N.Hips).z; hz[f] = wpos(N.Hips).z;
@@ -108,6 +109,7 @@ function retarget(P, key, upperOnly) {
   // stride (crouch walk): 2 x swing range of the left foot relative to the hips along forward; left-foot-forward phase
   let mx = -1e9, mi = 1e9, tm = 0; for (let f = 0; f < nf; f++) { if (lf[f] > mx) { mx = lf[f]; tm = f / (nf - 1); } mi = Math.min(mi, lf[f]); }
   out.userData = { stride: Math.max(0.2, 2 * (mx - mi)), ph: tm, off, drift: hz[nf - 1] - hz[0] };
+  if (NOROOTY.has(key)) { const lo = new Float32Array(nf); for (let f = 0; f < nf; f++) lo[f] = lows[f] + off - restLow; out.userData.lows = lo; out.userData.fps = fps; } // anim3: lowest foot joint above the ground per frame (proto units)
   // restore the light rig to rest for the next clip
   for (const o of T.order) o.quaternion.copy(T.restQ.get(o)); T.root.position.copy(T.restP); T.root.updateMatrixWorld(true);
   UAL_ST.clips++; UAL_ST.ms += performance.now() - t0;
