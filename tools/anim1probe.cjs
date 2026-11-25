@@ -4,7 +4,7 @@
 //   pen    = ground above the sole (cm, penetration), hover = lower foot's sole above its ground while grounded (cm)
 // writes shots/anim1/probe_<variant>.json
 const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
-const root = path.resolve(__dirname, '..'); const out = path.join(root, 'shots/anim1'); fs.mkdirSync(out, { recursive: true });
+const root = path.resolve(__dirname, '..'); const out = path.join(root, process.env.OUT || 'shots/anim1'); fs.mkdirSync(out, { recursive: true });
 const srv = http.createServer((q, s) => { const p = path.join(path.resolve(root, process.env.DIST || 'dist'), decodeURIComponent(q.url.split('?')[0])); fs.readFile(p, (e, d) => { if (e) { s.writeHead(404); s.end(); return; } s.writeHead(200, { 'Content-Type': p.endsWith('.html') ? 'text/html' : p.endsWith('.js') ? 'text/javascript' : 'application/octet-stream' }); s.end(d); }); });
 const V = (process.env.V || 'new=;old=oldanimrig&oldgait').split(';').map((s) => s.split('=')).map(([k, ...v]) => [k, v.join('=')]);
 const MODE = process.env.MODE || 'measure';
@@ -42,7 +42,7 @@ srv.listen(0, async () => {
     await p.evaluate('void (window.__G.THREE = window.__G.THREE || (window.THREE))');
     const hasT = await p.evaluate('!!(__G.THREE && __G.THREE.Vector3)'); if (!hasT) await p.evaluate(`void (__G.THREE = { Vector3: __G.game.player.pos.constructor })`);
     await p.evaluate(LIB);
-    const js = fs.readFileSync(path.join(__dirname, 'anim1_' + MODE + '.js'), 'utf8');
+    const js = (process.env.PRE || '') + fs.readFileSync(path.join(__dirname, fs.existsSync(path.join(__dirname, MODE + '.js')) ? MODE + '.js' : 'anim1_' + MODE + '.js'), 'utf8');
     const res = await p.evaluate(js);
     fs.writeFileSync(path.join(out, MODE + '_' + vn + '.json'), JSON.stringify(res, null, 1)); console.log(vn, JSON.stringify(res).slice(0, 3000));
     await ctx.close();

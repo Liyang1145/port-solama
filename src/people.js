@@ -174,6 +174,22 @@ const GAIT = ['walk', 'run', 'back', 'sl', 'sr'];
 const LOOPED = ['idle', 'walk', 'run', 'back', 'sl', 'sr', 'look', 'phone', 'text', 'talk', 'tread', 'swim', 'jair'];
 const UPPER_RE = /(Spine1|Spine2|Neck|Head|Shoulder|Arm|ForeArm|Hand)/;
 
+// anim3 phase warp: per gait clip, how fast the stance (lower) foot travels backwards in model space per unit of cycle phase
+// (m per cycle, 40 samples, circular 3-tap smoothing, clamped to 0.45-2.2 x its mean). Playing the shared phase at
+// sp / rate(phase) instead of sp / stride keeps the planted foot still in the world all through the contact (the mocap clips
+// do not move their stance foot at constant speed) -> cheap skate fix for NPCs without the IK layer.
+function warpTable(m, mixer, d, side) {
+  const N = 40, B = ['LeftFoot', 'LeftToeBase', 'RightFoot', 'RightToeBase'].map((n) => m.getObjectByName(n)); if (B.some((o) => !o)) return null;
+  // tracked point = middle of ankle and ball joint, stance = the foot whose ball / heel is lower (the sole on the ground)
+  const v = new THREE.Vector3(), u = new THREE.Vector3(), L = [], R = [];
+  const pt = (a, t) => { a.getWorldPosition(v); t.getWorldPosition(u); return [(v.x + u.x) / 2, Math.min(v.y - 0.04, u.y), (v.z + u.z) / 2]; };
+  for (let i = 0; i <= N; i++) { mixer.setTime(i / N * d); m.updateMatrixWorld(true); L.push(pt(B[0], B[1])); R.push(pt(B[2], B[3])); }
+  const ax = side ? 0 : 2, raw = new Float32Array(N);
+  for (let i = 0; i < N; i++) { const S = L[i][1] <= R[i][1] ? L : R; raw[i] = Math.abs(S[i + 1][ax] - S[i][ax]) * N; }
+  let mean = 0; for (let i = 0; i < N; i++) mean += raw[i]; mean /= N; if (!(mean > 0.05)) return null;
+  const w = new Float32Array(N); for (let i = 0; i < N; i++) w[i] = clamp((raw[(i + N - 1) % N] + 2 * raw[i] + raw[(i + 1) % N]) / 4, 0.35 * mean, 2.6 * mean);
+  return w;
+}
 // per proto + clip: stride (m per cycle), left-foot-forward phase and the vertical lift that puts the soles on the ground
 function calibrate(P) {
   const m = SkeletonUtils.clone(P.scene); m.updateMatrixWorld(true);
@@ -190,6 +206,7 @@ function calibrate(P) {
       lf.getWorldPosition(v); hips.getWorldPosition(h); const r = side ? v.x - h.x : v.z - h.z; if (r > mx) { mx = r; tm = i / N; } mn = Math.min(mn, r);
     }
     cal[k] = { lift: clamp(rest - lo, -0.12, 0.12), stride: Math.max(0.3, 2 * (mx - mn)), ph: tm, dur: d };
+    if (GAIT.includes(k)) cal[k].warp = warpTable(m, mixer, d, side); // anim3 (?oldphasewarp)
     a.stop(); mixer.uncacheAction(c);
   }
   // anim1: ankle / ball-of-foot joint heights above the sole, read in the idle clip's first frame (both feet flat; the idle lift puts
@@ -245,6 +262,7 @@ const WARM = [];
 // fix_pt6 #1 (?olddropimg = old): the cast GLB textures are decoded ImageBitmaps (1024² hero maps 4 MB each, ~150 textures in all) that
 // stayed alive next to their GPU copy for the whole session. Once every Texture that reads a bitmap has been uploaded (onUpdate), the
 // bitmap is closed and the source keeps only its size; three never re-uploads these (no needsUpdate after load).
+const WARP = !(typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldphasewarp')); // anim3
 const OLDDROPIMG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('olddropimg');
 const DROPIMG = { bitmaps: 0, closed: 0, mb: 0 }; if (typeof window !== 'undefined') window.__DROPIMG = DROPIMG;
 function dropBitmapsAfterUpload() {
@@ -460,6 +478,14 @@ export class Character {
     let stride = ws > 1e-3 ? st / ws : 1.4;
     if (ARIG.gait && !ARIG.off) stride *= 1 + 0.3 * smooth(sp, 4.2, 6.8); // anim1: sprint = longer strides, not just a faster cadence
     let fq = sp > 0.05 ? sp / stride : 0;
+    // anim3 (?oldphasewarp): NPCs — playback rate from the stance foot's speed at the current phase (warp tables), in world units
+    // (the calibration is in unscaled model space: x P.scale x root scale); the anim1 sprint stride stretch only where the IK
+    // layer runs (it plants the stretched stride); farther NPCs get the clip's own stride
+    if (WARP && !this.isPlayer && sp > 0.05 && ws > 1e-3) { let rs = 0, rw = 0;
+      for (const k of GAIT) { const a = A[k], c = cal[k]; if (!a || !c || a.weight < 1e-3) continue; const W = c.warp;
+        if (W) { const u = ((this.phase + c.ph) % 1) * 40, i0 = u | 0, f = u - i0; rs += a.weight * (W[i0 % 40] * (1 - f) + W[(i0 + 1) % 40] * f); } else rs += a.weight * c.stride; rw += a.weight; }
+      if (cwA && cwA.weight > 0) { rs += cwA.weight * cwA.getClip().userData.stride; rw += cwA.weight; }
+      if (rw > 1e-3) { let r = rs / rw * this.P.scale * (this.root.scale.x || 1); if (ARIG.gait && !ARIG.off && this.lod === 0 && (this._camD ?? 99) < 20) r *= 1 + 0.3 * smooth(sp, 4.2, 6.8); fq = sp / r; } }
     if (tw > 0 && moveT < 0.5) fq = Math.max(fq, 0.9 * turn);
     if (ARIG.gait && !ARIG.off) {
       // anim1 start: leaving a stand still, the cycle starts at the passing pose (feet together, right foot about to swing) instead of

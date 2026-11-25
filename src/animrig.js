@@ -11,18 +11,20 @@
 // LOD: player + LOD0 all layers; LOD1 only the body lean (model transform: valid on frames the mixer skips); LOD2+ nothing.
 import * as THREE from 'three';
 const Q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-export const ARIG = { off: Q.has('oldanimrig'), lean: !Q.has('oldlean'), ik: !Q.has('oldfootik'), breath: !Q.has('oldbreath'), sec: !Q.has('oldsec'), gait: !Q.has('oldgait') };
-export const ARIG_ST = { ms: 0, calls: 0, full: 0, lean: 0, steps: 0, locks: 0 };
+export const ARIG = { off: Q.has('oldanimrig'), lean: !Q.has('oldlean'), ik: !Q.has('oldfootik'), breath: !Q.has('oldbreath'), sec: !Q.has('oldsec'), gait: !Q.has('oldgait'), npcfeet: !Q.has('oldnpcfeet') }; // anim3: ?oldnpcfeet = no foot lock on LOD0 NPCs 12-20 m
+export const ARIG_ST = { ms: 0, calls: 0, full: 0, feet: 0, lean: 0, steps: 0, locks: 0 };
 if (typeof window !== 'undefined') { window.__ARIG = ARIG; window.__ARIG_ST = ARIG_ST; }
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 const sm = (x, a, b) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const ex = (k, dt) => 1 - Math.exp(-k * dt);
 const NAMES = ['Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftShoulder', 'RightShoulder', 'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm',
   'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase'];
-const FULL_D = 12; // m from the camera: NPCs farther (LOD0 up to 20 m) get the lean only
+const FULL_D = 12; // m from the camera: NPCs farther (LOD0 up to 20 m) get the lean + (anim3) the light foot lock only
+const FEET_D = 20; // anim3: light tier = leg IK lock only (one ground sample per foot, no sole tilt, no spine / breath / head / arms)
 const AMP = ['LeftUpLeg', 'RightUpLeg', 'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm'];
 const _m = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3(), _v6 = new THREE.Vector3(), _v7 = new THREE.Vector3();
+const _k1 = new THREE.Vector3(), _k2 = new THREE.Vector3(), _k3 = new THREE.Vector3(), _k4 = new THREE.Vector3();
 const _fw = new THREE.Vector3(), _lf = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _n = new THREE.Vector3();
 const wq = (o, out) => out.setFromRotationMatrix(_m.extractRotation(o.matrixWorld));
 const wp = (o, out) => out.setFromMatrixPosition(o.matrixWorld);
@@ -47,8 +49,8 @@ function ik2(up, mid, end, target, pole) {
   const a = J.distanceTo(M), b = M.distanceTo(E); const d = _v4.copy(target).sub(J); const c = clamp(d.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); d.normalize();
   const cosA = clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1), sinA = Math.sqrt(1 - cosA * cosA);
   const pn = _n.copy(pole).sub(J); pn.addScaledVector(d, -pn.dot(d)); if (pn.lengthSq() < 1e-8) pn.copy(_fw); pn.normalize();
-  const knee = new THREE.Vector3().copy(J).addScaledVector(d, a * cosA).addScaledVector(pn, a * sinA); // (2 allocs per leg: kept simple, see perf note)
-  const T = new THREE.Vector3().copy(J).addScaledVector(d, c);
+  const knee = _k1.copy(J).addScaledVector(d, a * cosA).addScaledVector(pn, a * sinA); // anim3: no per-leg allocations
+  const T = _k2.copy(J).addScaledVector(d, c);
   aim(up, mid, knee); aim(mid, end, T);
 }
 function init(c) {
@@ -83,8 +85,11 @@ export function rigApply(c, dt, posed, groundFn) {
   if (ARIG.off || dt <= 0) return;
   if (c.dead || c._seat || !c.root.visible || c.lod > 1 && !c.isPlayer) { const R = c._rg; if (R) { if (!c.dead && !c._seat) rigReset(c); else if (R.hasOut) { restoreClean(R); R.hasOut = false; R.full = false; } } return; }
   const t0 = performance.now(); const R = c._rg || (c._rg = init(c)); if (!R.ok) return;
-  const full = (c.isPlayer || c.lod === 0 && (c._camD ?? 0) < FULL_D) && posed; ARIG_ST.calls++; R.full = full;
-  if (R.hasOut) { restoreClean(R); if (!full) R.hasOut = false; } else if (full) restoreClean(R); if (full) ARIG_ST.full++; else ARIG_ST.lean++;
+  const top = (c.isPlayer || c.lod === 0 && (c._camD ?? 0) < FULL_D) && posed;
+  const lite = !top && ARIG.npcfeet && ARIG.ik && posed && c.lod === 0 && (c._camD ?? 0) < FEET_D && c.speed > 0.05; // anim3 light tier (walkers only)
+  const full = top || lite; ARIG_ST.calls++; R.full = full;
+  if (R.hasOut) { restoreClean(R); if (!full) R.hasOut = false; } else if (full) restoreClean(R); if (top) ARIG_ST.full++; else if (lite) ARIG_ST.feet++; else ARIG_ST.lean++;
+  if (!full && R.wasFull) { for (const f of R.feet) { f.locked = false; f.lw = 0; f.step = 0; f.has = false; } R.drop = 0; } R.wasFull = full; // anim3: no stale locks on re-entry
   const sp = c.speed, moveT = sm(sp, 0.08, 0.7), runT = sm(sp, 2.3, 3.8), sprT = sm(sp, 4.4, 6.6), gnd = (1 - c.swimW) * (1 - c.airW) * (1 - (c.noIK || 0)); // anim2: noIK = knock-down / get-up (body on the ground)
   // ---- signals: forward acceleration, lateral (turn) acceleration, slope of travel
   const a = (sp - R.lsp) / dt; R.lsp = sp; R.acc += (clamp(a, -20, 20) - R.acc) * ex(10, dt);
@@ -99,13 +104,16 @@ export function rigApply(c, dt, posed, groundFn) {
     if (c.aimW > 0.3) { roll *= 0.4; pitch *= 0.4; }
   }
   R.roll += (roll - R.roll) * ex(7, dt); R.pitch += (pitch - R.pitch) * ex(6, dt);
-  const bodyK = full ? 0.55 : 1;
+  const bodyK = top ? 0.55 : 1;
   // idle weight shift (lateral hip sway, feet stay locked by the IK)
   R.st += dt; const idleW = (1 - moveT) * gnd * (c.var ? 0.4 : 1);
-  const swayX = full && ARIG.breath ? Math.sin(R.st * 0.75 + R.sway) * 0.018 * idleW : 0;
+  const swayX = top && ARIG.breath ? Math.sin(R.st * 0.75 + R.sway) * 0.018 * idleW : 0;
   c.model.rotation.set(R.pitch * bodyK, 0, R.roll * bodyK); c.model.position.x = swayX / (c.root.scale.x || 1);
   if (!full) { ARIG_ST.ms += performance.now() - t0; return; }
   const B = R.B; CUR = R;
+  if (lite) { _fw.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)); c.root.updateWorldMatrix(false, false); c.model.updateWorldMatrix(false, false); upd(R.ord);
+    if (groundFn && gnd > 0.3) footIK(c, R, dt, groundFn, gnd, true); else { R.drop += (0 - R.drop) * ex(10, dt); for (const f of R.feet) { f.locked = false; f.lw = 0; } }
+    CUR = null; ARIG_ST.ms += performance.now() - t0; return; }
   _fw.set(Math.sin(c.yaw), 0, Math.cos(c.yaw)); _lf.set(Math.cos(c.yaw), 0, -Math.sin(c.yaw)); // character forward / left (world)
   // ---- sprint: larger thigh / arm swing (extrapolate the clip pose away from the idle rest pose)
   if (ARIG.sec && sprT > 0.01 && c.aimW < 0.1 && gnd > 0.5) {
@@ -138,13 +146,13 @@ export function rigApply(c, dt, posed, groundFn) {
   else { R.drop += (0 - R.drop) * ex(10, dt); for (const f of R.feet) { f.locked = false; f.lw = 0; } }
   CUR = null; ARIG_ST.ms += performance.now() - t0;
 }
-function footIK(c, R, dt, G, gnd) {
+function footIK(c, R, dt, G, gnd, lite) {
   const s = c.P.scale * (c.root.scale.x || 1); const base = c.pos.y;
   const k = c.P.scale * (c.root.scale.x || 1); const ank = (c.P.cal.__ank ?? 0.085) * k, toe = (c.P.cal.__toe ?? 0.05) * k; // joint heights above the sole (idle frame 0)
   let minOff = 0;
   for (const f of R.feet) {
     const A = wp(f.f, _v1); const T = f.t ? wp(f.t, _v2) : _v2.copy(A);
-    const g = Math.max(G(A.x, A.z), G(T.x, T.z));
+    const g = lite ? G((A.x + T.x) * 0.5, (A.z + T.z) * 0.5) : Math.max(G(A.x, A.z), G(T.x, T.z));
     f.gy = g; f.Ay = A.y; f.Ax = A.x; f.Az = A.z; f.sole = Math.min(A.y - ank, T.y - toe); // anim sole height (world)
     const off = clamp(g - base, -0.45, 0.45); f.off += (off - f.off) * ex(f.has ? 22 : 1e3, dt); f.has = true;
     minOff = Math.min(minOff, f.off);
@@ -177,10 +185,10 @@ function footIK(c, R, dt, G, gnd) {
     if (need) {
       const K = wp(f.l, _v4); const H = wp(f.u, _v5); _v6.copy(K).sub(_v3.copy(H).add(A).multiplyScalar(0.5)); if (_v6.lengthSq() < 1e-6) _v6.copy(_fw); _v6.normalize();
       const pole = _v7.copy(K).addScaledVector(_v6, 0.5).addScaledVector(_fw, 0.15);
-      ik2(f.u, f.l, f.f, new THREE.Vector3(tx, ty, tz), pole.clone());
+      ik2(f.u, f.l, f.f, _k3.set(tx, ty, tz), _k4.copy(pole));
     }
     // sole on the ground normal (only near the ground; steep = a kerb edge, no tilt)
-    const near = 1 - sm(clr, 0.02, 0.1);
+    const near = lite ? 0 : 1 - sm(clr, 0.02, 0.1);
     _qa.copy(f.nq);
     if (near > 0.01) {
       const e = 0.12, x = f.Ax, z = f.Az; const gx = (G(x + e, z) - G(x - e, z)) / (2 * e), gz = (G(x, z + e) - G(x, z - e)) / (2 * e);
