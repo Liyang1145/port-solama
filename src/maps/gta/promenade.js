@@ -263,7 +263,7 @@ export function buildPromenade(scene, city) {
           for (let z = z0 + 1.0; z < z1 - 1.0; z += 2.1) { const bb = place(c, sd, z, 12.45, 13.55, 0.95, 1.0, 'cafe2'); if (!bb) continue;
             const m = new THREE.Matrix4().compose(V3(c - 13.0, 0.15, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI / 2 + (r() - 0.5) * 0.25, 0)), V3(1, 1, 1));
             kinds.get('bistro').items.push({ x: c - 13.0, z, m, c: cc }); stat.sets++;
-            if (k++ % 2 === 0) { push('umbC', c - 13.0, 0.15, z, (r() - 0.5) * 0.3, uc, 0.85); push('umbP', c - 13.0, 0.15, z, 0); stat.umb++; } }
+            if (k++ % 2 === 0) { push('umbC', c - 13.0, 0.15, z, (r() - 0.5) * 0.3, uc, 0.85); push('umbP', c - 13.0, 0.15, z, 0); stat.umb++; (city.camOver || (city.camOver = [])).push({ x: c - 13.0, z, r: 1.15, y0: 2.0, y1: 2.75 }); } } // anim3: canopy blocks the camera boom (game.js overRay)
           if (!k) continue; stat.cafe++;
           let pi = 0; const bo = 12.06;
           for (let z = z0 + 1.2; z < z1 - 1.2; z += 2.45) { if (pi++ % 3 === 2) { if (r() < 0.7 && place(c, sd, z, 12.15, 12.65, 0.2, 0.9, 'aframe')) push('aframe', c - 12.4, 0.15, z, Math.PI / 2); continue; } // opening

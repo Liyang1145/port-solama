@@ -37,7 +37,7 @@ export class Valet {
     this.dropMk = mk([1.0, 0.85, 0.25], 2.6, 9.0);
     this.carMk = mk([0.35, 0.75, 1.0], 0.35, 1.2);
     const el = document.createElement('div'); el.id = 'obj';
-    Object.assign(el.style, { position: 'absolute', left: '50%', bottom: '64px', transform: 'translateX(-50%)', fontSize: '17px', color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,.9)', textAlign: 'center', whiteSpace: 'nowrap', pointerEvents: 'none', opacity: 0, transition: 'opacity .4s' });
+    el.id = 'mobj'; Object.assign(el.style, { position: 'absolute', left: '50%', bottom: '64px', transform: 'translateX(-50%)', fontSize: '17px', color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,.9)', textAlign: 'center', whiteSpace: 'nowrap', pointerEvents: 'none', opacity: 0, transition: 'opacity .4s' });
     (document.getElementById('hud') || document.body).appendChild(el); this.el = el;
     this.standMk.position.set(STAND.x, game.city.groundH(STAND.x, STAND.z), STAND.z); this.standMk.visible = true;
   }

@@ -23,7 +23,7 @@ export class Missions {
     this.G = game; this.active = null; this.stage = ''; this.t = 0; this.log = []; this.done = {}; this.cool = 0; this.target = null;
     this.startMk = MISSION_STARTS.map((s) => { const b = beam(game.scene, [1.0, 0.82, 0.25], 1.1, 4); b.position.set(s.x, game.city.groundH(s.x, s.z), s.z); b.visible = true; return b; });
     this.goalMk = beam(game.scene, [1.0, 0.85, 0.3], 2.4, 8);
-    const el = document.createElement('div'); Object.assign(el.style, { position: 'absolute', left: '50%', bottom: '92px', transform: 'translateX(-50%)', fontSize: '17px', color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,.9)', whiteSpace: 'nowrap', pointerEvents: 'none' });
+    const el = document.createElement('div'); el.id = 'mobj2'; Object.assign(el.style, { position: 'absolute', left: '50%', bottom: '92px', transform: 'translateX(-50%)', fontSize: '17px', color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,.9)', whiteSpace: 'nowrap', pointerEvents: 'none' });
     (document.getElementById('hud') || document.body).appendChild(el); this.el = el;
     const card = document.createElement('div'); Object.assign(card.style, { position: 'absolute', left: '0', right: '0', top: '30%', textAlign: 'center', pointerEvents: 'none', opacity: 0, transition: 'opacity .5s', color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,.8)' });
     (document.getElementById('hud') || document.body).appendChild(card); this.card = card; this.cardT = 0;

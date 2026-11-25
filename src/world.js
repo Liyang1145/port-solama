@@ -47,10 +47,10 @@ export class World {
     const hud = document.getElementById('hud') || document.body;
     const ph = document.createElement('div'); ph.id = 'phone';
     Object.assign(ph.style, { position: 'absolute', right: '40px', bottom: '40px', width: '250px', height: '440px', borderRadius: '30px', background: 'linear-gradient(160deg,#20232c,#0d0f14)', boxShadow: '0 10px 30px rgba(0,0,0,.6), inset 0 0 0 3px #3a3f4a', color: '#fff', font: '500 15px "Noto Sans CJK SC","PingFang SC",sans-serif', padding: '34px 16px 16px', boxSizing: 'border-box', display: 'none', pointerEvents: 'none' });
-    hud.appendChild(ph); this.phoneEl = ph;
+    ph.id = 'phone'; hud.appendChild(ph); this.phoneEl = ph;
     const mn = document.createElement('div'); mn.id = 'menu';
     Object.assign(mn.style, { position: 'absolute', left: '40px', top: '120px', width: '330px', borderRadius: '14px', background: 'rgba(14,16,22,.88)', color: '#fff', font: '500 16px "Noto Sans CJK SC","PingFang SC",sans-serif', padding: '14px 16px', display: 'none', pointerEvents: 'none' });
-    hud.appendChild(mn); this.menuEl = mn;
+    mn.id = 'wmenu'; hud.appendChild(mn); this.menuEl = mn;
     // second protagonist
     this.profiles = [];
   }

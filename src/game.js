@@ -22,6 +22,7 @@ import { CYBER } from './mapsel.js';
 import { routeWaypoint } from './roadroute.js';
 import { ActionPose } from './actionpose.js';
 import { VAULT, vaultScan, vaultStart, vaultStep } from './vault.js'; // anim3
+const OLD_CAMCAR = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldcamcar'); // anim3 playtest
 const OLD_EXIT = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldexit'); // fix_pt6 #4
 const OLDMANAGE = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmanage'); // perf_debug6
 const SAVE_KEY = CYBER ? 'portsolana_cyber_v60' : 'portsolana_v43'; // r6.0: one save per map (positions differ)
@@ -540,6 +541,28 @@ export class Game {
     for (const c of [...this.peds.list]) { if (c.pos.distanceTo(P.pos) > 150) this.peds.remove(c); }
     if (this.peds.list.length < 86) this.peds.spawn(P.pos, 50, 130);
   }
+  // anim3 playtest: segment target -> camera vs the other vehicles (oriented boxes, ground to roof + 0.15 m, 0.25 m margin): after a
+  // crash the camera boom ended inside the car that hit you (its body filled the screen); returns t in [0, 1]
+  carRay(a, b, skip) {
+    let best = 1; const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, L = Math.hypot(dx, dz) + 6;
+    for (const v of this.traffic.cars) { if (v === skip || !v.dims) continue; const ox = a.x - v.x, oz = a.z - v.z; if (ox * ox + oz * oz > L * L) continue;
+      const f = v.forward(); const hl = v.dims.L / 2 + 0.25, hw = v.dims.W / 2 + 0.25, y0 = (v.y || 0) - 0.2, y1 = (v.y || 0) + v.dims.H + 0.15;
+      let t0 = 0, t1 = 1; const sl = (o, d, mn, mx) => { if (Math.abs(d) < 1e-9) return o >= mn && o <= mx; let p = (mn - o) / d, q = (mx - o) / d; if (p > q) { const w = p; p = q; q = w; } t0 = Math.max(t0, p); t1 = Math.min(t1, q); return t0 <= t1; };
+      if (!sl(ox * f.x + oz * f.z, dx * f.x + dz * f.z, -hl, hl)) continue; if (!sl(ox * f.z - oz * f.x, dx * f.z - dz * f.x, -hw, hw)) continue; if (!sl(a.y, dy, y0, y1)) continue;
+      if (t0 > 0.02 && t0 < best) best = t0; }
+    return best;
+  }
+  // anim3 playtest: umbrella canopies (city.camOver: x, z, r, y0, y1) are not colliders (people walk under them) -> the boom went
+  // through them and the canopy / ribs filled the screen (A promenade cafe terrace while fleeing); same t convention as carRay
+  overRay(a, b) {
+    const L = this.city.camOver; if (!L) return 1; let best = 1; const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const mnx = Math.min(a.x, b.x) - 1.5, mxx = Math.max(a.x, b.x) + 1.5, mnz = Math.min(a.z, b.z) - 1.5, mxz = Math.max(a.z, b.z) + 1.5;
+    for (const u of L) { if (u.x < mnx || u.x > mxx || u.z < mnz || u.z > mxz) continue;
+      let t0 = 0, t1 = 1; const sl = (o, d, mn, mx) => { if (Math.abs(d) < 1e-9) return o >= mn && o <= mx; let p = (mn - o) / d, q = (mx - o) / d; if (p > q) { const w = p; p = q; q = w; } t0 = Math.max(t0, p); t1 = Math.min(t1, q); return t0 <= t1; };
+      if (!sl(a.x, dx, u.x - u.r, u.x + u.r) || !sl(a.z, dz, u.z - u.r, u.z + u.r) || !sl(a.y, dy, u.y0 - 0.15, u.y1)) continue;
+      if (t0 > 0.02 && t0 < best) best = t0; }
+    return best;
+  }
   updateCamera(dt, snap = false) {
     const P = this.P, C = this.cam;
     let target, dist, height, side = 0;
@@ -593,12 +616,13 @@ export class Game {
       if (Math.abs(C.wy) > 0.01 || C.wu > 0.01) { const yw = C.yaw + C.wy; want.set(target.x + Math.sin(yw) * cp * dist, target.y - sp * dist + height + C.wu, target.z + Math.cos(yw) * cp * dist);
         t = this.city.col.raycast(target.x, target.y, target.z, want.x, want.y, want.z); }
     } else if (P.car) { C.wy = 0; C.wu = 0; }
+    if (!OLD_CAMCAR) t = Math.min(t, this.carRay(target, want, P.car), this.overRay(target, want)); // anim3 playtest (?oldcamcar): other vehicles block the boom too
     if (t < 1) want = target.clone().lerp(want, Math.max(0.05, t - 0.25 / Math.max(1, dist)));
     want.y = Math.max(want.y, this.city.groundH(want.x, want.z) + 0.3);
     if (snap) C.pos.copy(want); else C.pos.lerp(want, 1 - Math.exp(-(P.car ? 14 : 20) * dt));
     // r6.2: the smoothed camera lags behind `want`, so for a few frames it could sit inside / behind a wall the ray had
     // already pulled `want` in front of (see-through walls when turning next to a building): re-test the smoothed position
-    if (!snap) { const t2 = this.city.col.raycast(target.x, target.y, target.z, C.pos.x, C.pos.y, C.pos.z); if (t2 < 1) C.pos.copy(target).lerp(C.pos, Math.max(0.05, t2 - 0.25 / Math.max(1, dist))); }
+    if (!snap) { let t2 = this.city.col.raycast(target.x, target.y, target.z, C.pos.x, C.pos.y, C.pos.z); if (!OLD_CAMCAR) t2 = Math.min(t2, this.carRay(target, C.pos, P.car), this.overRay(target, C.pos)); if (t2 < 1) C.pos.copy(target).lerp(C.pos, Math.max(0.05, t2 - 0.25 / Math.max(1, dist))); }
     // fix_pt2 (?oldcam = old; replaces fix_pt1's 0.2 m camera sphere, which measured no gain when walking in): with the player's back to a
     // wall the camera is pulled in to the shoulder and the near plane cuts through the head / torso (PLAYTEST_1H #7; tools/camwalk.cjs: the
     // camera point itself was inside a box 0 times in ~1900 walked / swept frames, but sat < 0.5 m from the head 20-38 times per spot).

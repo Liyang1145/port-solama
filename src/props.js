@@ -386,6 +386,7 @@ export function buildProps(scene, city, T) {
       const tilt = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(Math.cos(u.r), 0, Math.sin(u.r)), 0.12); const mt = m.clone().multiply(tilt);
       const pole = new THREE.CylinderGeometry(0.022, 0.03, 2.5, 6); pole.translate(0, 1.25, 0); g.geom(pole, mt, {}, [0.92, 0.9, 0.86]);
       const U2 = umbrellaGeo(1.25, 0.42, 2.2); g.geom(U2.cloth, mt, {}, u.color); g.geom(U2.frame, mt, {}, [0.85, 0.83, 0.8]);
+      (city.camOver || (city.camOver = [])).push({ x: u.x, z: u.z, r: 1.3, y0: y0 + 1.85, y1: y0 + 2.75 }); // anim3: canopy blocks the camera boom
       }
       if (!u.towelOnly) { // reclining lounger: frame + slatted bed + raised backrest + legs
         const lm = m.clone().multiply(new THREE.Matrix4().makeRotationY(u.r)).multiply(new THREE.Matrix4().makeTranslation(0.9, 0, 0.6)); const wc = [0.97, 0.96, 0.93], fc = [0.75, 0.75, 0.74];

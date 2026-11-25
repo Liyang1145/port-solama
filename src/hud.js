@@ -10,6 +10,7 @@ import { LANDS, DISTRICTS, beachX, BEACH_Z, districtAt as districtCyber } from '
 import { CYBER } from './mapsel.js';
 import { cyName } from './maps/cyber/names.js';
 // r6.0: area name of the active map ({name, sub} or null)
+const OLD_BIG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldbigmap'); // anim3
 const OLD_MMD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmmdraw'); // fix_pt1
 const districtAt = CYBER ? (x, z) => { const d = districtCyber(x, z); return d ? { name: d.name, sub: '霓港' } : null; } : districtGTA;
 
@@ -30,6 +31,25 @@ export class HUD {
     const OLDHUD = new URLSearchParams(location.search).has('oldhud');
     this.put = OLDHUD ? (el, k, v) => { el[k] = v; } : (el, k, v) => { const c = el.__hc || (el.__hc = {}); if (c[k] !== v) { c[k] = v; el[k] = v; } };
     this.sty = OLDHUD ? (el, k, v) => { el.style[k] = v; } : (el, k, v) => { const c = el.__hs || (el.__hs = {}); if (c[k] !== v) { c[k] = v; el.style[k] = v; } };
+    // anim3 playtest (?oldhudscale): the HUD was laid out in fixed px for ~1280x720; on small windows (phones, a 480x270 tab) the
+    // 206 px minimap covered ~45 % of the width and sat on the player / the player's car, and the objective line ran into it.
+    // Every HUD group now scales by --hs = clamp(min(w / 1280, h / 720), 0.5, 1) about its own screen corner.
+    if (!new URLSearchParams(location.search).has('oldhudscale')) {
+      const st = document.createElement('style'); st.id = 'hudscale';
+      st.textContent = `#tl{transform:scale(var(--hs));transform-origin:0 0}#tr{transform:scale(var(--hs));transform-origin:100% 0}
+#mm{transform:scale(var(--hs));transform-origin:0 100%}#area{transform:scale(var(--hs));transform-origin:100% 100%}
+#veh{left:calc(22px + 214px * var(--hs));transform:scale(var(--ts));transform-origin:0 100%}
+#msg,#help{top:calc(22px + 60px * var(--hs));transform:scale(var(--ts));transform-origin:0 0}#big{font-size:calc(100px * var(--hs))}
+#mobj{bottom:calc(64px * var(--hs)) !important;transform:translateX(-50%) scale(var(--ts)) !important;transform-origin:50% 100%}
+#mobj2{bottom:calc(92px * var(--hs)) !important;transform:translateX(-50%) scale(var(--ts)) !important;transform-origin:50% 100%}
+#mm.big{left:50%;top:50%;bottom:auto;width:min(84vw,149vh);height:min(47vw,84vh);transform:translate(-50%,-50%) !important;opacity:1 !important;z-index:4}#mm.big #mmc{width:100%;height:100%;box-shadow:0 0 0 2px rgba(255,255,255,.5),0 8px 40px rgba(0,0,0,.6)}
+#wheel{transform:scale(var(--ws))}#phone{transform:scale(var(--hs));transform-origin:100% 100%}#wmenu{transform:scale(var(--hs));transform-origin:0 0;top:calc(40px + 80px * var(--hs)) !important}`;
+      document.head.appendChild(st);
+      const fit = () => { const de = document.documentElement.style; const hs = Math.max(0.5, Math.min(1, innerWidth / 1280, innerHeight / 720)); de.setProperty('--hs', String(hs)); de.setProperty('--ts', String(Math.max(0.72, hs))); // text boxes stay readable (>= ~10 px)
+        de.setProperty('--ws', String(Math.min(1, innerHeight * 0.9 / 420, innerWidth * 0.9 / 420))); // weapon wheel (420 px) fits the window
+      };
+      fit(); addEventListener('resize', fit);
+    }
     this.stars = [...document.querySelectorAll('#stars span')];
     this.mm = this.$('mmc'); this.g = this.mm.getContext('2d');
     this.msgT = 0; this.cashT = 0; this.hurtT = 0; this.bigMap = false;
@@ -94,7 +114,8 @@ export class HUD {
   }
   // fix_pt1: snapshot the finished plate into an ImageBitmap (decoded once, uploaded once) and draw that every frame
   bakeMap() { if (OLD_MMD || typeof createImageBitmap !== 'function') return; const c = this.mapCanvas; createImageBitmap(c).then((bm) => { if (this.mapCanvas === c) { this.mapCanvas = bm; this.mapSrc = c; } }).catch(() => {}); }
-  toggleBig() { this.bigMap = !this.bigMap; }
+  // anim3 playtest: M toggled a flag nothing read (the key did nothing). Now a north-up full-screen map (?oldbigmap: old no-op)
+  toggleBig() { this.bigMap = !this.bigMap; if (OLD_BIG) return; this.$('mm').classList.toggle('big', this.bigMap); this.mm.width = this.bigMap ? 960 : 412; this.mm.height = this.bigMap ? 540 : 224; this.mmG = this.mmG || this.lastG; }
   msg(t, s = 2.5) { const m = this.$('msg'); m.textContent = t; this.sty(m, 'opacity', 1); this.msgT = s; this.$('help').style.opacity = 0; }
   big(t, col) { const b = this.$('big'); b.textContent = t; b.style.color = col; b.style.opacity = t ? 1 : 0; }
   cash(n) { this.cashEl.textContent = '+$' + n; this.sty(this.cashEl, 'opacity', 1); this.cashT = 2.5; this.statT = Math.max(this.statT, 3); }
@@ -165,9 +186,10 @@ export class HUD {
     const g = this.g, W = this.mm.width, H = this.mm.height; const P = G.P; const M = this.map;
     g.save(); g.clearRect(0, 0, W, H);
     g.beginPath(); g.roundRect(0, 0, W, H, 18); g.clip();
-    const zoom = (P.car ? 1.5 - Math.min(0.65, Math.abs(P.car.speed) / 40) : 1.9) * (CYBER ? 0.75 / M.S : 1); // canvas px per map px
-    const yaw = G.cam.yaw + Math.PI; // camera forward
-    const cx = W / 2, cy = H * 0.6;
+    const big = this.bigMap && !OLD_BIG; this.lastG = G;
+    const zoom = (big ? 0.55 : P.car ? 1.5 - Math.min(0.65, Math.abs(P.car.speed) / 40) : 1.9) * (CYBER ? 0.75 / M.S : 1); // canvas px per map px
+    const yaw = big ? -Math.PI : G.cam.yaw + Math.PI; // camera forward (big map: north up)
+    const cx = W / 2, cy = big ? H * 0.5 : H * 0.6;
     g.translate(cx, cy); g.rotate(Math.PI + yaw); g.scale(zoom, zoom);
     g.translate(-(P.pos.x - M.X0) * M.S, -(P.pos.z - M.Z0) * M.S);
     g.globalAlpha = 0.86; g.drawImage(this.mapCanvas, 0, 0); g.globalAlpha = 1;
