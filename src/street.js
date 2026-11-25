@@ -9,6 +9,7 @@ import { LAYOUT } from './city.js';
 import { stamp, woodPole, busShelter, newsBox, cabinet } from './detail.js';
 import { mulberry } from './util.js';
 import { CYBER } from './mapsel.js';
+import { POI } from './mapdata.js'; // p4: POI shop counters -> shop-kind grid
 import { EDGE_OFF } from './maps/gta/edgewalls.js'; // a_edgewalls
 import { NS_NAME, NS_PY, EW_NAME, EW_PY } from './maps/gta/streetnames.js';
 import { furnMat, PB, parkingMeter, litterBin, bollard, coverAtlas, coverQuad } from './streetkit.js';
@@ -360,6 +361,11 @@ export function buildShopSigns(scene, city) {
   const mat = prep(new THREE.MeshStandardMaterial({ map: t, emissiveMap: t, emissive: 0xffffff, emissiveIntensity: 0.0, roughness: 0.55, metalness: 0.0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 }), 'shopsign');
   if (k) { const mesh = new THREE.Mesh(b.build(), mat); mesh.receiveShadow = true; scene.add(mesh); }
   if (!CYBER && kreg.length) { // 1.5 m cells over the signed shop rows; the shader samples the cell under each 2-bay unit's centre
+    // p4: the POI counters (world.js signs) had no entry, so their units fell back to the hash: 潮汐衣橱, 快修车坊 and 甘蔗区杂货 all
+    // rendered laundromat washer banks behind their own signs. Pin each to its trade: stores -> grocery, clothes -> boutique,
+    // gun / body shop -> low counter cases (kind 0, variant 2). Appended last so they win over any sign row overlapping the POI front.
+    { const fr = (p) => p.x - p.face * 2.0; const put = (x, z, k) => kreg.push([x, z - 5, z + 5, k]);
+      for (const st of POI.stores) put(fr(st), st.z, [0, 0]); put(fr(POI.clothes), POI.clothes.z, [2, 0]); put(fr(POI.gunshop), POI.gunshop.z, [0, 2]); put(61.5, POI.modshop.z, [0, 2]); }
     let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const [x, za, zb] of kreg) { x0 = Math.min(x0, x - 3); x1 = Math.max(x1, x + 3); z0 = Math.min(z0, za); z1 = Math.max(z1, zb); }
     const ext = Math.max(x1 - x0, z1 - z0, 1); const cell = Math.max(1.5, ext / 1000); const N = Math.ceil(ext / cell) + 2; const d = new Uint8Array(N * N * 4);
     for (const [x, za, zb, kk] of kreg) for (let zz = za; zz <= zb; zz += cell * 0.5) for (let xx = x - 3; xx <= x + 3; xx += cell * 0.5) {

@@ -180,7 +180,8 @@ export function buildSignage(scene, city) {
 
   // ------------------------------------------------------------------ bus stops ----
   // targets: inner avenues both sides, 海潮大道 west (hotel) side; ~300 m apart per side, staggered between the two sides
-  const SIDES = [[50, 1, [-225, 75]], [50, -1, [-75, 225]], [170, 1, [-225, 75]], [170, -1, [-75, 225]], [290, -1, [-75, 225]]];
+  // p4: shift the two z = -225 bus shelters to -248 (same block, same station name) so they do not sit directly in front of 快修车坊 (57, -225) & 海风便利 (179.5, -225)
+  const SIDES = [[50, 1, [-248, 75]], [50, -1, [-75, 225]], [170, 1, [-248, 75]], [170, -1, [-75, 225]], [290, -1, [-75, 225]]];
   const OFF = 8.55; // shelter centre offset from the road axis (footprint 7.63 .. 9.35, through-zone 9.95 .. 12.0 stays clear)
   for (const [c, sd, zs] of SIDES) for (const z0 of zs) {
     const ry = sd > 0 ? -Math.PI / 2 : Math.PI / 2; // local +z -> towards the road axis; local +x -> along the street

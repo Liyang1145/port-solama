@@ -64,8 +64,10 @@ export function wildField(graph) {
     h = lerp(-2.4, h, smooth(3650, 3510, z));
     const m = smooth(WILD.x1, WILD.x1 - 70, x) * smooth(Z0, Z0 + 70, z) * smooth(X0, X0 + 70, x);
     h = -0.04 + (h + 0.04) * m;
-    // roads cut flat (4 cm under the asphalt)
-    const f = smooth(2.6, 30, RD[k]); h = -0.04 + (h + 0.04) * f;
+    // roads cut flat (4 cm under the asphalt). p4: the flat core was RD < 2.6 m while the ribbon is 4.2 m half-wide (RD is the
+    // distance to the centre line, minus hw - 4.2), so on the 5 m grid the verge triangles rose through the asphalt edge in a
+    // sawtooth that ate the white edge lines along every 草原 / 雨林 road. Flat out to edge + one cell (4.2 + 5 m), same 25 m ramp.
+    const f = smooth(9.5, 34, RD[k]); h = -0.04 + (h + 0.04) * f;
     // stream channel + banks
     let wet = 0;
     const q = streamQ(x, z);
@@ -85,6 +87,10 @@ export function wildField(graph) {
   field.H = (x, z) => { const fx = clamp((x - X0) / CELL, 0, NX - 1.001), fz = clamp((z - Z0) / CELL, 0, NZ - 1.001); const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j; const k = j * NX + i;
     return lerp(lerp(H[k], H[k + 1], u), lerp(H[k + NX], H[k + NX + 1], u), v); };
   field.at = (A, x, z) => { const i = clamp(Math.round((x - X0) / CELL), 0, NX - 1), j = clamp(Math.round((z - Z0) / CELL), 0, NZ - 1); return A[j * NX + i]; };
+  // p4: bilinear road distance for the ground-cover scatter (nearest-vertex RD is quantised to the 5 m grid, so grass / ferns
+  // passed a "1.5 m" test anywhere up to ~3.5 m off and sprouted across both lanes of the 草原 / 雨林 roads); clear of asphalt + kerb
+  field.rdAt = (x, z) => { const fx = clamp((x - X0) / CELL, 0, NX - 1.001), fz = clamp((z - Z0) / CELL, 0, NZ - 1.001); const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j; const k = j * NX + i;
+    return lerp(lerp(RD[k], RD[k + 1], u), lerp(RD[k + NX], RD[k + NX + 1], u), v); };
   field.slope = (x, z) => { const a = field.H(x - 2.5, z), b = field.H(x + 2.5, z), c = field.H(x, z - 2.5), d = field.H(x, z + 2.5); return Math.hypot(b - a, d - c) / 5; };
   field.forestK = (x, z) => field.inside(x, z) ? smooth(2280, 2480, z) : 0;
   field.waterAt = (x, z) => { if (Math.hypot((x - LAKE.x) / LAKE.rx, (z - LAKE.z) / LAKE.rz) < 1.06) return true; if (Math.hypot(x - FALLS.x, z - FALLS.z) < 15) return true; const q = streamQ(x, z); return !q.behind && q.d < field.streamHW(q.s) + 1.2; };
@@ -576,23 +582,23 @@ export function buildNature(scene, city, T, field) {
       const r = mulberry(gx * 7919 + gz * 104729 + 17); const mx = gx * GC, mz = gz * GC; const fk = F.forestK(mx + 6, mz + 6);
       const nearK = d < RN ? 1 : 0.28; // dense near, sparse (bigger) further out
       if (fk < 0.85) { const n = Math.round(150 * nearK * (1 - fk));
-        for (let i = 0; i < n; i++) { const x = mx + r() * GC, z = mz + r() * GC; const rd = F.at(F.RD, x, z); if (rd < 1.5 || F.waterAt(x, z)) continue; const sl = F.slope(x, z); if (sl > 0.6) continue;
-          const v = vn(x / 9, z / 9); const kind = rd < 6 ? 2 : (v < 0.3 ? 2 : (i & 1)); if (ng[kind] >= MAXG) continue;
-          const s = (0.8 + r() * 0.5) * (nearK < 1 ? 1.5 : 1) * (rd < 6 ? 0.7 : 1); q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.set(s, s * (0.8 + 0.4 * v), s); pv.set(x, F.H(x, z) - 0.03, z); m4.compose(pv, q, sc); grassIM[kind].setMatrixAt(ng[kind], m4);
+        for (let i = 0; i < n; i++) { const x = mx + r() * GC, z = mz + r() * GC; const rd = F.rdAt(x, z); if (rd < 4.8 || F.waterAt(x, z)) continue; const sl = F.slope(x, z); if (sl > 0.6) continue;
+          const v = vn(x / 9, z / 9); const kind = rd < 7.5 ? 2 : (v < 0.3 ? 2 : (i & 1)); if (ng[kind] >= MAXG) continue;
+          const s = (0.8 + r() * 0.5) * (nearK < 1 ? 1.5 : 1) * (rd < 7.5 ? 0.7 : 1); q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.set(s, s * (0.8 + 0.4 * v), s); pv.set(x, F.H(x, z) - 0.03, z); m4.compose(pv, q, sc); grassIM[kind].setMatrixAt(ng[kind], m4);
           { const dry = smooth(0.3, 0.75, vn(x / 70, z / 70) * 0.7 + vn(x / 14, z / 14) * 0.3); col3.setRGB(lerp(0.62, 1.05, dry), lerp(0.95, 1.0, dry), lerp(0.55, 0.9, dry)); grassIM[kind].setColorAt(ng[kind]++, col3); } }
         if (d < 64) { const fv = vn(mx / 45 + 3, mz / 45); if (fv > 0.5) { const nfl = Math.round((fv - 0.5) * 40 * (1 - fk));
-          for (let i = 0; i < nfl && nf < MAXF; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.at(F.RD, x, z) < 4 || F.waterAt(x, z)) continue; q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(0.8 + r() * 0.6); pv.set(x, F.H(x, z) - 0.02, z); m4.compose(pv, q, sc); flowerIM.setMatrixAt(nf, m4);
+          for (let i = 0; i < nfl && nf < MAXF; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.rdAt(x, z) < 5.2 || F.waterAt(x, z)) continue; q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(0.8 + r() * 0.6); pv.set(x, F.H(x, z) - 0.02, z); m4.compose(pv, q, sc); flowerIM.setMatrixAt(nf, m4);
             const bc = BLOOM[Math.floor(vn(x / 25, z / 25 + 9) * BLOOM.length * 1.6 + r() * 1.2) % BLOOM.length]; col3.setRGB(bc[0], bc[1], bc[2]); flowerIM.setColorAt(nf++, col3); } } }
       }
       if (fk > 0.35 && d < 70) { // r6.1 broad-leaf understory + leaf litter
         const nB = Math.round(9 * fk * (d < RN ? 1 : 0.55));
-        for (let i = 0; i < nB; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.at(F.RD, x, z) < 3.5 || F.waterAt(x, z) || F.slope(x, z) > 0.7) continue; const k = i % 3; if (nb[k] >= MAXB) continue;
+        for (let i = 0; i < nB; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.rdAt(x, z) < 5.6 || F.waterAt(x, z) || F.slope(x, z) > 0.7) continue; const k = i % 3; if (nb[k] >= MAXB) continue;
           const s2 = (k === 0 ? 0.8 : 0.7) + r() * 0.8; q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(s2); pv.set(x, F.H(x, z) - 0.04, z); m4.compose(pv, q, sc); bigIM[k].setMatrixAt(nb[k]++, m4); }
         if (d < 42) { const nL2 = Math.round(16 * fk);
-          for (let i = 0; i < nL2 && nl < MAXL; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.at(F.RD, x, z) < 2 || F.waterAt(x, z)) continue; q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(0.8 + r() * 0.6); pv.set(x, F.H(x, z) + 0.01, z); m4.compose(pv, q, sc); litterIM.setMatrixAt(nl++, m4); } }
+          for (let i = 0; i < nL2 && nl < MAXL; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.rdAt(x, z) < 4.5 || F.waterAt(x, z)) continue; q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(0.8 + r() * 0.6); pv.set(x, F.H(x, z) + 0.01, z); m4.compose(pv, q, sc); litterIM.setMatrixAt(nl++, m4); } }
       }
       if (fk > 0.3 && d < 64) { const n = Math.round(58 * fk * (d < RN ? 1 : 0.5));
-        for (let i = 0; i < n; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.at(F.RD, x, z) < 3 || F.waterAt(x, z) || F.slope(x, z) > 0.8) continue; const k = i & 1; if (nn[k] >= MAXN) continue; const s = 0.8 + r() * 0.9;
+        for (let i = 0; i < n; i++) { const x = mx + r() * GC, z = mz + r() * GC; if (F.rdAt(x, z) < 5.2 || F.waterAt(x, z) || F.slope(x, z) > 0.8) continue; const k = i & 1; if (nn[k] >= MAXN) continue; const s = 0.8 + r() * 0.9;
           q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); sc.setScalar(s); pv.set(x, F.H(x, z) - 0.05, z); m4.compose(pv, q, sc); fernIM[k].setMatrixAt(nn[k]++, m4); } }
     }
     grassIM.forEach((im, k) => { im.count = ng[k]; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; });
