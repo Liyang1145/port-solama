@@ -20,7 +20,8 @@ srv.listen(0, async () => {
       const nm = (o) => { const m = Array.isArray(o.material) ? o.material[0] : o.material; return (o.name || o.type) + ':' + (m && (m.name || (m.userData && m.userData.prepKey) || m.type)) + (o.parent ? '<' + (o.parent.name || o.parent.type) : ''); };
       const cp = G.camera.position; return { green: +(g / (120 * 34)).toFixed(3), cam: [cp.x, cp.y, cp.z].map((v) => +v.toFixed(2)), on: on.slice(0, 12).map(nm), off: off.slice(0, 12).map(nm), non: on.length, noff: off.length, sp: !!(G.sprobe.step && G.sprobe.step.busy) }; })()`);
     if (!r) continue; r.i = i; rows.push(r); console.log(JSON.stringify(r).slice(0, 500));
-    if (shots < 6 && rows.length > 1 && Math.abs(r.green - rows[rows.length - 2].green) > 0.05) { await p.screenshot({ path: OUT.replace(/\.json$/, '') + '_' + i + '.jpg', type: 'jpeg', quality: 70 }); shots++; }
+    if ((process.env.SHOTS || '').split(',').includes(String(i))) await p.screenshot({ path: OUT.replace(/\.json$/, '') + '_' + i + '.jpg', type: 'jpeg', quality: 70 });
+    else if (shots < 6 && rows.length > 1 && Math.abs(r.green - rows[rows.length - 2].green) > 0.05) { await p.screenshot({ path: OUT.replace(/\.json$/, '') + '_' + i + '.jpg', type: 'jpeg', quality: 70 }); shots++; }
   }
   fs.writeFileSync(OUT, JSON.stringify({ perr, rows }, null, 1)); console.log('DONE perr', perr); await b.close(); srv.close(); process.exit(0);
 });
