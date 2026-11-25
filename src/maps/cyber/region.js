@@ -25,6 +25,23 @@ function clip(s, c) {
   return out;
 }
 
+// grassfix (?oldgrassfix = old): land / district caps were single polygons triangulated into km-long slivers (the island's
+// 276 triangles reach 2.7 km). A sliver crossing the camera plane is clipped by the rasteriser and its depth comes out a few
+// cm too near right in front of the camera, so the lawn 3 cm under the road won the depth test there (whole near road turning
+// to grass for a frame, edge = a horizontal line). Caps are now cut into CAP_S m cells (same bucket = same draw calls).
+const OLDGRASSFIX = typeof location !== 'undefined' && /[?&]oldgrassfix\b/.test(location.search);
+const CAP_S = 64;
+function tiledCap(bucket, poly, y) {
+  if (OLDGRASSFIX) { polyCap(bucket, poly, y); return; }
+  const [x0, z0, x1, z1] = polyBox(poly);
+  if (x1 - x0 <= CAP_S && z1 - z0 <= CAP_S) { polyCap(bucket, poly, y); return; }
+  for (let gx = Math.floor(x0 / CAP_S) * CAP_S; gx < x1; gx += CAP_S) for (let gz = Math.floor(z0 / CAP_S) * CAP_S; gz < z1; gz += CAP_S) {
+    const c = clip(poly, [[gx, gz], [gx + CAP_S, gz], [gx + CAP_S, gz + CAP_S], [gx, gz + CAP_S]]);
+    if (c.length < 3 || Math.abs(area(c)) < 0.01) continue;
+    polyCap(bucket, cw(c), y);
+  }
+}
+
 export function buildRegion(ctx, graph) {
   const { W, col, lamps, palms, trees, shrubs } = ctx;
   // ------------------------------------------------------------ land caps + seawalls ----
@@ -32,7 +49,7 @@ export function buildRegion(ctx, graph) {
   for (const l of LANDS) {
     if (l.noCap) continue; // v4.5 wild terrain has its own height-field mesh (src/nature.js)
     const p = cw(l.poly); const [x0, z0, x1, z1] = polyBox(p);
-    polyCap(W.b(l.mat === 'concrete' ? 'landc' : 'land', (x0 + x1) / 2, (z0 + z1) / 2), p, -0.03);
+    tiledCap(W.b(l.mat === 'concrete' ? 'landc' : 'land', (x0 + x1) / 2, (z0 + z1) / 2), p, -0.03);
     // seawall faces on every shore edge except the island's beach edge (and the Deco core's own wall at x = −22)
     const sw = W.b('concrete', (x0 + x1) / 2, (z0 + z1) / 2);
     for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length];
@@ -49,7 +66,7 @@ export function buildRegion(ctx, graph) {
   for (const d of DISTRICTS) {
     if (d.far) continue; const mat = { downtown: 'pavers', port: 'concrete', park: null, golf: null }[d.style]; // v4.5: island districts keep their lawns (whole island read as salmon pavers from the air)
     if (!mat) continue; // r6.0 fix: this guard sat inside the comment -> every non-urban district got an unlit white cap (white slabs from the air)
-    for (const l of LANDS) { if (l.far) continue; const c = clip(l.poly, d.poly); if (c.length < 3) continue; const [x0, z0, x1, z1] = polyBox(c); polyCap(W.b(mat, (x0 + x1) / 2, (z0 + z1) / 2), cw(c), -0.02); }
+    for (const l of LANDS) { if (l.far) continue; const c = clip(l.poly, d.poly); if (c.length < 3) continue; const [x0, z0, x1, z1] = polyBox(c); tiledCap(W.b(mat, (x0 + x1) / 2, (z0 + z1) / 2), cw(c), -0.02); }
   }
   // ------------------------------------------------------------------ roads ----
   const rd = (x, z) => W.b('road', x, z);
