@@ -11,6 +11,7 @@ import { CYBER } from './mapsel.js';
 import { cyName } from './maps/cyber/names.js';
 // r6.0: area name of the active map ({name, sub} or null)
 const OLD_BIG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldbigmap'); // anim3
+const OLD_MMN = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmmnight'); // grassfix playtest
 const OLD_MMD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmmdraw'); // fix_pt1
 const districtAt = CYBER ? (x, z) => { const d = districtCyber(x, z); return d ? { name: d.name, sub: '霓港' } : null; } : districtGTA;
 
@@ -222,9 +223,19 @@ export class HUD {
     g.restore();
     // dark plate variant at night (the GPS map follows the time of day)
     const nt = window.__G && window.__G.env ? window.__G.env.look.night || 0 : 0;
+    const chase = G.wanted > 0 && !G.wantedFlash;
+    if (OLD_MMN) {
     if (nt > 0.05) { g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = `rgba(${Math.round(255 - 205 * nt)},${Math.round(255 - 195 * nt)},${Math.round(255 - 160 * nt)},1)`; g.fillRect(0, 0, W, H); g.restore(); }
     // chase tint: the whole plate goes blue while police can see you
-    if (G.wanted > 0 && !G.wantedFlash) { g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgba(60,110,230,.85)'; g.beginPath(); g.roundRect(0, 0, W, H, 18); g.fill(); g.restore(); }
+    if (chase) { g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgba(60,110,230,.85)'; g.beginPath(); g.roundRect(0, 0, W, H, 18); g.fill(); g.restore(); }
+    } else if (nt > 0.05 || chase) {
+      // grassfix playtest (?oldmmnight = old): the night plate (x0.20/0.24/0.37) and the chase tint (x0.35/0.52/0.92) were two
+      // stacked multiplies -> at night with stars the roads came out (18,31,87) on a (7,21,77) sea: an empty navy plate (minimap
+      // and the M map). Now one multiply: a lighter night plate, chase tint on top, clamped so white roads stay >= (60,95,170).
+      const fn = [1 - 0.45 * nt, 1 - 0.41 * nt, 1 - 0.27 * nt], fw = chase ? [0.35, 0.52, 0.92] : [1, 1, 1], lo = chase ? [0.27, 0.43, 0.78] : [0.4, 0.45, 0.6];
+      const f = fn.map((v, k) => Math.max(lo[k], v * fw[k]));
+      g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = `rgb(${f.map((v) => Math.round(v * 255)).join(',')})`; g.beginPath(); g.roundRect(0, 0, W, H, 18); g.fill(); g.restore();
+    }
     // player marker: white arrow in a dark disc
     g.save(); g.translate(cx, cy);
     g.fillStyle = 'rgba(20,22,30,.85)'; g.beginPath(); g.arc(0, 0, 13, 0, 7); g.fill();
